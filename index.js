@@ -1,12 +1,20 @@
 ("use strict");
 require("dotenv").config();
-const db = require("./utils/db/pg-pool");
+
+//127.0.0.1
+
+// JOBS
+const { helium_level_reports } = require("./jobs");
+
+// TOOLS
 const { formatted_dt, captureDatetime } = require("./tools");
+
+// UTILS
+const db = require("./utils/db/pg-pool");
 const {
   alert_notify: { get_user_report_schemas, get_he_level_report_data }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
-
 const [
   addLogEvent,
   writeLogEvents,
@@ -22,8 +30,22 @@ async function run_job() {
   const capture_datetime = captureDatetime();
   const job_id = uuidv4();
   const users_model_rpp_data = await on_boot();
-  for (let users_rpp_data of users_model_rpp_data) {
-    console.log(users_rpp_data);
+
+  // 1) Loop through each user's specific report model
+  // 2) Filter on user’s operator and custom_threshold criteria
+  // 3) Get filtered data into HTML
+  // 4) Send email report
+  for await (let users_rpp_data of users_model_rpp_data) {
+    switch (users_rpp_data.field_name) {
+      case "he_level_value":
+        await helium_level_reports(users_rpp_data);
+        break;
+      default:
+        break;
+    }
+
+    // REMOVE: Just loop though one user report
+    return;
   }
 }
 
@@ -66,6 +88,10 @@ async function on_boot() {
 
       users_model_rpp_data.push({
         author: users_report.author,
+        field_name: users_report.field_name,
+        operator: users_report.operator,
+        custom_threshold: users_report.threshold,
+        threshold_data_type: users_report.threshold_data_type,
         cc_list: users_report.cc_list,
         matched_model_data
       });
