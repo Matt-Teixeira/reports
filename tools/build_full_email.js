@@ -6,16 +6,30 @@ const {
   table_footer
 } = require("../email/templates/table-caps");
 
-async function build_full_email(processed_row, report_name) {
-  let table_head = await process_template(table_header_alert, {
-    report_name: report_name
-  });
-  let full_email_text = "";
+const [addLogEvent] = require("../utils/logger/log");
+const {
+  type: { I, W, E },
+  tag: { cal, det, cat, seq, qaf }
+} = require("../utils/logger/enums");
 
-  full_email_text =
-    doc_head + table_head + processed_row + table_footer + doc_tail;
+async function build_full_email(run_log, job_id, processed_row, report_name) {
+  let note = { job_id };
+  try {
+    await addLogEvent(I, run_log, "build_full_email", cal, note, null);
 
-  return full_email_text;
+    let table_head = await process_template(table_header_alert, {
+      report_name: report_name
+    });
+
+    let full_email_text = "";
+
+    full_email_text =
+      doc_head + table_head + processed_row + table_footer + doc_tail;
+
+    return full_email_text;
+  } catch (error) {
+    await addLogEvent(E, run_log, "build_full_email", cat, note, error);
+  }
 }
 
 module.exports = build_full_email;

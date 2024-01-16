@@ -1,12 +1,20 @@
 const { build_email_text, build_full_email } = require("../tools");
+const build_transporter = require("../email/build-transporter");
+const send_email = require("../email/send_email");
 
-const send_it = require("../email/send");
+const [addLogEvent] = require("../utils/logger/log");
+const {
+  type: { I, W, E },
+  tag: { cal, det, cat, seq, qaf }
+} = require("../utils/logger/enums");
 
 // 1) Filter on user’s operator and custom_threshold criteria
 // 2) Get filtered data into HTML
 // 3) Send email report
 const helium_level_reports = async (run_log, job_id, user_reports) => {
-  //console.log(user_reports);
+  let note = { job_id, user_report: user_reports };
+  await addLogEvent(I, run_log, "helium_level_reports", cal, note, null);
+
   const {
     author,
     report_name,
@@ -27,37 +35,70 @@ const helium_level_reports = async (run_log, job_id, user_reports) => {
     cc_list
   };
 
-  console.log(report_meta_data);
+  try {
+    // 1) Looping though all rpp data that corresponds with user's array of alert_model_ids and filtering out data that fits user’s custom_threshold condition.
+    const reportable_data = [];
+    for (let rpp_data of user_reports.matched_model_data) {
+      if (rpp_data.helium_value === null) continue;
+      switch (user_reports.operator) {
+        case "less_than":
+          if (rpp_data.helium_value < user_reports.custom_threshold)
+            reportable_data.push(rpp_data);
+          break;
+        case "greater_than":
+          if (rpp_data.helium_value > user_reports.custom_threshold)
+            reportable_data.push(rpp_data);
+          break;
 
-  const reportable_reports = [];
-  for (let report of user_reports.matched_model_data) {
-    if (report.helium_value === null) continue;
-    switch (user_reports.operator) {
-      case "less_than":
-        if (report.helium_value < user_reports.custom_threshold)
-          reportable_reports.push(report);
-        break;
-      case "greater_than":
-        if (report.helium_value > user_reports.custom_threshold)
-          reportable_reports.push(report);
-        break;
-
-      default:
-        break;
+        default:
+          break;
+      }
     }
+
+    let note = { job_id, report_meta_data, reportable_data };
+
+    // Discontinue email process if no reportable data found.
+    if (reportable_data.length === 0) {
+      let note = {
+        job_id,
+        report_meta_data,
+        reportable_data,
+        message: "User has no reportable data"
+      };
+      await addLogEvent(W, run_log, "helium_level_reports", det, note, null);
+      return;
+    }
+    await addLogEvent(I, run_log, "helium_level_reports", det, note, null);
+
+    // 2) Build row text
+    const email_text = await build_email_text(
+      run_log,
+      job_id,
+      report_meta_data,
+      reportable_data
+    );
+
+    // 2) Build/Nest row text into full email
+    const full_email = await build_full_email(
+      run_log,
+      job_id,
+      email_text,
+      report_meta_data.report_name
+    );
+
+    // 3) Send Email
+    const transporter = await build_transporter();
+
+    await send_email(
+      run_log,
+      job_id,
+      transporter,
+      "matt.teixeira@avantehs.com",
+      full_email
+    ); // report_meta_data.author - matt.teixeira@avantehs.com
+  } catch (error) {
+    await addLogEvent(E, run_log, "helium_level_reports", cat, note, error);
   }
-
-  // Build row text
-  const email_text = await build_email_text(
-    report_meta_data,
-    reportable_reports
-  );
-  // Build/Nest row text into full email
-  const full_email = await build_full_email(email_text, report_meta_data.report_name);
-
-  console.log(full_email);
-
-  await send_it(run_log, job_id, report_meta_data.author, full_email); // report_meta_data.author
 };
 
 module.exports = helium_level_reports;

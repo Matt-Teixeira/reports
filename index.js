@@ -27,7 +27,7 @@ const {
 } = require("./utils/logger/enums");
 
 async function run_job() {
-  const capture_datetime = captureDatetime();
+  const app_run_datetime = captureDatetime();
   const job_id = uuidv4();
   const [users_model_rpp_data, run_log] = await on_boot();
 
@@ -39,15 +39,15 @@ async function run_job() {
     switch (users_rpp_data.field_name) {
       case "he_level_value":
         await helium_level_reports(run_log, job_id, users_rpp_data);
-        console.log("\n********************** END  **********************\n");
         break;
       default:
         break;
     }
 
     // REMOVE: Just loop though one user report
-    // return;
+    break;
   }
+  await writeLogEvents(run_log);
 }
 
 async function on_boot() {
@@ -119,7 +119,6 @@ matched_model_data = [
 ]
 
 */
-
 
 /* 
 

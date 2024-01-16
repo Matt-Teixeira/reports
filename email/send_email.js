@@ -13,21 +13,19 @@ const send_email = async (
   job_id,
   transporter,
   email_address,
-  full_email_text,
-  alert_detection_ids
+  full_email_text
 ) => {
   let send_note = {
     job_id: job_id,
-    user: email_address,
-    alert_detection_ids: alert_detection_ids
+    user: email_address
   };
   try {
-    addLogEvent(I, run_log, "send_email", cal, send_note, null);
+    await addLogEvent(I, run_log, "send_email", cal, send_note, null);
 
     const format_email = {
       from: process.env.OUTLOOK_USER,
       to: email_address,
-      subject: `Avante Health Solutions Alert Report`,
+      subject: `Avante Health Solutions Systems Report`,
       html: full_email_text
     };
 
@@ -39,7 +37,7 @@ const send_email = async (
       txt: "EMAIL SENT",
       info: info
     };
-    addLogEvent(I, run_log, "send_email", det, send_note, null);
+    await addLogEvent(I, run_log, "send_email", det, send_note, null);
 
     db.any(update_notification_email, ["SENT", run_log.run_id, job_id]);
   } catch (error) {
@@ -47,7 +45,7 @@ const send_email = async (
       job_id: job_id,
       user: email_address
     };
-    addLogEvent(E, run_log, "send_email", cat, err_note, error);
+    await addLogEvent(E, run_log, "send_email", cat, err_note, error);
 
     db.any(update_notification_email, ["ERROR", run_log.run_id, job_id]);
   }
