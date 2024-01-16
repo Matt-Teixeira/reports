@@ -1,12 +1,15 @@
-const { build_email_text } = require("../tools");
+const { build_email_text, build_full_email } = require("../tools");
+
+const send_it = require("../email/send");
 
 // 1) Filter on user’s operator and custom_threshold criteria
 // 2) Get filtered data into HTML
 // 3) Send email report
-const helium_level_reports = async (user_reports) => {
+const helium_level_reports = async (run_log, job_id, user_reports) => {
   //console.log(user_reports);
   const {
     author,
+    report_name,
     field_name,
     operator,
     custom_threshold,
@@ -16,6 +19,7 @@ const helium_level_reports = async (user_reports) => {
 
   const report_meta_data = {
     author,
+    report_name,
     field_name,
     operator,
     custom_threshold,
@@ -43,12 +47,17 @@ const helium_level_reports = async (user_reports) => {
     }
   }
 
-  console.log("\nReport This Data!");
-  console.log(reportable_reports);
+  // Build row text
+  const email_text = await build_email_text(
+    report_meta_data,
+    reportable_reports
+  );
+  // Build/Nest row text into full email
+  const full_email = await build_full_email(email_text, report_meta_data.report_name);
 
-  console.log("\n Build Email");
+  console.log(full_email);
 
-  build_email_text(report_meta_data, reportable_reports);
+  await send_it(run_log, job_id, report_meta_data.author, full_email); // report_meta_data.author
 };
 
 module.exports = helium_level_reports;
