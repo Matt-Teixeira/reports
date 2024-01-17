@@ -64,14 +64,14 @@ const build_email_text = async (
 
       const less_than_data = {
         field_name: report_meta_data.field_name,
-        resolved_field_content: rpp_data.helium_value, // Need to change to general name
-        threshold_units: rpp_data.helium_units
+        resolved_field_content: rpp_data.rpp_value, // Need to change to general name
+        threshold_units: rpp_data.rpp_units
       };
 
       const greater_than_data = {
         field_name: report_meta_data.field_name,
-        resolved_field_content: rpp_data.helium_value, // Need to change to general name
-        threshold_units: rpp_data.helium_units
+        resolved_field_content: rpp_data.rpp_value, // Need to change to general name
+        threshold_units: rpp_data.rpp_units
       };
 
       processed_row += await process_template(

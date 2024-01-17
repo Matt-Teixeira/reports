@@ -4,7 +4,7 @@ require("dotenv").config();
 //127.0.0.1
 
 // JOBS
-const { helium_level_reports } = require("./jobs");
+const { helium_level_report, helium_psi_report } = require("./jobs");
 
 // TOOLS
 const { formatted_dt, captureDatetime } = require("./tools");
@@ -12,7 +12,11 @@ const { formatted_dt, captureDatetime } = require("./tools");
 // UTILS
 const db = require("./utils/db/pg-pool");
 const {
-  alert_notify: { get_user_report_schemas, get_he_level_report_data }
+  alert_notify: {
+    get_user_report_schemas,
+    get_he_level_report_data,
+    get_he_psi_rport_data
+  }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
 const [
@@ -31,6 +35,8 @@ async function run_job() {
   const job_id = uuidv4();
   const [users_model_rpp_data, run_log] = await on_boot();
 
+  console.log(users_model_rpp_data);
+
   // 1) Loop through each user's specific report model
   // 2) Filter on user’s operator and custom_threshold criteria
   // 3) Get filtered data into HTML
@@ -38,19 +44,33 @@ async function run_job() {
   for await (let users_rpp_data of users_model_rpp_data) {
     switch (users_rpp_data.field_name) {
       case "he_level_value":
-        await helium_level_reports(run_log, job_id, users_rpp_data);
+        await helium_level_report(run_log, job_id, users_rpp_data);
+        break;
+      case "he_pressure_value":
+        await helium_psi_report(run_log, job_id, users_rpp_data);
         break;
       default:
         break;
     }
 
     // REMOVE: Just loop though one user report
-    break;
+    // break;
   }
   await writeLogEvents(run_log);
 }
 
 async function on_boot() {
+  // GET PROCESS ARG TO DETERMIN REPORT TYPE FOR QUERY
+  // he_level_value
+  // he_pressure_value
+  const report_type = process.argv[2];
+
+  const report_queries = {
+    get_user_report_schemas,
+    he_level_value: get_he_level_report_data,
+    he_pressure_value: get_he_psi_rport_data
+  };
+
   const dt = formatted_dt();
   const dt_2 = "wed-09:00";
 
@@ -60,9 +80,10 @@ async function on_boot() {
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
 
   try {
-    const user_report_schemas = await db.any(get_user_report_schemas, [dt_2]);
-
-    // console.log(user_report_schemas);
+    const user_report_schemas = await db.any(
+      report_queries.get_user_report_schemas,
+      [dt_2, report_type]
+    );
 
     let note = { dt, user_report_schemas };
     await addLogEvent(I, run_log, "on_boot", det, note, null);
@@ -70,7 +91,7 @@ async function on_boot() {
     const users_model_rpp_data = [];
 
     for await (let users_report of user_report_schemas) {
-      const rpp_data = await db.any(get_he_level_report_data, [
+      const rpp_data = await db.any(report_queries[report_type], [
         dt_2,
         users_report.author
       ]);

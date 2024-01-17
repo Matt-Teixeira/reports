@@ -11,9 +11,10 @@ const {
 // 1) Filter on user’s operator and custom_threshold criteria
 // 2) Get filtered data into HTML
 // 3) Send email report
-const helium_level_report = async (run_log, job_id, user_reports) => {
+const helium_psi_report = async (run_log, job_id, user_reports) => {
+    console.log(user_reports)
   let note = { job_id, user_report: user_reports };
-  await addLogEvent(I, run_log, "helium_level_report", cal, note, null);
+  await addLogEvent(I, run_log, "helium_psi_report", cal, note, null);
 
   const {
     author,
@@ -71,10 +72,10 @@ const helium_level_report = async (run_log, job_id, user_reports) => {
         reportable_data,
         message: "User has no reportable data"
       };
-      await addLogEvent(W, run_log, "helium_level_report", det, note, null);
+      await addLogEvent(W, run_log, "helium_psi_report", det, note, null);
       return;
     }
-    await addLogEvent(I, run_log, "helium_level_report", det, note, null);
+    await addLogEvent(I, run_log, "helium_psi_report", det, note, null);
 
     // 2) Build row text
     const email_text = await build_email_text(
@@ -103,8 +104,8 @@ const helium_level_report = async (run_log, job_id, user_reports) => {
       full_email
     ); // report_meta_data.author - matt.teixeira@avantehs.com
   } catch (error) {
-    await addLogEvent(E, run_log, "helium_level_report", cat, note, error);
+    await addLogEvent(E, run_log, "helium_psi_report", cat, note, error);
   }
 };
 
-module.exports = helium_level_report;
+module.exports = helium_psi_report;
