@@ -38,7 +38,7 @@ const helium_level_report = async (run_log, job_id, user_reports) => {
   try {
     // 1) Looping though all rpp data that corresponds with user's array of alert_model_ids and filtering out data that fits user’s custom_threshold condition.
     const reportable_data = [];
-    for (let rpp_data of user_reports.matched_model_data) {
+    for (let rpp_data of user_reports.matched_systems_list) {
       if (rpp_data.rpp_value === null) continue;
       switch (user_reports.operator) {
         case "less_than":
@@ -99,7 +99,7 @@ const helium_level_report = async (run_log, job_id, user_reports) => {
       run_log,
       job_id,
       transporter,
-      "matt.teixeira@avantehs.com",
+      report_meta_data.author,
       full_email
     ); // report_meta_data.author - matt.teixeira@avantehs.com
   } catch (error) {
