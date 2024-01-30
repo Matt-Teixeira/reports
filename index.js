@@ -5,7 +5,8 @@ require("dotenv").config();
 const {
   helium_level_report,
   helium_psi_report,
-  all_he_level_report
+  all_he_level_report,
+  all_he_psi_report
 } = require("./jobs");
 
 // TOOLS
@@ -18,7 +19,8 @@ const {
     get_user_report_schemas,
     get_he_level_report_data,
     get_he_psi_rport_data,
-    get_he_level_all_report
+    get_he_level_all_report,
+    get_he_psi_all_report
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -53,6 +55,9 @@ async function run_job() {
       case "all_he_level":
         await all_he_level_report(run_log, job_id, users_rpp_data);
         break;
+      case "all_he_psi":
+        await all_he_psi_report(run_log, job_id, users_rpp_data);
+        break;
       default:
         break;
     }
@@ -73,7 +78,8 @@ async function on_boot() {
     get_user_report_schemas,
     he_level_value: get_he_level_report_data,
     he_pressure_value: get_he_psi_rport_data,
-    all_he_level: get_he_level_all_report
+    all_he_level: get_he_level_all_report,
+    all_he_psi: get_he_psi_all_report
   };
 
   const dt = formatted_dt();

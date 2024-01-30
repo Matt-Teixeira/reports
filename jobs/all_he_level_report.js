@@ -1,4 +1,8 @@
-const { build_email_text, build_full_email } = require("../tools");
+const {
+  build_email_text,
+  build_full_email,
+  sort_by_manufacturer
+} = require("../tools");
 const build_transporter = require("../email/build-transporter");
 const send_email = require("../email/send_email");
 
@@ -43,14 +47,16 @@ const all_he_level_report = async (run_log, job_id, user_reports) => {
       reportable_data.push(rpp_data);
     }
 
-    let note = { job_id, report_meta_data, reportable_data };
+    const sorted_data = sort_by_manufacturer(reportable_data);
+
+    let note = { job_id, report_meta_data, sorted_data };
 
     // Discontinue email process if no reportable data found.
-    if (reportable_data.length === 0) {
+    if (sorted_data.length === 0) {
       let note = {
         job_id,
         report_meta_data,
-        reportable_data,
+        sorted_data,
         message: "User has no reportable data"
       };
       await addLogEvent(W, run_log, "all_he_level_report", det, note, null);
@@ -63,7 +69,7 @@ const all_he_level_report = async (run_log, job_id, user_reports) => {
       run_log,
       job_id,
       report_meta_data,
-      reportable_data
+      sorted_data
     );
 
     // 2) Build/Nest row text into full email
