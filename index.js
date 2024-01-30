@@ -1,10 +1,12 @@
 ("use strict");
 require("dotenv").config();
 
-//127.0.0.1
-
 // JOBS
-const { helium_level_report, helium_psi_report } = require("./jobs");
+const {
+  helium_level_report,
+  helium_psi_report,
+  all_he_level_report
+} = require("./jobs");
 
 // TOOLS
 const { formatted_dt, captureDatetime } = require("./tools");
@@ -15,7 +17,8 @@ const {
   alert_notify: {
     get_user_report_schemas,
     get_he_level_report_data,
-    get_he_psi_rport_data
+    get_he_psi_rport_data,
+    get_he_level_all_report
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -35,8 +38,6 @@ async function run_job() {
   const job_id = uuidv4();
   const [users_model_rpp_data, run_log] = await on_boot();
 
-  console.log(users_model_rpp_data);
-
   // 1) Loop through each user's specific report model
   // 2) Filter on user’s operator and custom_threshold criteria
   // 3) Get filtered data into HTML
@@ -48,6 +49,9 @@ async function run_job() {
         break;
       case "he_pressure_value":
         await helium_psi_report(run_log, job_id, users_rpp_data);
+        break;
+      case "all_he_level":
+        await all_he_level_report(run_log, job_id, users_rpp_data);
         break;
       default:
         break;
@@ -68,13 +72,14 @@ async function on_boot() {
   const report_queries = {
     get_user_report_schemas,
     he_level_value: get_he_level_report_data,
-    he_pressure_value: get_he_psi_rport_data
+    he_pressure_value: get_he_psi_rport_data,
+    all_he_level: get_he_level_all_report
   };
 
   const dt = formatted_dt();
   const dt_2 = "fri-10:30";
 
-  let note = { dt };
+  let note = { dt_2 };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
@@ -85,10 +90,10 @@ async function on_boot() {
       [dt_2, report_type]
     );
 
-    console.log("\nuser_report_schemas");
-    console.log(user_report_schemas);
+    // console.log("\nuser_report_schemas");
+    // console.log(user_report_schemas);
 
-    let note = { dt, user_report_schemas };
+    let note = { dt_2, user_report_schemas };
     await addLogEvent(I, run_log, "on_boot", det, note, null);
 
     const users_system_rpp_data = [];
@@ -99,11 +104,9 @@ async function on_boot() {
         users_report.author
       ]);
 
-      console.log(rpp_data);
+      // console.log(rpp_data);
 
-      const object_map = new Map(
-        rpp_data.map((obj) => [obj.system_id, obj])
-      );
+      const object_map = new Map(rpp_data.map((obj) => [obj.system_id, obj]));
 
       const matched_systems_list = [];
 
