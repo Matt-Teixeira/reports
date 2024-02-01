@@ -42,8 +42,6 @@ async function run_job() {
   const job_id = uuidv4();
   const [users_model_rpp_data, run_log] = await on_boot();
 
-  // console.log(users_model_rpp_data[0]);
-
   // 1) Loop through each user's specific report model
   // 2) Filter on user’s operator and custom_threshold criteria
   // 3) Get filtered data into HTML

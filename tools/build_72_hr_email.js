@@ -46,6 +46,20 @@ const build_72_hr_text = async (
 
     // Loop though each index and conver to email template
     for await (const rpp_data of reportable_data) {
+      // CONVERT TO STRING
+      const dt_iso_min = rpp_data.host_datetime_min_value.toISOString();
+      const dt_iso_max = rpp_data.host_datetime_max_value.toISOString();
+
+      // CREATE LUXON DT OBJECT
+      // TODO: MAKE ZONE DYNAMIC AND SYSTEM SPECIFIC
+      const dt_ny_min = DateTime.fromISO(dt_iso_min, {
+        zone: "America/New_York"
+      });
+
+      const dt_ny_max = DateTime.fromISO(dt_iso_max, {
+        zone: "America/New_York"
+      });
+
       // MAP DATA AND PROCESS TEMPLATE
       const col_0_1_data = {
         view_link: "https://remote2.avantehs.com/machine/" + rpp_data.system_id,
@@ -57,42 +71,29 @@ const build_72_hr_text = async (
 
       processed_row += await process_template(col_0_72_hr_report, col_0_1_data);
 
-      // Adds model info to report
-      if (report_meta_data.field_name === "he_pressure_72_hr") {
-        /* const col_4_data = {
-          model: rpp_data.model
-        };
-
-        processed_row += await process_template(col_4_report, col_4_data); */
-
-        const col_5_data = {
-          datapoint_count: rpp_data.datapoint_count
-        };
-
-        processed_row += await process_template(col_5_report, col_5_data);
-
-        const col_6_data = {
-          min_value: rpp_data.min_value,
-          unit: rpp_data.unit
-        };
-
-        processed_row += await process_template(col_6_report, col_6_data);
-
-        const col_7_data = {
-          max_value: rpp_data.max_value,
-          unit: rpp_data.unit
-        };
-
-        processed_row += await process_template(col_7_report, col_7_data);
-      }
-
-      /* const col_3_data = {
-        site_name: rpp_data.site_name,
-        city: rpp_data.city,
-        state: rpp_data.state
+      const col_5_data = {
+        datapoint_count: rpp_data.datapoint_count
       };
 
-      processed_row += await process_template(col_3_end, col_3_data); */
+      processed_row += await process_template(col_5_report, col_5_data);
+
+      const col_6_data = {
+        min_value: rpp_data.min_value,
+        unit: rpp_data.unit,
+        time: dt_ny_min.toFormat("t ZZZZ"), // 9:07 AM EST,
+        date: dt_ny_min.toFormat("DD") // Aug 6, 2014,
+      };
+
+      processed_row += await process_template(col_6_report, col_6_data);
+
+      const col_7_data = {
+        max_value: rpp_data.max_value,
+        unit: rpp_data.unit,
+        time: dt_ny_max.toFormat("t ZZZZ"), // 9:07 AM EST,
+        date: dt_ny_max.toFormat("DD") // Aug 6, 2014,
+      };
+
+      processed_row += await process_template(col_7_report, col_7_data);
     }
     return processed_row;
   } catch (error) {

@@ -117,21 +117,25 @@ const col_4_report =
   "</td>";
 
 const col_5_report =
-  '<td class="geo" style="border: none; text-align: left; vertical-align: top; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Data Points</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{datapoint_count}}</div>'
   "</td>";
 
 const col_6_report =
-  '<td class="geo" style="border: none; text-align: left; vertical-align: top; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Min Value</div>' +
-  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{min_value}} {{unit}}</div>'
+  '<div class="bot" style="margin: 6px 0px; color: darkgrey; font-size: 14px;">{{min_value}} {{unit}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 12px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 12px;">{{date}}</div>' +
   "</td>";
 
 const col_7_report =
-  '<td class="geo" style="border: none; text-align: left; vertical-align: top; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Max Value</div>' +
-  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{max_value}} {{unit}}</div>'
+  '<div class="bot" style="margin: 6px 0px; color: darkgrey; font-size: 14px;">{{max_value}} {{unit}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 12px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 12px;">{{date}}</div>' +
   "</td>"
   "</tr>";
 
