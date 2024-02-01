@@ -58,7 +58,7 @@ const col_2_less_than =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{resolved_field_content}} BELOW {{threshold}}{{threshold_units}}</div>' +
   "</td>";
 
-const col_2_less_than_report =
+const col_2_report =
   '<td class="condition" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 1px;" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">{{field_name}}</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{resolved_field_content}} {{threshold_units}}</div>' +
@@ -144,7 +144,7 @@ module.exports = {
   col_0_warn,
   col_1,
   col_2_less_than,
-  col_2_less_than_report,
+  col_2_report,
   col_2_greater_than,
   col_2_equals,
   col_2_delta_neg,

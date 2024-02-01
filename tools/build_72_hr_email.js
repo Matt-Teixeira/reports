@@ -1,22 +1,7 @@
 const { DateTime } = require("luxon");
 const process_template = require("../email/process-template");
 const {
-  col_0_alert,
-  col_0_report,
   col_0_72_hr_report,
-  col_0_warn,
-  col_1,
-  col_2_less_than,
-  col_2_less_than_report,
-  col_2_greater_than,
-  col_2_equals,
-  col_2_delta_neg,
-  col_2_offline,
-  col_2_contains,
-  col_2_composite_equals,
-  col_3_end,
-  col_4_report,
-  col_3,
   col_5_report,
   col_6_report,
   col_7_report

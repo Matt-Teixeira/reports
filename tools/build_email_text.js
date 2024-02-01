@@ -1,21 +1,10 @@
 const { DateTime } = require("luxon");
 const process_template = require("../email/process-template");
 const {
-  col_0_alert,
   col_0_report,
-  col_0_warn,
   col_1,
-  col_2_less_than,
-  col_2_less_than_report,
-  col_2_greater_than,
-  col_2_equals,
-  col_2_delta_neg,
-  col_2_offline,
-  col_2_contains,
-  col_2_composite_equals,
-  col_3_end,
-  col_4_report,
-  col_3
+  col_2_report,
+  col_3_end
 } = require("../email/templates/rows");
 
 const [addLogEvent] = require("../utils/logger/log");
@@ -64,22 +53,13 @@ const build_email_text = async (
         col_0_1_data
       );
 
-      const less_than_data = {
+      const col_2_data = {
         field_name: report_meta_data.field_name,
         resolved_field_content: rpp_data.rpp_value, // Need to change to general name
         threshold_units: rpp_data.rpp_units
       };
 
-      const greater_than_data = {
-        field_name: report_meta_data.field_name,
-        resolved_field_content: rpp_data.rpp_value, // Need to change to general name
-        threshold_units: rpp_data.rpp_units
-      };
-
-      processed_row += await process_template(
-        col_2_less_than_report,
-        less_than_data
-      );
+      processed_row += await process_template(col_2_report, col_2_data);
 
       const col_3_data = {
         site_name: rpp_data.site_name,
