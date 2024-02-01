@@ -6,7 +6,8 @@ const {
   helium_level_report,
   helium_psi_report,
   all_he_level_report,
-  all_he_psi_report
+  all_he_psi_report,
+  he_pressure_72_hr
 } = require("./jobs");
 
 // TOOLS
@@ -20,7 +21,8 @@ const {
     get_he_level_report_data,
     get_he_psi_rport_data,
     get_he_level_all_report,
-    get_he_psi_all_report
+    get_he_psi_all_report,
+    get_72_hr_pressure_report
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -40,6 +42,8 @@ async function run_job() {
   const job_id = uuidv4();
   const [users_model_rpp_data, run_log] = await on_boot();
 
+  // console.log(users_model_rpp_data[0]);
+
   // 1) Loop through each user's specific report model
   // 2) Filter on user’s operator and custom_threshold criteria
   // 3) Get filtered data into HTML
@@ -58,6 +62,9 @@ async function run_job() {
       case "all_he_psi":
         await all_he_psi_report(run_log, job_id, users_rpp_data);
         break;
+      case "he_pressure_72_hr":
+        await he_pressure_72_hr(run_log, job_id, users_rpp_data);
+        break;
       default:
         break;
     }
@@ -74,16 +81,19 @@ async function on_boot() {
   // he_pressure_value
   const report_type = process.argv[2];
 
+  console.log(report_type);
+
   const report_queries = {
     get_user_report_schemas,
     he_level_value: get_he_level_report_data,
     he_pressure_value: get_he_psi_rport_data,
     all_he_level: get_he_level_all_report,
-    all_he_psi: get_he_psi_all_report
+    all_he_psi: get_he_psi_all_report,
+    he_pressure_72_hr: get_72_hr_pressure_report
   };
 
   const dt = formatted_dt();
-  const dt_2 = "fri-10:30";
+  const dt_2 = "wed-15:00";
 
   let note = { dt_2 };
 
@@ -110,6 +120,7 @@ async function on_boot() {
         users_report.author
       ]);
 
+      //console.log("Args to query");
       // console.log(rpp_data);
 
       const object_map = new Map(rpp_data.map((obj) => [obj.system_id, obj]));

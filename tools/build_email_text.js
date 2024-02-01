@@ -13,7 +13,9 @@ const {
   col_2_offline,
   col_2_contains,
   col_2_composite_equals,
-  col_3_end
+  col_3_end,
+  col_4_report,
+  col_3
 } = require("../email/templates/rows");
 
 const [addLogEvent] = require("../utils/logger/log");

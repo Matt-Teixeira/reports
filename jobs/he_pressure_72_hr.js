@@ -1,5 +1,5 @@
 const {
-  build_email_text,
+  build_72_hr_text,
   build_full_email,
   sort_by_manufacturer
 } = require("../tools");
@@ -15,9 +15,9 @@ const {
 // 1) Filter on user’s operator and custom_threshold criteria
 // 2) Get filtered data into HTML
 // 3) Send email report
-const all_he_level_report = async (run_log, job_id, user_reports) => {
+const he_pressure_72_hr = async (run_log, job_id, user_reports) => {
   let note = { job_id, user_report: user_reports };
-  await addLogEvent(I, run_log, "all_he_level_report", cal, note, null);
+  await addLogEvent(I, run_log, "he_pressure_72_hr", cal, note, null);
 
   const {
     author,
@@ -32,7 +32,7 @@ const all_he_level_report = async (run_log, job_id, user_reports) => {
   const report_meta_data = {
     author,
     report_name,
-    field_name: "He Level",
+    field_name,
     operator,
     custom_threshold,
     threshold_data_type,
@@ -59,13 +59,13 @@ const all_he_level_report = async (run_log, job_id, user_reports) => {
         sorted_data,
         message: "User has no reportable data"
       };
-      await addLogEvent(W, run_log, "all_he_level_report", det, note, null);
+      await addLogEvent(W, run_log, "he_pressure_72_hr", det, note, null);
       return;
     }
-    await addLogEvent(I, run_log, "all_he_level_report", det, note, null);
+    await addLogEvent(I, run_log, "he_pressure_72_hr", det, note, null);
 
     // 2) Build row text
-    const email_text = await build_email_text(
+    const email_text = await build_72_hr_text(
       run_log,
       job_id,
       report_meta_data,
@@ -80,9 +80,7 @@ const all_he_level_report = async (run_log, job_id, user_reports) => {
       report_meta_data.report_name
     );
 
-    console.log(full_email);
-
-    return;
+  console.log(full_email);
 
     // 3) Send Email
     const transporter = await build_transporter();
@@ -96,8 +94,8 @@ const all_he_level_report = async (run_log, job_id, user_reports) => {
     ); // report_meta_data.author - matt.teixeira@avantehs.com
   } catch (error) {
     console.log(error);
-    await addLogEvent(E, run_log, "all_he_level_report", cat, note, error);
+    await addLogEvent(E, run_log, "he_pressure_72_hr", cat, note, error);
   }
 };
 
-module.exports = all_he_level_report;
+module.exports = he_pressure_72_hr;
