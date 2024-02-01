@@ -79,8 +79,6 @@ async function on_boot() {
   // he_pressure_value
   const report_type = process.argv[2];
 
-  console.log(report_type);
-
   const report_queries = {
     get_user_report_schemas,
     he_level_value: get_he_level_report_data,
@@ -93,7 +91,7 @@ async function on_boot() {
   const dt = formatted_dt();
   const dt_2 = "wed-15:00";
 
-  let note = { dt_2 };
+  let note = { dt };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
@@ -101,25 +99,19 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt_2, report_type]
+      [dt, report_type]
     );
 
-    // console.log("\nuser_report_schemas");
-    // console.log(user_report_schemas);
-
-    let note = { dt_2, user_report_schemas };
+    let note = { dt, user_report_schemas };
     await addLogEvent(I, run_log, "on_boot", det, note, null);
 
     const users_system_rpp_data = [];
 
     for await (let users_report of user_report_schemas) {
       const rpp_data = await db.any(report_queries[report_type], [
-        dt_2,
+        dt,
         users_report.author
       ]);
-
-      //console.log("Args to query");
-      // console.log(rpp_data);
 
       const object_map = new Map(rpp_data.map((obj) => [obj.system_id, obj]));
 

@@ -80,8 +80,6 @@ const all_he_psi_report = async (run_log, job_id, user_reports) => {
       report_meta_data.report_name
     );
 
-    console.log(full_email);
-
     // 3) Send Email
     const transporter = await build_transporter();
 

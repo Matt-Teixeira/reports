@@ -16,7 +16,6 @@ const {
 // 2) Get filtered data into HTML
 // 3) Send email report
 const helium_psi_report = async (run_log, job_id, user_reports) => {
-  console.log(user_reports);
   let note = { job_id, user_report: user_reports };
   await addLogEvent(I, run_log, "helium_psi_report", cal, note, null);
 

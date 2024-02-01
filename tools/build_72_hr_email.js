@@ -22,7 +22,6 @@ const build_72_hr_text = async (
   let note = {
     job_id
   };
-  console.log(report_meta_data);
 
   try {
     await addLogEvent(I, run_log, "build_72_hr_text", cal, note, null);
