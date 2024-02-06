@@ -37,40 +37,33 @@ const {
   tag: { cal, det, cat, seq, qaf }
 } = require("./utils/logger/enums");
 
-async function run_job() {
+async function run_job(users_report_rpp_data, run_log) {
   const app_run_datetime = captureDatetime();
   const job_id = uuidv4();
-  const [users_model_rpp_data, run_log] = await on_boot();
 
   // 1) Loop through each user's specific report model
   // 2) Filter on user’s operator and custom_threshold criteria
   // 3) Get filtered data into HTML
   // 4) Send email report
-  for await (let users_rpp_data of users_model_rpp_data) {
-    switch (users_rpp_data.field_name) {
-      case "he_level_value":
-        await helium_level_report(run_log, job_id, users_rpp_data);
-        break;
-      case "he_pressure_value":
-        await helium_psi_report(run_log, job_id, users_rpp_data);
-        break;
-      case "all_he_level":
-        await all_he_level_report(run_log, job_id, users_rpp_data);
-        break;
-      case "all_he_psi":
-        await all_he_psi_report(run_log, job_id, users_rpp_data);
-        break;
-      case "he_pressure_72_hr":
-        await he_pressure_72_hr(run_log, job_id, users_rpp_data);
-        break;
-      default:
-        break;
-    }
-
-    // REMOVE: Just loop though one user report
-    // break;
+  switch (users_report_rpp_data.field_name) {
+    case "he_level_value":
+      await helium_level_report(run_log, job_id, users_report_rpp_data);
+      break;
+    case "he_pressure_value":
+      await helium_psi_report(run_log, job_id, users_report_rpp_data);
+      break;
+    case "all_he_level":
+      await all_he_level_report(run_log, job_id, users_report_rpp_data);
+      break;
+    case "all_he_psi":
+      await all_he_psi_report(run_log, job_id, users_report_rpp_data);
+      break;
+    case "he_pressure_72_hr":
+      await he_pressure_72_hr(run_log, job_id, users_report_rpp_data);
+      break;
+    default:
+      break;
   }
-  await writeLogEvents(run_log);
 }
 
 async function on_boot() {
@@ -89,7 +82,7 @@ async function on_boot() {
   };
 
   const dt = formatted_dt();
-  const dt_2 = "wed-15:00";
+  const dt_2 = "wed-08:00";
 
   let note = { dt };
 
@@ -135,7 +128,18 @@ async function on_boot() {
       });
     }
 
-    return [users_system_rpp_data, run_log];
+    const child_processes = [];
+    for await (let users_report_rpp_data of users_system_rpp_data) {
+      child_processes.push(
+        async () => await run_job(users_report_rpp_data, run_log)
+      );
+    }
+
+    const promises = child_processes.map((child_process) => child_process());
+
+    await Promise.all(promises);
+
+    await writeLogEvents(run_log);
   } catch (error) {
     console.log(error);
     await addLogEvent(E, run_log, "on_boot", cat, note, error);
@@ -143,4 +147,4 @@ async function on_boot() {
   }
 }
 
-run_job();
+on_boot();
