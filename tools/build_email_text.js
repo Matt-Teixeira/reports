@@ -27,10 +27,21 @@ const build_email_text = async (
 
     let processed_row = "";
 
+    console.log("\nreport_meta_data");
+    console.log(report_meta_data);
+
+    console.log("\nreportable_data");
+    console.log(reportable_data);
+
     // Loop though each index and conver to email template
     for await (const rpp_data of reportable_data) {
       // CONVERT TO STRING
-      const dt_iso = rpp_data.capture_datetime.toISOString();
+      let dt_iso;
+      if (rpp_data.capture_datetime) {
+        dt_iso = rpp_data.capture_datetime.toISOString();
+      } else if (rpp_data.host_datetime) {
+        dt_iso = rpp_data.host_datetime.toISOString();
+      }
 
       // CREATE LUXON DT OBJECT
       // TODO: MAKE ZONE DYNAMIC AND SYSTEM SPECIFIC
@@ -53,11 +64,28 @@ const build_email_text = async (
         col_0_1_data
       );
 
-      const col_2_data = {
-        field_name: report_meta_data.field_name,
-        resolved_field_content: rpp_data.rpp_value, // Need to change to general name
-        threshold_units: rpp_data.rpp_units
-      };
+      // Run seperate case for Scan Seconds because rpp_data.field_name is variable e.g. scan_seconds and system_scan_seconds. 
+      let col_2_data = {};
+      if (report_meta_data.field_name === "Scan Seconds") {
+        let split_words = rpp_data.field_name
+          .split("_")
+          .map(
+            (word) => (word = word[0] = word[0].toUpperCase() + word.slice(1))
+          );
+        split_words = split_words.join(" ");
+
+        col_2_data = {
+          field_name: split_words,
+          resolved_field_content: rpp_data.rpp_value, // Need to change to general name
+          threshold_units: rpp_data.rpp_units
+        };
+      } else {
+        col_2_data = {
+          field_name: report_meta_data.field_name,
+          resolved_field_content: rpp_data.rpp_value, // Need to change to general name
+          threshold_units: rpp_data.rpp_units
+        };
+      }
 
       processed_row += await process_template(col_2_report, col_2_data);
 
@@ -71,6 +99,7 @@ const build_email_text = async (
     }
     return processed_row;
   } catch (error) {
+    console.log(error);
     await addLogEvent(E, run_log, "build_email_text", cat, note, error);
   }
 };

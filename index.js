@@ -7,7 +7,8 @@ const {
   helium_psi_report,
   all_he_level_report,
   all_he_psi_report,
-  he_pressure_72_hr
+  he_pressure_72_hr,
+  scan_seconds
 } = require("./jobs");
 
 // TOOLS
@@ -22,7 +23,8 @@ const {
     get_he_psi_rport_data,
     get_he_level_all_report,
     get_he_psi_all_report,
-    get_72_hr_pressure_report
+    get_72_hr_pressure_report,
+    get_scan_seconds
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -61,6 +63,9 @@ async function run_job(users_report_rpp_data, run_log) {
     case "he_pressure_72_hr":
       await he_pressure_72_hr(run_log, job_id, users_report_rpp_data);
       break;
+    case "scan_seconds":
+      await scan_seconds(run_log, job_id, users_report_rpp_data);
+      break;
     default:
       break;
   }
@@ -78,13 +83,14 @@ async function on_boot() {
     he_pressure_value: get_he_psi_rport_data,
     all_he_level: get_he_level_all_report,
     all_he_psi: get_he_psi_all_report,
-    he_pressure_72_hr: get_72_hr_pressure_report
+    he_pressure_72_hr: get_72_hr_pressure_report,
+    scan_seconds: get_scan_seconds
   };
 
   const dt = formatted_dt();
-  const dt_2 = "wed-08:00";
+  const dt_2 = "sun-00:00";
 
-  let note = { dt };
+  let note = { dt_2 };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
@@ -92,7 +98,7 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt, report_type]
+      [dt_2, report_type]
     );
 
     let note = { dt, user_report_schemas };
@@ -102,17 +108,42 @@ async function on_boot() {
 
     for await (let users_report of user_report_schemas) {
       const rpp_data = await db.any(report_queries[report_type], [
-        dt,
+        dt_2,
         users_report.author
       ]);
 
-      const object_map = new Map(rpp_data.map((obj) => [obj.system_id, obj]));
+      // console.log("rpp_data");
+      // console.log(rpp_data);
+
+      /* const object_map = new Map(rpp_data.map((obj) => [obj.system_id, obj]));
 
       const matched_systems_list = [];
 
       users_report.systems_list.forEach((sme) => {
         if (object_map.has(sme)) {
           matched_systems_list.push(object_map.get(sme));
+        }
+      }); */
+
+      // Initialize the map to hold arrays of objects for each system_id
+      const object_map = new Map();
+
+      // Populate the map, appending objects to an array under their system_id
+      rpp_data.forEach((obj) => {
+        if (!object_map.has(obj.system_id)) {
+          object_map.set(obj.system_id, [obj]);
+        } else {
+          object_map.get(obj.system_id).push(obj);
+        }
+      });
+
+      const matched_systems_list = [];
+
+      // matched_systems_list will now contain all matched objects, including duplicates based on system_id
+      users_report.systems_list.forEach((sme) => {
+        if (object_map.has(sme)) {
+          // Dump the array of duplicate systems into the matched_systems_list array
+          matched_systems_list.push(...object_map.get(sme));
         }
       });
 
