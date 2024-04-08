@@ -88,9 +88,9 @@ async function on_boot() {
   };
 
   const dt = formatted_dt();
-  const dt_2 = "sun-00:00";
+  const dt_2 = "mon-16:30";
 
-  let note = { dt_2 };
+  let note = { dt };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
@@ -98,7 +98,7 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt_2, report_type]
+      [dt, report_type]
     );
 
     let note = { dt, user_report_schemas };
@@ -106,9 +106,14 @@ async function on_boot() {
 
     const users_system_rpp_data = [];
 
+    console.log("\nuser_report_schemas");
+    console.log(user_report_schemas);
+
     for await (let users_report of user_report_schemas) {
+      console.log("\nreport_queries");
+      console.log(report_queries);
       const rpp_data = await db.any(report_queries[report_type], [
-        dt_2,
+        dt,
         users_report.author
       ]);
 
