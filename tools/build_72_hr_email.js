@@ -6,6 +6,7 @@ const {
   col_6_report,
   col_7_report
 } = require("../email/templates/rows");
+const avante_link = require("../tools/link_builder");
 
 const [addLogEvent] = require("../utils/logger/log");
 const {
@@ -44,9 +45,11 @@ const build_72_hr_text = async (
         zone: "America/New_York"
       });
 
+      const link = avante_link(rpp_data.system_id, rpp_data.field_name);
+
       // MAP DATA AND PROCESS TEMPLATE
       const col_0_1_data = {
-        view_link: "https://remote2.avantehs.com/machine/" + rpp_data.system_id,
+        view_link: link,
         system_id: rpp_data.system_id,
         manufacturer: rpp_data.manufacturer,
         modality: rpp_data.modality,

@@ -12,6 +12,7 @@ const {
   type: { I, W, E },
   tag: { cal, det, cat, seq, qaf }
 } = require("../utils/logger/enums");
+const avante_link = require("../tools/link_builder");
 
 const build_email_text = async (
   run_log,
@@ -26,12 +27,6 @@ const build_email_text = async (
     await addLogEvent(I, run_log, "build_email_text", cal, note, null);
 
     let processed_row = "";
-
-    console.log("\nreport_meta_data");
-    console.log(report_meta_data);
-
-    console.log("\nreportable_data");
-    console.log(reportable_data);
 
     // Loop though each index and conver to email template
     for await (const rpp_data of reportable_data) {
@@ -49,9 +44,13 @@ const build_email_text = async (
         zone: "America/New_York"
       });
 
+      const link = avante_link(rpp_data.system_id, rpp_data.field_name);
+      // Was: https://remote2.avantehs.com/machine/" + rpp_data.system_id
+      
+      console.log(link);
       // MAP DATA AND PROCESS TEMPLATE
       const col_0_1_data = {
-        view_link: "https://remote2.avantehs.com/machine/" + rpp_data.system_id,
+        view_link: link,
         system_id: rpp_data.system_id,
         manufacturer: rpp_data.manufacturer,
         modality: rpp_data.modality,
@@ -64,7 +63,7 @@ const build_email_text = async (
         col_0_1_data
       );
 
-      // Run seperate case for Scan Seconds because rpp_data.field_name is variable e.g. scan_seconds and system_scan_seconds. 
+      // Run seperate case for Scan Seconds because rpp_data.field_name is variable e.g. scan_seconds and system_scan_seconds.
       let col_2_data = {};
       if (report_meta_data.field_name === "Scan Seconds") {
         let split_words = rpp_data.field_name

@@ -4,6 +4,7 @@ const build_email_text = require("./build_email_text");
 const build_full_email = require("./build_full_email");
 const sort_by_manufacturer = require("./sort_by_manufacturer");
 const build_72_hr_text = require("./build_72_hr_email");
+const avante_link = require("./link_builder");
 
 module.exports = {
   formatted_dt,
@@ -11,5 +12,6 @@ module.exports = {
   build_email_text,
   build_full_email,
   sort_by_manufacturer,
-  build_72_hr_text
+  build_72_hr_text,
+  avante_link
 };
