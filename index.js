@@ -40,7 +40,7 @@ const {
 } = require("./utils/logger/enums");
 
 async function run_job(users_report_rpp_data, run_log) {
-  const app_run_datetime = captureDatetime();
+  // const app_run_datetime = captureDatetime();
   const job_id = uuidv4();
 
   // 1) Loop through each user's specific report model
@@ -106,19 +106,11 @@ async function on_boot() {
 
     const users_system_rpp_data = [];
 
-    console.log("\nuser_report_schemas");
-    console.log(user_report_schemas);
-
     for await (let users_report of user_report_schemas) {
-      console.log("\nreport_queries");
-      console.log(report_queries);
       const rpp_data = await db.any(report_queries[report_type], [
         dt,
         users_report.author
       ]);
-
-      // console.log("rpp_data");
-      // console.log(rpp_data);
 
       /* const object_map = new Map(rpp_data.map((obj) => [obj.system_id, obj]));
 
