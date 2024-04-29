@@ -88,9 +88,9 @@ async function on_boot() {
   };
 
   const dt = formatted_dt();
-  const dt_2 = "mon-16:30";
+  const dt_2 = "mon-09:30";
 
-  let note = { dt };
+  let note = { dt_2 };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
@@ -98,17 +98,17 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt, report_type]
+      [dt_2, report_type]
     );
 
-    let note = { dt, user_report_schemas };
+    let note = { dt_2, user_report_schemas };
     await addLogEvent(I, run_log, "on_boot", det, note, null);
 
     const users_system_rpp_data = [];
 
     for await (let users_report of user_report_schemas) {
       const rpp_data = await db.any(report_queries[report_type], [
-        dt,
+        dt_2,
         users_report.author
       ]);
 
@@ -156,16 +156,24 @@ async function on_boot() {
       });
     }
 
-    const child_processes = [];
+    const jobs = [];
     for await (let users_report_rpp_data of users_system_rpp_data) {
-      child_processes.push(
-        async () => await run_job(users_report_rpp_data, run_log)
-      );
+      jobs.push(async () => await run_job(users_report_rpp_data, run_log));
     }
 
-    const promises = child_processes.map((child_process) => child_process());
+    // const promises = jobs.map((child_process) => child_process());
 
-    await Promise.all(promises);
+    // await Promise.all(promises);
+
+    const execute_jobs = async () => {
+      for (const job of jobs) {
+        await job();
+
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    };
+
+    await execute_jobs();
 
     await writeLogEvents(run_log);
   } catch (error) {
