@@ -8,7 +8,8 @@ const {
   all_he_level_report,
   all_he_psi_report,
   he_pressure_72_hr,
-  scan_seconds
+  scan_seconds,
+  shield_temp
 } = require("./jobs");
 
 // TOOLS
@@ -24,7 +25,8 @@ const {
     get_he_level_all_report,
     get_he_psi_all_report,
     get_72_hr_pressure_report,
-    get_scan_seconds
+    get_scan_seconds,
+    get_shield_temp
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -66,6 +68,9 @@ async function run_job(users_report_rpp_data, run_log) {
     case "scan_seconds":
       await scan_seconds(run_log, job_id, users_report_rpp_data);
       break;
+    case "shield_temp":
+      await shield_temp(run_log, job_id, users_report_rpp_data);
+      break;
     default:
       break;
   }
@@ -84,7 +89,8 @@ async function on_boot() {
     all_he_level: get_he_level_all_report,
     all_he_psi: get_he_psi_all_report,
     he_pressure_72_hr: get_72_hr_pressure_report,
-    scan_seconds: get_scan_seconds
+    scan_seconds: get_scan_seconds,
+    shield_temp: get_shield_temp
   };
 
   const dt = formatted_dt();
@@ -144,6 +150,8 @@ async function on_boot() {
         }
       });
 
+      console.log(matched_systems_list);
+
       users_system_rpp_data.push({
         author: users_report.author,
         report_name: users_report.report_name,
@@ -160,10 +168,6 @@ async function on_boot() {
     for await (let users_report_rpp_data of users_system_rpp_data) {
       jobs.push(async () => await run_job(users_report_rpp_data, run_log));
     }
-
-    // const promises = jobs.map((child_process) => child_process());
-
-    // await Promise.all(promises);
 
     const execute_jobs = async () => {
       for (const job of jobs) {
