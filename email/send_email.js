@@ -25,7 +25,7 @@ const send_email = async (
     const format_email = {
       from: process.env.OUTLOOK_USER,
       to: email_address,
-      subject: `Avante Health Solutions Systems Report`,
+      subject: `Avante Health Solutions Status Report`,
       html: full_email_text
     };
 
