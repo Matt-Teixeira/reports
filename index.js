@@ -26,7 +26,8 @@ const {
     get_he_psi_all_report,
     get_72_hr_pressure_report,
     get_scan_seconds,
-    get_shield_temp
+    get_shield_temp,
+    get_conn_offline
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -71,6 +72,9 @@ async function run_job(users_report_rpp_data, run_log) {
     case "shield_temp":
       await shield_temp(run_log, job_id, users_report_rpp_data);
       break;
+    case "conn_offline":
+      console.log(users_report_rpp_data);
+      break;
     default:
       break;
   }
@@ -82,6 +86,9 @@ async function on_boot() {
   // he_pressure_value
   const report_type = process.argv[2];
 
+  const dt = formatted_dt();
+  const dt_2 = "mon-09:30";
+
   const report_queries = {
     get_user_report_schemas,
     he_level_value: get_he_level_report_data,
@@ -90,11 +97,9 @@ async function on_boot() {
     all_he_psi: get_he_psi_all_report,
     he_pressure_72_hr: get_72_hr_pressure_report,
     scan_seconds: get_scan_seconds,
-    shield_temp: get_shield_temp
+    shield_temp: get_shield_temp,
+    conn_offline: get_conn_offline
   };
-
-  const dt = formatted_dt();
-  const dt_2 = "mon-09:30";
 
   let note = { dt };
 
@@ -104,7 +109,7 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt, report_type]
+      [dt_2, report_type]
     );
 
     let note = { dt, user_report_schemas };
@@ -118,15 +123,7 @@ async function on_boot() {
         users_report.author
       ]);
 
-      /* const object_map = new Map(rpp_data.map((obj) => [obj.system_id, obj]));
-
-      const matched_systems_list = [];
-
-      users_report.systems_list.forEach((sme) => {
-        if (object_map.has(sme)) {
-          matched_systems_list.push(object_map.get(sme));
-        }
-      }); */
+      console.log(users_report);
 
       // Initialize the map to hold arrays of objects for each system_id
       const object_map = new Map();
@@ -142,15 +139,18 @@ async function on_boot() {
 
       const matched_systems_list = [];
 
-      // matched_systems_list will now contain all matched objects, including duplicates based on system_id
-      users_report.systems_list.forEach((sme) => {
-        if (object_map.has(sme)) {
-          // Dump the array of duplicate systems into the matched_systems_list array
-          matched_systems_list.push(...object_map.get(sme));
-        }
-      });
-
-      console.log(matched_systems_list);
+      // The conn_offline report will not have a systems list associated with the user report model. Just stuff it all in there.
+      if (report_type === "conn_offline") {
+        matched_systems_list.push(...rpp_data);
+      } else {
+        // matched_systems_list will now contain all matched objects, including duplicates based on system_id
+        users_report.systems_list.forEach((sme) => {
+          if (object_map.has(sme)) {
+            // Dump the array of duplicate systems into the matched_systems_list array
+            matched_systems_list.push(...object_map.get(sme));
+          }
+        });
+      }
 
       users_system_rpp_data.push({
         author: users_report.author,
