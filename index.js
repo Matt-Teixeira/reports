@@ -9,7 +9,8 @@ const {
   all_he_psi_report,
   he_pressure_72_hr,
   scan_seconds,
-  shield_temp
+  shield_temp,
+  connection_offline
 } = require("./jobs");
 
 // TOOLS
@@ -73,7 +74,7 @@ async function run_job(users_report_rpp_data, run_log) {
       await shield_temp(run_log, job_id, users_report_rpp_data);
       break;
     case "conn_offline":
-      console.log(users_report_rpp_data);
+      await connection_offline(run_log, job_id, users_report_rpp_data);
       break;
     default:
       break;
@@ -109,7 +110,7 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt_2, report_type]
+      [dt, report_type]
     );
 
     let note = { dt, user_report_schemas };
@@ -122,8 +123,6 @@ async function on_boot() {
         dt,
         users_report.author
       ]);
-
-      console.log(users_report);
 
       // Initialize the map to hold arrays of objects for each system_id
       const object_map = new Map();
