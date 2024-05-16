@@ -31,6 +31,15 @@ const col_0_report =
   '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
   "</td>";
 
+  const col_0_conn_report =
+  '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
+  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 1px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
+  "<br>" +
+  '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
+  "<br>" +
+  '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{name}}</span>' +
+  "</td>";
+
 const col_0_72_hr_report =
   '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
   '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 1px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
@@ -116,20 +125,20 @@ const col_4_report =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{model}}</div>'
   "</td>";
 
-const col_5_report =
+const col_1_72_hr_report =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Data Points</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{datapoint_count}}</div>'
   "</td>";
 
-const col_6_report =
+const col_2_72_hr_report =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Min Value · {{min_value}} {{unit}}</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
   "</td>";
 
-const col_7_report =
+const col_3_72_hr_report =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Max Value · {{max_value}} {{unit}}</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
@@ -137,9 +146,53 @@ const col_7_report =
   "</td>"
   "</tr>";
 
+  const col_1_conn_report =
+  '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Ticket Created At</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
+  "</td>";
+
+  const col_2_conn_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Ticket Updated At</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
+  "</td>"
+  "</tr>";
+
+  const col_3_conn_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">HHM Last Connected</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
+  "</td>"
+  "</tr>";
+
+  const col_4_conn_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">HHM Last DB Update</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
+  "</td>"
+  "</tr>";
+
+  const col_5_conn_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Manual Intervention Needed</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{intervention_detected}}</div>' +
+  "</td>"
+  "</tr>";
+
 module.exports = {
   col_0_alert,
   col_0_report,
+  col_0_conn_report,
+  col_1_conn_report,
+  col_2_conn_report,
+  col_3_conn_report,
+  col_4_conn_report,
+  col_5_conn_report,
   col_0_72_hr_report,
   col_0_warn,
   col_1,
@@ -154,7 +207,7 @@ module.exports = {
   col_3_end,
   col_4_report,
   col_3,
-  col_5_report,
-  col_6_report,
-  col_7_report
+  col_1_72_hr_report,
+  col_2_72_hr_report,
+  col_3_72_hr_report
 };
