@@ -75,7 +75,8 @@ const shield_temp = async (run_log, job_id, user_reports) => {
       run_log,
       job_id,
       email_text,
-      report_meta_data.report_name
+      report_meta_data.report_name,
+      4
     );
 
     // 3) Send Email
