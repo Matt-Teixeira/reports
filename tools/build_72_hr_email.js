@@ -2,9 +2,9 @@ const { DateTime } = require("luxon");
 const process_template = require("../email/process-template");
 const {
   col_0_72_hr_report,
-  col_5_report,
-  col_6_report,
-  col_7_report
+  col_1_72_hr_report,
+  col_2_72_hr_report,
+  col_3_72_hr_report
 } = require("../email/templates/rows");
 const avante_link = require("../tools/link_builder");
 
@@ -48,7 +48,7 @@ const build_72_hr_text = async (
       const link = avante_link(rpp_data.system_id, rpp_data.field_name);
 
       // MAP DATA AND PROCESS TEMPLATE
-      const col_0_1_data = {
+      const col_0_data = {
         view_link: link,
         system_id: rpp_data.system_id,
         manufacturer: rpp_data.manufacturer,
@@ -56,31 +56,31 @@ const build_72_hr_text = async (
         model: rpp_data.model
       };
 
-      processed_row += await process_template(col_0_72_hr_report, col_0_1_data);
+      processed_row += await process_template(col_0_72_hr_report, col_0_data);
 
-      const col_5_data = {
+      const col_1_data = {
         datapoint_count: rpp_data.datapoint_count
       };
 
-      processed_row += await process_template(col_5_report, col_5_data);
+      processed_row += await process_template(col_1_72_hr_report, col_1_data);
 
-      const col_6_data = {
+      const col_2_data = {
         min_value: rpp_data.min_value,
         unit: rpp_data.unit,
         time: dt_ny_min.toFormat("t ZZZZ"), // 9:07 AM EST,
         date: dt_ny_min.toFormat("DD") // Aug 6, 2014,
       };
 
-      processed_row += await process_template(col_6_report, col_6_data);
+      processed_row += await process_template(col_2_72_hr_report, col_2_data);
 
-      const col_7_data = {
+      const col_3_data = {
         max_value: rpp_data.max_value,
         unit: rpp_data.unit,
         time: dt_ny_max.toFormat("t ZZZZ"), // 9:07 AM EST,
         date: dt_ny_max.toFormat("DD") // Aug 6, 2014,
       };
 
-      processed_row += await process_template(col_7_report, col_7_data);
+      processed_row += await process_template(col_3_72_hr_report, col_3_data);
     }
     return processed_row;
   } catch (error) {

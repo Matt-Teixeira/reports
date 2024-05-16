@@ -47,7 +47,6 @@ const build_email_text = async (
       const link = avante_link(rpp_data.system_id, rpp_data.field_name);
       // Was: https://remote2.avantehs.com/machine/" + rpp_data.system_id
       
-      console.log(link);
       // MAP DATA AND PROCESS TEMPLATE
       const col_0_1_data = {
         view_link: link,
