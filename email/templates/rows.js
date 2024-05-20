@@ -179,7 +179,7 @@ const col_3_72_hr_report =
 
   const col_5_conn_report =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
-  '<div class="top" style="color: #005b94; font-size: 16px;">Manual Intervention Needed</div>' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Manual Intervention</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{intervention_detected}}</div>' +
   "</td>"
   "</tr>";
