@@ -88,7 +88,7 @@ async function on_boot() {
   const report_type = process.argv[2];
 
   const dt = formatted_dt();
-  const dt_2 = "mon-09:30";
+  const dt_2 = "mon-09:00";
 
   const report_queries = {
     get_user_report_schemas,
