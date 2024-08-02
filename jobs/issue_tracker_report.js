@@ -70,7 +70,7 @@ const issue_tracker_report = async (run_log, job_id, user_reports) => {
       job_id,
       email_text,
       report_meta_data.report_name,
-      6
+      5
     );
 
     // 3) Send Email

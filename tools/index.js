@@ -7,6 +7,7 @@ const build_72_hr_text = require("./build_72_hr_email");
 const avante_link = require("./link_builder");
 const build_conn_offline_text = require("./build_conn_offline_text");
 const build_issue_tracker_text = require("./build_issue_tracker_text");
+const build_disabled_alert_text = require("./build_disabled_alert_text");
 
 module.exports = {
   formatted_dt,
@@ -17,5 +18,6 @@ module.exports = {
   build_72_hr_text,
   avante_link,
   build_conn_offline_text,
-  build_issue_tracker_text
+  build_issue_tracker_text,
+  build_disabled_alert_text
 };

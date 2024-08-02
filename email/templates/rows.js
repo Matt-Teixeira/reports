@@ -26,14 +26,14 @@ const col_0_alert =
 
 const col_0_report =
   '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
-  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 1px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
+  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
   "<br>" +
   '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
   "</td>";
 
 const col_0_conn_report =
   '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
-  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 1px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
+  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
   "<br>" +
   '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
   "<br>" +
@@ -42,7 +42,7 @@ const col_0_conn_report =
 
 const col_0_72_hr_report =
   '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
-  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 1px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
+  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
   "<br>" +
   '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
   "<br>" +
@@ -144,7 +144,6 @@ const col_3_72_hr_report =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
   "</td>";
-("</tr>");
 
 const col_1_conn_report =
   '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
@@ -159,7 +158,6 @@ const col_2_conn_report =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
   "</td>";
-("</tr>");
 
 const col_3_conn_report =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
@@ -167,7 +165,6 @@ const col_3_conn_report =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
   "</td>";
-("</tr>");
 
 const col_4_conn_report =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
@@ -186,7 +183,7 @@ const col_5_conn_report =
 
 const col_0_issue_tracker_report =
   '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
-  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 1px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
+  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
   "<br>" +
   '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
   "<br>" +
@@ -226,6 +223,36 @@ const col_4_issue_tracker_report =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{reported_by}}</div>' +
   "</td>";
 
+  const col_0_default_alert_report =
+  '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
+  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
+  "<br>" +
+  "</td>";
+
+  const col_1_default_alert_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 12px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Alert Model Id</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{alert_model_id}}</div>' +
+  "</td>";
+
+  const col_2_default_alert_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Field Name</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{field_name}}</div>' +
+  "</td>";
+
+  const col_3_default_alert_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Operator</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{operator}}</div>' +
+  "</td>";
+
+  const col_4_default_alert_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Enabled</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{enabled}}</div>' +
+  "</td>";
+
 module.exports = {
   col_0_alert,
   col_0_report,
@@ -257,5 +284,10 @@ module.exports = {
   col_2_issue_tracker_report,
   col_3_issue_tracker_report,
   col_4_issue_tracker_report,
-  col_5_issue_tracker_report
+  col_5_issue_tracker_report,
+  col_0_default_alert_report,
+  col_1_default_alert_report,
+  col_2_default_alert_report,
+  col_3_default_alert_report,
+  col_4_default_alert_report
 };
