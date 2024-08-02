@@ -10,7 +10,9 @@ const {
   he_pressure_72_hr,
   scan_seconds,
   shield_temp,
-  connection_offline
+  connection_offline,
+  disabled_default_alerts,
+  issue_tracker_report
 } = require("./jobs");
 
 // TOOLS
@@ -28,8 +30,10 @@ const {
     get_72_hr_pressure_report,
     get_scan_seconds,
     get_shield_temp,
-    get_conn_offline
-  }
+    get_conn_offline,
+    get_default_alert_report
+  },
+  reports: { get_issue_tracker_systems }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
 const [
@@ -76,6 +80,12 @@ async function run_job(users_report_rpp_data, run_log) {
     case "conn_offline":
       await connection_offline(run_log, job_id, users_report_rpp_data);
       break;
+    case "default_alerts":
+      await disabled_default_alerts(run_log, job_id, users_report_rpp_data);
+      break;
+    case "issue_tracker":
+      await issue_tracker_report(run_log, job_id, users_report_rpp_data);
+      break;
     default:
       break;
   }
@@ -99,10 +109,12 @@ async function on_boot() {
     he_pressure_72_hr: get_72_hr_pressure_report,
     scan_seconds: get_scan_seconds,
     shield_temp: get_shield_temp,
-    conn_offline: get_conn_offline
+    conn_offline: get_conn_offline,
+    default_alerts: get_default_alert_report,
+    issue_tracker: get_issue_tracker_systems
   };
 
-  let note = { dt };
+  let note = { dt_2 };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
@@ -110,17 +122,20 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt, report_type]
+      [dt_2, report_type]
     );
 
-    let note = { dt, user_report_schemas };
+    let note = { dt_2, user_report_schemas };
     await addLogEvent(I, run_log, "on_boot", det, note, null);
 
     const users_system_rpp_data = [];
 
+    console.log("\nuser_report_schemas");
+    console.log(user_report_schemas);
+
     for await (let users_report of user_report_schemas) {
       const rpp_data = await db.any(report_queries[report_type], [
-        dt,
+        dt_2,
         users_report.author
       ]);
 
@@ -139,7 +154,11 @@ async function on_boot() {
       const matched_systems_list = [];
 
       // The conn_offline report will not have a systems list associated with the user report model. Just stuff it all in there.
-      if (report_type === "conn_offline") {
+      if (
+        report_type === "conn_offline" ||
+        report_type === "default_alerts" ||
+        report_type === "issue_tracker"
+      ) {
         matched_systems_list.push(...rpp_data);
       } else {
         // matched_systems_list will now contain all matched objects, including duplicates based on system_id

@@ -6,6 +6,8 @@ const he_pressure_72_hr = require("./he_pressure_72_hr");
 const scan_seconds = require("./scan_seconds");
 const shield_temp = require("./shield_temp");
 const connection_offline = require("./connection_offline");
+const disabled_default_alerts = require("./disabled_default_alerts");
+const issue_tracker_report = require("./issue_tracker_report");
 
 module.exports = {
   helium_level_report,
@@ -15,5 +17,7 @@ module.exports = {
   he_pressure_72_hr,
   scan_seconds,
   shield_temp,
-  connection_offline
+  connection_offline,
+  disabled_default_alerts,
+  issue_tracker_report
 };
