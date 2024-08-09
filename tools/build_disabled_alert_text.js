@@ -32,13 +32,26 @@ const build_disabled_alert_text = async (
 
     // Loop though each index and conver to email template
     for await (const rpp_data of reportable_data) {
+
+      const dt_iso_last_update = rpp_data.last_update.toISOString();
+
+      const dt_ny_last_update = DateTime.fromISO(dt_iso_last_update, {
+        zone: "America/New_York"
+      });
+
+     /*  const dt_ny_last_update = DateTime.fromISO(dt_iso_last_update, {
+        zone: "America/New_York"
+      }); */
       
       const link = avante_link(rpp_data.system_id, rpp_data.field_name);
 
       // MAP DATA AND PROCESS TEMPLATE
       const col_0_data = {
         view_link: link,
-        system_id: rpp_data.system_id
+        system_id: rpp_data.system_id,
+        manufacturer: rpp_data.manufacturer,
+        modality: rpp_data.modality,
+        alert_model_id: rpp_data.alert_model_id
       };
 
       processed_row += await process_template(
@@ -47,7 +60,9 @@ const build_disabled_alert_text = async (
       );
 
       const col_1_data = {
-        alert_model_id: rpp_data.alert_model_id
+        name: rpp_data.name,
+        city: rpp_data.city,
+        state: rpp_data.state
       };
 
       processed_row += await process_template(
@@ -56,7 +71,9 @@ const build_disabled_alert_text = async (
       );
 
       const col_2_data = {
-        field_name: rpp_data.field_name
+        field_name: rpp_data.field_name,
+        operator: rpp_data.operator,
+        threshold: rpp_data.threshold
       };
 
       processed_row += await process_template(
@@ -65,7 +82,9 @@ const build_disabled_alert_text = async (
       );
 
       const col_3_data = {
-        operator: rpp_data.operator
+        time: dt_ny_last_update.toFormat("t ZZZZ"), // 9:07 AM EST,
+        date: dt_ny_last_update.toFormat("DD"),
+        last_updated_by: rpp_data.last_updated_by
       };
 
       processed_row += await process_template(
@@ -73,14 +92,14 @@ const build_disabled_alert_text = async (
         col_3_data
       );
 
-      const col_4_data = {
+      /* const col_4_data = {
         enabled: rpp_data.enabled
       };
 
       processed_row += await process_template(
         col_4_default_alert_report,
         col_4_data
-      );
+      ); */
 
     }
 

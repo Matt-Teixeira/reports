@@ -130,9 +130,6 @@ async function on_boot() {
 
     const users_system_rpp_data = [];
 
-    console.log("\nuser_report_schemas");
-    console.log(user_report_schemas);
-
     for await (let users_report of user_report_schemas) {
       const rpp_data = await db.any(report_queries[report_type], [
         dt_2,

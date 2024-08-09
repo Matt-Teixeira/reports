@@ -1,8 +1,6 @@
 const {
-  build_email_text,
   build_disabled_alert_text,
   build_full_email,
-  sort_by_manufacturer
 } = require("../tools");
 const build_transporter = require("../email/build-transporter");
 const send_email = require("../email/send_email");
@@ -70,7 +68,7 @@ const disabled_default_alerts = async (run_log, job_id, user_reports) => {
       job_id,
       email_text,
       report_meta_data.report_name,
-      5
+      4
     );
 
     // 3) Send Email

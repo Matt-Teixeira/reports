@@ -217,37 +217,51 @@ const col_4_issue_tracker_report =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{diagnoses}}</div>' +
   "</td>";
 
-  const col_5_issue_tracker_report =
+const col_5_issue_tracker_report =
   '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Reported By</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{reported_by}}</div>' +
   "</td>";
 
-  const col_0_default_alert_report =
+/*   const col_0_default_alert_report =
   '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
   '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
   "<br>" +
+  "</td>"; */
+
+const col_0_default_alert_report =
+  '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
+  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 12px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
+  "<br>" +
+  '<span class="bot" style="color: darkgrey; font-size: 12px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
+  "<br>" +
   "</td>";
 
-  const col_1_default_alert_report =
+const col_1_default_alert_report =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 12px;" width="25%" align="center" valign="middle">' +
-  '<div class="top" style="color: #005b94; font-size: 16px;">Alert Model Id</div>' +
-  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{alert_model_id}}</div>' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Location</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{name}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{city}} · {{state}}</div>' +
   "</td>";
 
-  const col_2_default_alert_report =
-  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
-  '<div class="top" style="color: #005b94; font-size: 16px;">Field Name</div>' +
-  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{field_name}}</div>' +
+  // {{city}} · {{state}}
+
+const col_2_default_alert_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 12px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Summary</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 12px;"><span class="bot" style="color: darkgrey; font-size: 12px; margin-top: 2px;">Field: </span>{{field_name}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 12px;"><span class="bot" style="color: darkgrey; font-size: 12px; margin-top: 2px;">Operator: </span>{{operator}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 12px;"><span class="bot" style="color: darkgrey; font-size: 12px; margin-top: 2px;">Threshold: </span>{{threshold}}</div>' +
   "</td>";
 
-  const col_3_default_alert_report =
-  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
-  '<div class="top" style="color: #005b94; font-size: 16px;">Operator</div>' +
-  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{operator}}</div>' +
+const col_3_default_alert_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 12px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Disabled Since/By</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}} · {{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{last_updated_by}}</div>' +
   "</td>";
 
-  const col_4_default_alert_report =
+const col_4_default_alert_report =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Enabled</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{enabled}}</div>' +
