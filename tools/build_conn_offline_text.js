@@ -35,7 +35,11 @@ const build_conn_offline_text = async (
     for await (const rpp_data of reportable_data) {
       // CONVERT TO STRING
       const dt_iso_created_at = rpp_data.ticket_created_at.toISOString();
-      const dt_iso_updated_at = rpp_data.ticket_updated_at.toISOString();
+      //const dt_iso_updated_at = rpp_data.ticket_updated_at.toISOString();
+      const dt_iso_updated_at = rpp_data.ticket_updated_at
+        ? { datetime: rpp_data.ticket_updated_at.toISOString(), msg: null }
+        : { datetime: null, msg: "No Datetime" };
+
       const dt_iso_hhm_conn = rpp_data.hhm_last_connected
         ? { datetime: rpp_data.hhm_last_connected.toISOString(), msg: null }
         : { datetime: null, msg: "No Datetime" };
@@ -49,9 +53,15 @@ const build_conn_offline_text = async (
         zone: "America/New_York"
       });
 
-      const dt_ny_updated_at = DateTime.fromISO(dt_iso_updated_at, {
+      const dt_ny_updated_at = dt_iso_updated_at.datetime
+      ? DateTime.fromISO(dt_iso_updated_at.datetime, {
+          zone: "America/New_York"
+        })
+      : dt_iso_updated_at.msg;
+
+      /* const dt_ny_updated_at = DateTime.fromISO(dt_iso_updated_at, {
         zone: "America/New_York"
-      });
+      }); */
 
       const dt_ny_hhm_conn = dt_iso_hhm_conn.datetime
         ? DateTime.fromISO(dt_iso_hhm_conn.datetime, {
