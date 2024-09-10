@@ -12,7 +12,8 @@ const {
   shield_temp,
   connection_offline,
   disabled_default_alerts,
-  issue_tracker_report
+  issue_tracker_report,
+  mmb_all_issue_tracker
 } = require("./jobs");
 
 // TOOLS
@@ -33,7 +34,15 @@ const {
     get_conn_offline,
     get_default_alert_report
   },
-  reports: { get_issue_tracker_systems }
+  reports: {
+    get_issue_tracker_systems,
+    get_issue_mmb_all,
+    get_issue_hhm_all,
+    get_issue_mmb_older_than_30,
+    get_issue_hhm_older_than_30,
+    get_issue_mmb_newer_than_30,
+    get_issue_hhm_newer_than_30
+  }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
 const [
@@ -86,6 +95,29 @@ async function run_job(users_report_rpp_data, run_log) {
     case "issue_tracker":
       await issue_tracker_report(run_log, job_id, users_report_rpp_data);
       break;
+    case "mmb_all_issue_tracker":
+      await mmb_all_issue_tracker(run_log, job_id, users_report_rpp_data);
+      break;
+    case "hhm_all_issue_tracker":
+      //await mmb_all_issue_tracker(run_log, job_id, users_report_rpp_data);
+      console.log("hhm_all_issue_tracker");
+      break;
+    case "mmb_issue_older_30":
+      //await issue_tracker_report(run_log, job_id, users_report_rpp_data);
+      console.log("mmb_issue_older_30");
+      break;
+    case "hhm_issue_older_30":
+      //await issue_tracker_report(run_log, job_id, users_report_rpp_data);
+      console.log("hhm_issue_older_30");
+      break;
+    case "mmb_issue_newer_30":
+      //await issue_tracker_report(run_log, job_id, users_report_rpp_data);
+      console.log("mmb_issue_newer_30");
+      break;
+    case "hhm_issue_newer_30":
+      //await issue_tracker_report(run_log, job_id, users_report_rpp_data);
+      console.log("hhm_issue_newer_30");
+      break;
     default:
       break;
   }
@@ -111,10 +143,16 @@ async function on_boot() {
     shield_temp: get_shield_temp,
     conn_offline: get_conn_offline,
     default_alerts: get_default_alert_report,
-    issue_tracker: get_issue_tracker_systems
+    issue_tracker: get_issue_tracker_systems,
+    mmb_all_issue_tracker: get_issue_mmb_all,
+    hhm_all_issue_tracker: get_issue_hhm_all,
+    mmb_issue_older_30: get_issue_mmb_older_than_30,
+    hhm_issue_older_30: get_issue_hhm_older_than_30,
+    mmb_issue_newer_30: get_issue_mmb_newer_than_30,
+    hhm_issue_newer_30: get_issue_hhm_newer_than_30
   };
 
-  let note = { dt };
+  let note = { dt_2 };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
@@ -122,19 +160,23 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt, report_type]
+      [dt_2, report_type]
     );
 
-    let note = { dt, user_report_schemas };
+    let note = { dt_2, user_report_schemas };
     await addLogEvent(I, run_log, "on_boot", det, note, null);
 
     const users_system_rpp_data = [];
 
     for await (let users_report of user_report_schemas) {
       const rpp_data = await db.any(report_queries[report_type], [
-        dt,
+        dt_2,
         users_report.author
       ]);
+
+      if (!rpp_data.length) {
+        continue;
+      }
 
       // Initialize the map to hold arrays of objects for each system_id
       const object_map = new Map();
@@ -151,10 +193,11 @@ async function on_boot() {
       const matched_systems_list = [];
 
       // The conn_offline report will not have a systems list associated with the user report model. Just stuff it all in there.
+      const contains_issue = report_type.includes("issue");
       if (
         report_type === "conn_offline" ||
         report_type === "default_alerts" ||
-        report_type === "issue_tracker"
+        contains_issue
       ) {
         matched_systems_list.push(...rpp_data);
       } else {

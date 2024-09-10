@@ -8,6 +8,7 @@ const avante_link = require("./link_builder");
 const build_conn_offline_text = require("./build_conn_offline_text");
 const build_issue_tracker_text = require("./build_issue_tracker_text");
 const build_disabled_alert_text = require("./build_disabled_alert_text");
+const build_mmb_all_issue_text = require("./build_mmb_all_issue_text");
 
 module.exports = {
   formatted_dt,
@@ -19,5 +20,6 @@ module.exports = {
   avante_link,
   build_conn_offline_text,
   build_issue_tracker_text,
-  build_disabled_alert_text
+  build_disabled_alert_text,
+  build_mmb_all_issue_text
 };

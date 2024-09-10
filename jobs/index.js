@@ -8,6 +8,7 @@ const shield_temp = require("./shield_temp");
 const connection_offline = require("./connection_offline");
 const disabled_default_alerts = require("./disabled_default_alerts");
 const issue_tracker_report = require("./issue_tracker_report");
+const mmb_all_issue_tracker = require("./mmb_all_issue_tracker");
 
 module.exports = {
   helium_level_report,
@@ -19,5 +20,6 @@ module.exports = {
   shield_temp,
   connection_offline,
   disabled_default_alerts,
-  issue_tracker_report
+  issue_tracker_report,
+  mmb_all_issue_tracker
 };
