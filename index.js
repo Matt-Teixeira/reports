@@ -13,7 +13,7 @@ const {
   connection_offline,
   disabled_default_alerts,
   issue_tracker_report,
-  mmb_all_issue_tracker
+  mmb_hhm_all_issue_tracker
 } = require("./jobs");
 
 // TOOLS
@@ -96,27 +96,22 @@ async function run_job(users_report_rpp_data, run_log) {
       await issue_tracker_report(run_log, job_id, users_report_rpp_data);
       break;
     case "mmb_all_issue_tracker":
-      await mmb_all_issue_tracker(run_log, job_id, users_report_rpp_data);
+      await mmb_hhm_all_issue_tracker(run_log, job_id, users_report_rpp_data);
       break;
     case "hhm_all_issue_tracker":
-      //await mmb_all_issue_tracker(run_log, job_id, users_report_rpp_data);
-      console.log("hhm_all_issue_tracker");
+      await mmb_hhm_all_issue_tracker(run_log, job_id, users_report_rpp_data);
       break;
     case "mmb_issue_older_30":
-      //await issue_tracker_report(run_log, job_id, users_report_rpp_data);
-      console.log("mmb_issue_older_30");
+      await mmb_hhm_all_issue_tracker(run_log, job_id, users_report_rpp_data);
       break;
     case "hhm_issue_older_30":
-      //await issue_tracker_report(run_log, job_id, users_report_rpp_data);
-      console.log("hhm_issue_older_30");
+      await mmb_hhm_all_issue_tracker(run_log, job_id, users_report_rpp_data);
       break;
     case "mmb_issue_newer_30":
-      //await issue_tracker_report(run_log, job_id, users_report_rpp_data);
-      console.log("mmb_issue_newer_30");
+      await mmb_hhm_all_issue_tracker(run_log, job_id, users_report_rpp_data);
       break;
     case "hhm_issue_newer_30":
-      //await issue_tracker_report(run_log, job_id, users_report_rpp_data);
-      console.log("hhm_issue_newer_30");
+      await mmb_hhm_all_issue_tracker(run_log, job_id, users_report_rpp_data);
       break;
     default:
       break;
@@ -175,6 +170,14 @@ async function on_boot() {
       ]);
 
       if (!rpp_data.length) {
+        await addLogEvent(
+          W,
+          run_log,
+          "on_boot",
+          det,
+          { message: "No data for this report", report: users_report, report_data: rpp_data },
+          null
+        );
         continue;
       }
 

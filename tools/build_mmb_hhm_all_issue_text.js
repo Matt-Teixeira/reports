@@ -8,7 +8,7 @@ const {
   col_4_issue_mmb_all_report,
   col_5_issue_tracker_report
 } = require("../email/templates/rows");
-const avante_link = require("../tools/link_builder");
+const avante_link = require("./link_builder");
 
 const [addLogEvent] = require("../utils/logger/log");
 const {

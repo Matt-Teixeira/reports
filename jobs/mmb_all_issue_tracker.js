@@ -1,4 +1,4 @@
-const { build_mmb_all_issue_text, build_full_email } = require("../tools");
+const { build_mmb_hhm_all_issue_text, build_full_email } = require("../tools");
 const build_transporter = require("../email/build-transporter");
 const send_email = require("../email/send_email");
 
@@ -8,9 +8,9 @@ const {
   tag: { cal, det, cat, seq, qaf }
 } = require("../utils/logger/enums");
 
-const mmb_all_issue_tracker = async (run_log, job_id, user_reports) => {
+const mmb_hhm_all_issue_tracker = async (run_log, job_id, user_reports) => {
   let note = { job_id, user_report: user_reports };
-  await addLogEvent(I, run_log, "mmb_all_issue_tracker", cal, note, null);
+  await addLogEvent(I, run_log, "mmb_hhm_all_issue_tracker", cal, note, null);
 
   const {
     author,
@@ -46,13 +46,13 @@ const mmb_all_issue_tracker = async (run_log, job_id, user_reports) => {
         systems_list,
         message: "User has no reportable data"
       };
-      await addLogEvent(W, run_log, "mmb_all_issue_tracker", det, note, null);
+      await addLogEvent(W, run_log, "mmb_hhm_all_issue_tracker", det, note, null);
       return;
     }
-    await addLogEvent(I, run_log, "mmb_all_issue_tracker", det, note, null);
+    await addLogEvent(I, run_log, "mmb_hhm_all_issue_tracker", det, note, null);
 
     // 2) Build row text
-    const email_text = await build_mmb_all_issue_text(
+    const email_text = await build_mmb_hhm_all_issue_text(
       run_log,
       job_id,
       report_meta_data,
@@ -80,11 +80,11 @@ const mmb_all_issue_tracker = async (run_log, job_id, user_reports) => {
     ); // report_meta_data.author - matt.teixeira@avantehs.com
   } catch (error) {
     console.log(error);
-    await addLogEvent(E, run_log, "mmb_all_issue_tracker", cat, note, error);
+    await addLogEvent(E, run_log, "mmb_hhm_all_issue_tracker", cat, note, error);
   }
 };
 
-module.exports = mmb_all_issue_tracker;
+module.exports = mmb_hhm_all_issue_tracker;
 
 /* 
    matched_systems_list: [
