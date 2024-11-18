@@ -41,7 +41,8 @@ const {
     get_issue_mmb_older_than_30,
     get_issue_hhm_older_than_30,
     get_issue_mmb_newer_than_30,
-    get_issue_hhm_newer_than_30
+    get_issue_hhm_newer_than_30,
+    get_disabled_alerts
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -92,6 +93,9 @@ async function run_job(users_report_rpp_data, run_log) {
     case "default_alerts":
       await disabled_default_alerts(run_log, job_id, users_report_rpp_data);
       break;
+    case "disabled_alerts":
+      await disabled_default_alerts(run_log, job_id, users_report_rpp_data);
+      break;
     case "issue_tracker":
       await issue_tracker_report(run_log, job_id, users_report_rpp_data);
       break;
@@ -125,7 +129,7 @@ async function on_boot() {
   const report_type = process.argv[2];
 
   const dt = formatted_dt();
-  const dt_2 = "mon-09:00";
+  const dt_2 = "mon-08:00";
 
   const report_queries = {
     get_user_report_schemas,
@@ -144,10 +148,11 @@ async function on_boot() {
     mmb_issue_older_30: get_issue_mmb_older_than_30,
     hhm_issue_older_30: get_issue_hhm_older_than_30,
     mmb_issue_newer_30: get_issue_mmb_newer_than_30,
-    hhm_issue_newer_30: get_issue_hhm_newer_than_30
+    hhm_issue_newer_30: get_issue_hhm_newer_than_30,
+    disabled_alerts: get_disabled_alerts
   };
 
-  let note = { dt_2 };
+  let note = { dt };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
@@ -155,17 +160,17 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt_2, report_type]
+      [dt, report_type]
     );
 
-    let note = { dt_2, user_report_schemas };
+    let note = { dt, user_report_schemas };
     await addLogEvent(I, run_log, "on_boot", det, note, null);
 
     const users_system_rpp_data = [];
 
     for await (let users_report of user_report_schemas) {
       const rpp_data = await db.any(report_queries[report_type], [
-        dt_2,
+        dt,
         users_report.author
       ]);
 
@@ -175,7 +180,11 @@ async function on_boot() {
           run_log,
           "on_boot",
           det,
-          { message: "No data for this report", report: users_report, report_data: rpp_data },
+          {
+            message: "No data for this report",
+            report: users_report,
+            report_data: rpp_data
+          },
           null
         );
         continue;
@@ -195,7 +204,7 @@ async function on_boot() {
 
       const matched_systems_list = [];
 
-      // The conn_offline report will not have a systems list associated with the user report model. Just stuff it all in there.
+      // The conn_offline & default_alerts reports will not have a systems list associated with the user report model. Internal reporting
       const contains_issue = report_type.includes("issue");
       if (
         report_type === "conn_offline" ||
