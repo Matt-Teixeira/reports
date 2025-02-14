@@ -106,8 +106,9 @@ const helium_psi_report = async (run_log, job_id, user_reports) => {
       run_log,
       job_id,
       transporter,
-      "matt.teixeira@avantehs.com",
-      full_email
+      report_meta_data.author,
+      full_email,
+      report_name
     ); // report_meta_data.author - matt.teixeira@avantehs.com
   } catch (error) {
     await addLogEvent(E, run_log, "helium_psi_report", cat, note, error);

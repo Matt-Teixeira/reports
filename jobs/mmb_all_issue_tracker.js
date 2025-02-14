@@ -76,7 +76,8 @@ const mmb_hhm_all_issue_tracker = async (run_log, job_id, user_reports) => {
       job_id,
       transporter,
       report_meta_data.author,
-      full_email
+      full_email,
+      report_name
     ); // report_meta_data.author - matt.teixeira@avantehs.com
   } catch (error) {
     console.log(error);
