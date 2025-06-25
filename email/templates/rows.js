@@ -244,7 +244,7 @@ const col_1_default_alert_report =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{city}} · {{state}}</div>' +
   "</td>";
 
-  // {{city}} · {{state}}
+// {{city}} · {{state}}
 
 const col_2_default_alert_report =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 12px;" width="25%" align="center" valign="middle">' +
@@ -267,10 +267,17 @@ const col_4_default_alert_report =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{enabled}}</div>' +
   "</td>";
 
-  const col_4_issue_mmb_all_report =
+const col_4_issue_mmb_all_report =
   '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Assigned</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{assigned}}</div>' +
+  "</td>";
+
+const col_2_missed_stack_mmb =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 12px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Stack Last Ran</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}} · {{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{last_updated_by}}</div>' +
   "</td>";
 
 module.exports = {
@@ -310,5 +317,6 @@ module.exports = {
   col_2_default_alert_report,
   col_3_default_alert_report,
   col_4_default_alert_report,
-  col_4_issue_mmb_all_report
+  col_4_issue_mmb_all_report,
+  col_2_missed_stack_mmb
 };

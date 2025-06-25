@@ -1,6 +1,7 @@
 const { doc_head, doc_tail } = require("../email/templates/doc-caps");
 const process_template = require("../email/process-template");
 const {
+  table_header_3,
   table_header_4,
   table_report_header_5,
   table_report_header_6,
@@ -37,6 +38,10 @@ async function build_full_email(
       });
     } else if (col_num === 4) {
       table_head = await process_template(table_header_4, {
+        report_name: report_name
+      });
+    } else if (col_num === 3) {
+      table_head = await process_template(table_header_3, {
         report_name: report_name
       });
     }

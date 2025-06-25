@@ -9,6 +9,7 @@ const build_conn_offline_text = require("./build_conn_offline_text");
 const build_issue_tracker_text = require("./build_issue_tracker_text");
 const build_disabled_alert_text = require("./build_disabled_alert_text");
 const build_mmb_hhm_all_issue_text = require("./build_mmb_hhm_all_issue_text");
+const build_missed_stack_mmb = require("./build_missed_stack_mmb.js");
 
 module.exports = {
   formatted_dt,
@@ -21,5 +22,6 @@ module.exports = {
   build_conn_offline_text,
   build_issue_tracker_text,
   build_disabled_alert_text,
-  build_mmb_hhm_all_issue_text
+  build_mmb_hhm_all_issue_text,
+  build_missed_stack_mmb
 };

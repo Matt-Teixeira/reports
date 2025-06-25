@@ -9,6 +9,7 @@ const connection_offline = require("./connection_offline");
 const disabled_default_alerts = require("./disabled_default_alerts");
 const issue_tracker_report = require("./issue_tracker_report");
 const mmb_hhm_all_issue_tracker = require("./mmb_all_issue_tracker");
+const missed_stack_run_mmb = require("./missed_stack_run_mmb");
 
 module.exports = {
   helium_level_report,
@@ -21,5 +22,6 @@ module.exports = {
   connection_offline,
   disabled_default_alerts,
   issue_tracker_report,
-  mmb_hhm_all_issue_tracker
+  mmb_hhm_all_issue_tracker,
+  missed_stack_run_mmb
 };

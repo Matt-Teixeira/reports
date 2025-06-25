@@ -13,7 +13,8 @@ const {
   connection_offline,
   disabled_default_alerts,
   issue_tracker_report,
-  mmb_hhm_all_issue_tracker
+  mmb_hhm_all_issue_tracker,
+  missed_stack_run_mmb
 } = require("./jobs");
 
 // TOOLS
@@ -42,7 +43,8 @@ const {
     get_issue_hhm_older_than_30,
     get_issue_mmb_newer_than_30,
     get_issue_hhm_newer_than_30,
-    get_disabled_alerts
+    get_disabled_alerts,
+    get_missed_stack_run_mmb
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -114,8 +116,8 @@ async function run_job(users_report_rpp_data, run_log) {
     case "mmb_issue_newer_30":
       await mmb_hhm_all_issue_tracker(run_log, job_id, users_report_rpp_data);
       break;
-    case "hhm_issue_newer_30":
-      await mmb_hhm_all_issue_tracker(run_log, job_id, users_report_rpp_data);
+    case "missed_stack_run_mmb":
+      await missed_stack_run_mmb(run_log, job_id, users_report_rpp_data);
       break;
     default:
       break;
@@ -149,7 +151,8 @@ async function on_boot() {
     hhm_issue_older_30: get_issue_hhm_older_than_30,
     mmb_issue_newer_30: get_issue_mmb_newer_than_30,
     hhm_issue_newer_30: get_issue_hhm_newer_than_30,
-    disabled_alerts: get_disabled_alerts
+    disabled_alerts: get_disabled_alerts,
+    missed_stack_run_mmb: get_missed_stack_run_mmb
   };
 
   let note = { dt };
@@ -160,7 +163,7 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt, report_type]
+      [dt_2, report_type]
     );
 
     let note = { dt, user_report_schemas };
@@ -168,11 +171,41 @@ async function on_boot() {
 
     const users_system_rpp_data = [];
 
+    console.log("\nuser_report_schemas");
+    console.log(user_report_schemas);
+
     for await (let users_report of user_report_schemas) {
-      const rpp_data = await db.any(report_queries[report_type], [
+      let rpp_data = await db.any(report_queries[report_type], [
         dt,
         users_report.author
       ]);
+
+      console.log("RPP DATA BEFORE MODIFY");
+      console.log(rpp_data);
+
+      rpp_data = [
+        {
+          system_id: "SME13573",
+          capture_datetime: "2025-06-23T20:18:31.973Z",
+          manufacturer: "Siemens",
+          modality: "MRI",
+          name: "Easton",
+          city: null,
+          state: null
+        },
+        {
+          system_id: "SME01892",
+          capture_datetime: "2025-06-23T20:15:45.587Z",
+          manufacturer: "GE",
+          modality: "MRI",
+          name: "Atlas Imaging",
+          city: "Royal Oak",
+          state: "MI"
+        }
+      ];
+
+      console.log("\nrpp_data");
+      console.log(rpp_data);
 
       if (!rpp_data.length) {
         await addLogEvent(
@@ -209,6 +242,7 @@ async function on_boot() {
       if (
         report_type === "conn_offline" ||
         report_type === "default_alerts" ||
+        report_type === "missed_stack_run_mmb" ||
         contains_issue
       ) {
         matched_systems_list.push(...rpp_data);
