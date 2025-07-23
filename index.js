@@ -126,8 +126,6 @@ async function run_job(users_report_rpp_data, run_log) {
 
 async function on_boot() {
   // GET PROCESS ARG TO DETERMIN REPORT TYPE FOR QUERY
-  // he_level_value
-  // he_pressure_value
   const report_type = process.argv[2];
 
   const dt = formatted_dt();
@@ -163,7 +161,7 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt_2, report_type]
+      [dt, report_type]
     );
 
     let note = { dt, user_report_schemas };
@@ -179,33 +177,6 @@ async function on_boot() {
         dt,
         users_report.author
       ]);
-
-      console.log("RPP DATA BEFORE MODIFY");
-      console.log(rpp_data);
-
-      rpp_data = [
-        {
-          system_id: "SME13573",
-          capture_datetime: "2025-06-23T20:18:31.973Z",
-          manufacturer: "Siemens",
-          modality: "MRI",
-          name: "Easton",
-          city: null,
-          state: null
-        },
-        {
-          system_id: "SME01892",
-          capture_datetime: "2025-06-23T20:15:45.587Z",
-          manufacturer: "GE",
-          modality: "MRI",
-          name: "Atlas Imaging",
-          city: "Royal Oak",
-          state: "MI"
-        }
-      ];
-
-      console.log("\nrpp_data");
-      console.log(rpp_data);
 
       if (!rpp_data.length) {
         await addLogEvent(

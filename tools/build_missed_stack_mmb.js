@@ -64,23 +64,13 @@ const build_missed_stack_mmb = async (
 
       const col_2_data = {
         time: dt_ny_last_update.toFormat("t ZZZZ"), // 9:07 AM EST,
-        date: dt_ny_last_update.toFormat("DD"),
-        last_updated_by: rpp_data.last_updated_by
+        date: dt_ny_last_update.toFormat("DD")
       };
 
       processed_row += await process_template(
         col_2_missed_stack_mmb,
         col_2_data
       );
-
-      /* const col_4_data = {
-        enabled: rpp_data.enabled
-      };
-
-      processed_row += await process_template(
-        col_4_default_alert_report,
-        col_4_data
-      ); */
     }
 
     return processed_row;
