@@ -10,6 +10,7 @@ const build_issue_tracker_text = require("./build_issue_tracker_text");
 const build_disabled_alert_text = require("./build_disabled_alert_text");
 const build_mmb_hhm_all_issue_text = require("./build_mmb_hhm_all_issue_text");
 const build_missed_stack_mmb = require("./build_missed_stack_mmb.js");
+const build_reportable_issue = require("./build_reportable_issue.js");
 
 module.exports = {
   formatted_dt,
@@ -23,5 +24,6 @@ module.exports = {
   build_issue_tracker_text,
   build_disabled_alert_text,
   build_mmb_hhm_all_issue_text,
-  build_missed_stack_mmb
+  build_missed_stack_mmb,
+  build_reportable_issue
 };

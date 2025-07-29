@@ -10,6 +10,7 @@ const disabled_default_alerts = require("./disabled_default_alerts");
 const issue_tracker_report = require("./issue_tracker_report");
 const mmb_hhm_all_issue_tracker = require("./mmb_all_issue_tracker");
 const missed_stack_run_mmb = require("./missed_stack_run_mmb");
+const reportable_issue_report = require("./reportable_issue_report");
 
 module.exports = {
   helium_level_report,
@@ -23,5 +24,6 @@ module.exports = {
   disabled_default_alerts,
   issue_tracker_report,
   mmb_hhm_all_issue_tracker,
-  missed_stack_run_mmb
+  missed_stack_run_mmb,
+  reportable_issue_report
 };

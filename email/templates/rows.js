@@ -223,15 +223,9 @@ const col_5_issue_tracker_report =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{reported_by}}</div>' +
   "</td>";
 
-/*   const col_0_default_alert_report =
-  '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
-  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
-  "<br>" +
-  "</td>"; */
-
 const col_0_default_alert_report =
   '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
-  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 12px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
+  '<td class="link" style="border: none; text-align: left; vertical-align: middle; width: 25%; padding: 10px 12px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
   "<br>" +
   '<span class="bot" style="color: darkgrey; font-size: 12px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
   "<br>" +
@@ -243,8 +237,6 @@ const col_1_default_alert_report =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{name}}</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{city}} · {{state}}</div>' +
   "</td>";
-
-// {{city}} · {{state}}
 
 const col_2_default_alert_report =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 12px;" width="25%" align="center" valign="middle">' +
@@ -277,6 +269,12 @@ const col_2_missed_stack_mmb =
   '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 12px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Stack Last Ran</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}} · {{time}}</div>' +
+  "</td>";
+
+const col_2_reportable_issue =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 12px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Note</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{note}}</div>' +
   "</td>";
 
 module.exports = {
@@ -317,5 +315,6 @@ module.exports = {
   col_3_default_alert_report,
   col_4_default_alert_report,
   col_4_issue_mmb_all_report,
-  col_2_missed_stack_mmb
+  col_2_missed_stack_mmb,
+  col_2_reportable_issue
 };

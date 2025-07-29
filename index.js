@@ -14,7 +14,8 @@ const {
   disabled_default_alerts,
   issue_tracker_report,
   mmb_hhm_all_issue_tracker,
-  missed_stack_run_mmb
+  missed_stack_run_mmb,
+  reportable_issue_report
 } = require("./jobs");
 
 // TOOLS
@@ -44,7 +45,8 @@ const {
     get_issue_mmb_newer_than_30,
     get_issue_hhm_newer_than_30,
     get_disabled_alerts,
-    get_missed_stack_run_mmb
+    get_missed_stack_run_mmb,
+    get_issue_tracker_report
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -119,6 +121,9 @@ async function run_job(users_report_rpp_data, run_log) {
     case "missed_stack_run_mmb":
       await missed_stack_run_mmb(run_log, job_id, users_report_rpp_data);
       break;
+    case "reportable_issue":
+      await reportable_issue_report(run_log, job_id, users_report_rpp_data);
+      break;
     default:
       break;
   }
@@ -150,10 +155,11 @@ async function on_boot() {
     mmb_issue_newer_30: get_issue_mmb_newer_than_30,
     hhm_issue_newer_30: get_issue_hhm_newer_than_30,
     disabled_alerts: get_disabled_alerts,
-    missed_stack_run_mmb: get_missed_stack_run_mmb
+    missed_stack_run_mmb: get_missed_stack_run_mmb,
+    reportable_issue: get_issue_tracker_report
   };
 
-  let note = { dt };
+  let note = { dt_2 };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
@@ -161,20 +167,17 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt, report_type]
+      [dt_2, report_type]
     );
 
-    let note = { dt, user_report_schemas };
+    let note = { dt_2, user_report_schemas };
     await addLogEvent(I, run_log, "on_boot", det, note, null);
 
     const users_system_rpp_data = [];
 
-    console.log("\nuser_report_schemas");
-    console.log(user_report_schemas);
-
     for await (let users_report of user_report_schemas) {
       let rpp_data = await db.any(report_queries[report_type], [
-        dt,
+        dt_2,
         users_report.author
       ]);
 
@@ -216,7 +219,15 @@ async function on_boot() {
         report_type === "missed_stack_run_mmb" ||
         contains_issue
       ) {
-        matched_systems_list.push(...rpp_data);
+        if (report_type === "reportable_issue") {
+          for (let rpp of rpp_data) {
+            if (rpp.system_id === users_report.issue_system_id) {
+              matched_systems_list.push(rpp);
+            }
+          }
+        } else {
+          matched_systems_list.push(...rpp_data);
+        }
       } else {
         // matched_systems_list will now contain all matched objects, including duplicates based on system_id
         users_report.systems_list.forEach((sme) => {
@@ -241,6 +252,7 @@ async function on_boot() {
 
     const jobs = [];
     for await (let users_report_rpp_data of users_system_rpp_data) {
+      console.log(users_report_rpp_data);
       jobs.push(async () => await run_job(users_report_rpp_data, run_log));
     }
 
