@@ -46,9 +46,6 @@ const reportable_issue_report = async (run_log, job_id, user_reports) => {
       systems_list
     );
 
-    console.log("\nemail_text");
-    console.log(email_text);
-
     // 2) Build/Nest row text into full email
     const full_email = await build_full_email(
       run_log,
@@ -57,9 +54,6 @@ const reportable_issue_report = async (run_log, job_id, user_reports) => {
       report_meta_data.report_name,
       3
     );
-
-    console.log("\nfull_email");
-    console.log(full_email);
 
     // 3) Send Email
     const transporter = await build_transporter();

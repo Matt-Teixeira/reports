@@ -134,7 +134,7 @@ async function on_boot() {
   const report_type = process.argv[2];
 
   const dt = formatted_dt();
-  const dt_2 = "mon-08:00";
+  const dt_2 = "mon-11:00";
 
   const report_queries = {
     get_user_report_schemas,
@@ -159,7 +159,7 @@ async function on_boot() {
     reportable_issue: get_issue_tracker_report
   };
 
-  let note = { dt_2 };
+  let note = { dt };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
@@ -167,17 +167,17 @@ async function on_boot() {
   try {
     const user_report_schemas = await db.any(
       report_queries.get_user_report_schemas,
-      [dt_2, report_type]
+      [dt, report_type]
     );
 
-    let note = { dt_2, user_report_schemas };
+    let note = { dt, user_report_schemas };
     await addLogEvent(I, run_log, "on_boot", det, note, null);
 
     const users_system_rpp_data = [];
 
     for await (let users_report of user_report_schemas) {
       let rpp_data = await db.any(report_queries[report_type], [
-        dt_2,
+        dt,
         users_report.author
       ]);
 
@@ -220,9 +220,15 @@ async function on_boot() {
         contains_issue
       ) {
         if (report_type === "reportable_issue") {
+          let dup_list = [];
           for (let rpp of rpp_data) {
-            if (rpp.system_id === users_report.issue_system_id) {
+            let concat_key = `${rpp.system_id}-${rpp.report_name}`;
+            if (
+              rpp.system_id === users_report.issue_system_id &&
+              !dup_list.includes(concat_key)
+            ) {
               matched_systems_list.push(rpp);
+              dup_list.push(concat_key);
             }
           }
         } else {
