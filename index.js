@@ -15,7 +15,8 @@ const {
   issue_tracker_report,
   mmb_hhm_all_issue_tracker,
   missed_stack_run_mmb,
-  reportable_issue_report
+  reportable_issue_report,
+  unsuccessful_acqu_hhm_report
 } = require("./jobs");
 
 // TOOLS
@@ -46,7 +47,8 @@ const {
     get_issue_hhm_newer_than_30,
     get_disabled_alerts,
     get_missed_stack_run_mmb,
-    get_issue_tracker_report
+    get_issue_tracker_report,
+    get_unsuccessful_acqu_hhm
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -118,11 +120,21 @@ async function run_job(users_report_rpp_data, run_log) {
     case "mmb_issue_newer_30":
       await mmb_hhm_all_issue_tracker(run_log, job_id, users_report_rpp_data);
       break;
+    case "hhm_issue_newer_30":
+      await mmb_hhm_all_issue_tracker(run_log, job_id, users_report_rpp_data);
+      break;
     case "missed_stack_run_mmb":
       await missed_stack_run_mmb(run_log, job_id, users_report_rpp_data);
       break;
     case "reportable_issue":
       await reportable_issue_report(run_log, job_id, users_report_rpp_data);
+      break;
+    case "unsuccessful_acqu_hhm":
+      await unsuccessful_acqu_hhm_report(
+        run_log,
+        job_id,
+        users_report_rpp_data
+      );
       break;
     default:
       break;
@@ -134,7 +146,7 @@ async function on_boot() {
   const report_type = process.argv[2];
 
   const dt = formatted_dt();
-  const dt_2 = "mon-11:00";
+  const dt_2 = "mon-08:00";
 
   const report_queries = {
     get_user_report_schemas,
@@ -156,7 +168,8 @@ async function on_boot() {
     hhm_issue_newer_30: get_issue_hhm_newer_than_30,
     disabled_alerts: get_disabled_alerts,
     missed_stack_run_mmb: get_missed_stack_run_mmb,
-    reportable_issue: get_issue_tracker_report
+    reportable_issue: get_issue_tracker_report,
+    unsuccessful_acqu_hhm: get_unsuccessful_acqu_hhm
   };
 
   let note = { dt };
@@ -217,6 +230,7 @@ async function on_boot() {
         report_type === "conn_offline" ||
         report_type === "default_alerts" ||
         report_type === "missed_stack_run_mmb" ||
+        report_type === "unsuccessful_acqu_hhm" ||
         contains_issue
       ) {
         if (report_type === "reportable_issue") {
@@ -258,7 +272,6 @@ async function on_boot() {
 
     const jobs = [];
     for await (let users_report_rpp_data of users_system_rpp_data) {
-      console.log(users_report_rpp_data);
       jobs.push(async () => await run_job(users_report_rpp_data, run_log));
     }
 

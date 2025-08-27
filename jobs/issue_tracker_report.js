@@ -91,26 +91,3 @@ const issue_tracker_report = async (run_log, job_id, user_reports) => {
 };
 
 module.exports = issue_tracker_report;
-
-/* 
- matched_systems_list: [
-    {
-      system_id: 'SME00888',
-      notes: 'Machine does not ping locally',
-      diagnoses: 'CV does not ping locally maybe not in use changed ip or not used often',
-      created_at: 2024-01-04T15:09:19.132Z,
-      updated_at: 2024-01-04T15:10:38.165Z,
-      status: 'active',
-      report_id: '5f4936ed-b980-4d20-bd3e-721d1c3b5e2c'
-    },
-    {
-      system_id: 'SME01227',
-      notes: null,
-      diagnoses: null,
-      created_at: 2023-12-06T14:38:01.642Z,
-      updated_at: 2023-12-06T14:38:49.143Z,
-      status: 'removed',
-      report_id: '9de705da-0380-4c8b-b425-478ce91d494d'
-    },
-];
-*/

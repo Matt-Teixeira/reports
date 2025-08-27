@@ -190,9 +190,25 @@ const col_0_issue_tracker_report =
   '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{name}}</span>' +
   "</td>";
 
+const col_0_unsucc_acqu_hhm_report =
+  '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
+  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
+  "<br>" +
+  '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
+  "<br>" +
+  '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{name}}</span>' +
+  "</td>";
+
 const col_1_issue_tracker_report =
   '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Ticket Created At</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
+  "</td>";
+
+const col_1_unsucc_acqu_hhm_report =
+  '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Last Connected</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
   "</td>";
@@ -205,16 +221,36 @@ const col_2_issue_tracker_report =
   "</td>";
 ("</tr>");
 
+const col_2_unsucc_acqu_hhm_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Last Files Data Time</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
+  "</td>";
+("</tr>");
+
 const col_3_issue_tracker_report =
   '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Notes</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{notes}}</div>' +
   "</td>";
 
+const col_3_unsucc_acqu_hhm_report =
+  '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Error</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{connection_error}}</div>' +
+  "</td>";
+
 const col_4_issue_tracker_report =
   '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
   '<div class="top" style="color: #005b94; font-size: 16px;">Diagnoses</div>' +
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{diagnoses}}</div>' +
+  "</td>";
+
+const col_4_unsucc_acqu_hhm_report =
+  '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Host Intervention Needed</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{host_intervention}}</div>' +
   "</td>";
 
 const col_5_issue_tracker_report =
@@ -316,5 +352,10 @@ module.exports = {
   col_4_default_alert_report,
   col_4_issue_mmb_all_report,
   col_2_missed_stack_mmb,
-  col_2_reportable_issue
+  col_2_reportable_issue,
+  col_0_unsucc_acqu_hhm_report,
+  col_1_unsucc_acqu_hhm_report,
+  col_2_unsucc_acqu_hhm_report,
+  col_3_unsucc_acqu_hhm_report,
+  col_4_unsucc_acqu_hhm_report
 };
