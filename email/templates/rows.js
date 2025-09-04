@@ -313,6 +313,50 @@ const col_2_reportable_issue =
   '<div class="bot" style="color: darkgrey; font-size: 14px;">{{note}}</div>' +
   "</td>";
 
+  const col_0_new_system_enroll_report =
+  '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
+  '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
+  "<br>" +
+  '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
+  "<br>" +
+  '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{name}}</span>' +
+  "</td>";
+
+  const col_1_new_system_enroll_report =
+  '<td class="geo" style="border: none; text-align: left; vertical-align: center; width: 25%; padding: 10px 12px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">{{customer}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{name}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{city}} · {{state}}</div>' +
+  "</td>";
+
+  const col_2_new_system_enroll_report =
+  '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Show on Website</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
+  "</td>";
+
+  const col_3_new_system_enroll_report =
+  '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Start: Process Mag</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
+  "</td>";
+
+  const col_4_new_system_enroll_report =
+  '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Start: Process Log</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
+  "</td>";
+
+  const col_5_new_system_enroll_report =
+  '<td class="geo" style="border: none; text-align: left; margin-left: 20px; vertical-align: center; width: 25%; padding: 10px 1px;" width="25%" align="center" valign="middle">' +
+  '<div class="top" style="color: #005b94; font-size: 16px;">Start: Process EDU</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{time}}</div>' +
+  '<div class="bot" style="color: darkgrey; font-size: 14px;">{{date}}</div>' +
+  "</td>";
+
 module.exports = {
   col_0_alert,
   col_0_report,
@@ -357,5 +401,11 @@ module.exports = {
   col_1_unsucc_acqu_hhm_report,
   col_2_unsucc_acqu_hhm_report,
   col_3_unsucc_acqu_hhm_report,
-  col_4_unsucc_acqu_hhm_report
+  col_4_unsucc_acqu_hhm_report,
+  col_0_new_system_enroll_report,
+  col_1_new_system_enroll_report,
+  col_2_new_system_enroll_report,
+  col_3_new_system_enroll_report,
+  col_4_new_system_enroll_report,
+  col_5_new_system_enroll_report
 };

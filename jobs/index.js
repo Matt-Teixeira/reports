@@ -12,6 +12,7 @@ const mmb_hhm_all_issue_tracker = require("./mmb_all_issue_tracker");
 const missed_stack_run_mmb = require("./missed_stack_run_mmb");
 const reportable_issue_report = require("./reportable_issue_report");
 const unsuccessful_acqu_hhm_report = require("./unsuccessful_acqu_hhm_report");
+const new_online_systems = require("./new_online_systems");
 
 module.exports = {
   helium_level_report,
@@ -27,5 +28,6 @@ module.exports = {
   mmb_hhm_all_issue_tracker,
   missed_stack_run_mmb,
   reportable_issue_report,
-  unsuccessful_acqu_hhm_report
+  unsuccessful_acqu_hhm_report,
+  new_online_systems
 };

@@ -12,6 +12,7 @@ const build_mmb_hhm_all_issue_text = require("./build_mmb_hhm_all_issue_text");
 const build_missed_stack_mmb = require("./build_missed_stack_mmb.js");
 const build_reportable_issue = require("./build_reportable_issue.js");
 const build_unsucc_acqu_hhm_text = require("./build_unsucc_acqu_hhm_text.js");
+const build_new_systems_text = require("./build_new_systems_text.js");
 
 module.exports = {
   formatted_dt,
@@ -27,5 +28,6 @@ module.exports = {
   build_mmb_hhm_all_issue_text,
   build_missed_stack_mmb,
   build_reportable_issue,
-  build_unsucc_acqu_hhm_text
+  build_unsucc_acqu_hhm_text,
+  build_new_systems_text
 };

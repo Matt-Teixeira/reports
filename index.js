@@ -16,7 +16,8 @@ const {
   mmb_hhm_all_issue_tracker,
   missed_stack_run_mmb,
   reportable_issue_report,
-  unsuccessful_acqu_hhm_report
+  unsuccessful_acqu_hhm_report,
+  new_online_systems
 } = require("./jobs");
 
 // TOOLS
@@ -48,7 +49,8 @@ const {
     get_disabled_alerts,
     get_missed_stack_run_mmb,
     get_issue_tracker_report,
-    get_unsuccessful_acqu_hhm
+    get_unsuccessful_acqu_hhm,
+    get_new_online_systems
   }
 } = require("./utils/db/sql/sql");
 const { v4: uuidv4 } = require("uuid");
@@ -136,6 +138,9 @@ async function run_job(users_report_rpp_data, run_log) {
         users_report_rpp_data
       );
       break;
+    case "new_online_systems":
+      await new_online_systems(run_log, job_id, users_report_rpp_data);
+      break;
     default:
       break;
   }
@@ -169,7 +174,8 @@ async function on_boot() {
     disabled_alerts: get_disabled_alerts,
     missed_stack_run_mmb: get_missed_stack_run_mmb,
     reportable_issue: get_issue_tracker_report,
-    unsuccessful_acqu_hhm: get_unsuccessful_acqu_hhm
+    unsuccessful_acqu_hhm: get_unsuccessful_acqu_hhm,
+    new_online_systems: get_new_online_systems
   };
 
   let note = { dt };
@@ -227,6 +233,7 @@ async function on_boot() {
       // The conn_offline & default_alerts reports will not have a systems list associated with the user report model. Internal reporting
       const contains_issue = report_type.includes("issue");
       if (
+        report_type === "new_online_systems" ||
         report_type === "conn_offline" ||
         report_type === "default_alerts" ||
         report_type === "missed_stack_run_mmb" ||
