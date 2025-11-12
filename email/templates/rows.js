@@ -26,6 +26,7 @@ const col_0_alert =
 
 const col_0_report =
   '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
+  '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{cus_sys_id}}</span>' +
   '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
   "<br>" +
   '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +
@@ -42,6 +43,7 @@ const col_0_conn_report =
 
 const col_0_72_hr_report =
   '<tr class="data-row" style="background-color: white; border-bottom: none;" bgcolor="white">' +
+  '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{cus_sys_id}}</span>' +
   '<td class="link" style="border: none; text-align: left; vertical-align: middle; min-width: 100px; padding: 10px 24px;" align="center" valign="middle"><a href="{{view_link}}" style="padding: 2px 6px; border-radius: 6px; text-decoration: none; color: #005b94; background-color: #E4F7FF;">{{system_id}}</a>' +
   "<br>" +
   '<span class="bot" style="color: darkgrey; font-size: 14px; margin-top: 2px;">{{manufacturer}} · {{modality}}</span>' +

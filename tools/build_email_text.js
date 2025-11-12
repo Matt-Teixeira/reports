@@ -51,6 +51,7 @@ const build_email_text = async (
       const col_0_1_data = {
         view_link: link,
         system_id: rpp_data.system_id,
+        cus_sys_id: rpp_data.cus_sys_id,
         manufacturer: rpp_data.manufacturer,
         modality: rpp_data.modality,
         time: dt_ny.toFormat("t ZZZZ"), // 9:07 AM EST,

@@ -51,6 +51,7 @@ const build_72_hr_text = async (
       const col_0_data = {
         view_link: link,
         system_id: rpp_data.system_id,
+        cus_sys_id: rpp_data.cus_sys_id,
         manufacturer: rpp_data.manufacturer,
         modality: rpp_data.modality,
         model: rpp_data.model

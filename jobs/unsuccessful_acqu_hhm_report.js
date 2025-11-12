@@ -1,8 +1,6 @@
 const {
-  build_email_text,
   build_unsucc_acqu_hhm_text,
   build_full_email,
-  sort_by_manufacturer
 } = require("../tools");
 const build_transporter = require("../email/build-transporter");
 const send_email = require("../email/send_email");

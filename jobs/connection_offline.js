@@ -1,5 +1,4 @@
 const {
-  build_email_text,
   build_conn_offline_text,
   build_full_email,
   sort_by_manufacturer
