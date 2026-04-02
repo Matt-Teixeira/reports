@@ -17,7 +17,10 @@ const {
   missed_stack_run_mmb,
   reportable_issue_report,
   unsuccessful_acqu_hhm_report,
-  new_online_systems
+  new_online_systems,
+  inspect_board,
+  get_board_info,
+  create_row
 } = require("./jobs");
 
 // TOOLS
@@ -141,6 +144,11 @@ async function run_job(users_report_rpp_data, run_log) {
     case "new_online_systems":
       await new_online_systems(run_log, job_id, users_report_rpp_data);
       break;
+    case "monday":
+      // await inspect_board();
+      await get_board_info();
+      // await create_row();
+      break;
     default:
       break;
   }
@@ -149,6 +157,13 @@ async function run_job(users_report_rpp_data, run_log) {
 async function on_boot() {
   // GET PROCESS ARG TO DETERMIN REPORT TYPE FOR QUERY
   const report_type = process.argv[2];
+
+  if (report_type === "monday") {
+    let users_report_rpp_data = {
+      field_name: "monday"
+    };
+    await run_job(users_report_rpp_data, null);
+  }
 
   const dt = formatted_dt();
   const dt_2 = "mon-08:00";
