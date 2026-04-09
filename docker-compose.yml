@@ -1,0 +1,53 @@
+# no "version" key
+
+x-common-env: &common_env
+# Load environment variables from .env in the project root
+  env_file:
+    - .env
+
+  # Allow containers to reach services on the host via this hostname
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+  # Runtime env vars
+  environment:
+    # Don't write into root's $HOME inside the image; use a tmp home
+    HOME: /tmp
+
+    # Keep npm's cache ephemeral (avoids permission issues on bind mounts)
+    NPM_CONFIG_CACHE: /tmp/.npm
+
+x-common-mounts: &common_mounts
+  working_dir: /workspace
+  volumes:
+  # --- Bind mounts (host paths must exist) ---
+
+    # 1) Project source → live edit on host reflects in container
+    - ./:/workspace
+
+    # 2) Cache node_modules on host (survives container removal)
+    - /opt/resources/node_mod_cache/reports:/workspace/node_modules
+
+    # 3) Centralized run logs on host
+    - /opt/run-logs/reports:/opt/run-logs/reports
+
+# ---------- Services ----------
+services:
+  app:
+    image: reports:svc
+    <<: [*common_env, *common_mounts]
+    environment:
+      RUN_USER: ${RUN_USER:-svc}
+      HOME: /tmp
+      NPM_CONFIG_CACHE: /tmp/.npm
+      # Local PG container overrides
+      PGHOST: pg_db
+      PGPORT: "5432"
+      PG_SSLMODE: disable
+    networks:
+      - pg_net
+
+# Declare external networks
+networks:
+  pg_net:
+    external: true
