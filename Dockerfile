@@ -7,11 +7,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends gosu \
  && rm -rf /var/lib/apt/lists/*
 
-# Create docker group (GID 990 matches host)
-RUN groupadd -g 990 docker
+# Create docker group (GID 987 matches host)
+RUN groupadd -g 987 docker
 
-# Create svc user (UID 104 matches host)
-RUN useradd -u 104 -g docker -m -d /home/svc -s /bin/bash svc
+# Create svc user (UID 105 matches host)
+RUN useradd -u 105 -g docker -m -d /home/svc -s /bin/bash svc
 
 # Cooperative umask for all shells
 RUN printf 'umask ${UMASK:-0002}\n' > /etc/profile.d/umask.sh \

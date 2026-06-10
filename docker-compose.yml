@@ -34,7 +34,7 @@ x-common-mounts: &common_mounts
 # ---------- Services ----------
 services:
   app:
-    image: reports:svc
+    image: aux:staging
     <<: [*common_env, *common_mounts]
     environment:
       RUN_USER: ${RUN_USER:-svc}
@@ -43,7 +43,7 @@ services:
       # Local PG container overrides
       PGHOST: pg_db
       PGPORT: "5432"
-      PG_SSLMODE: disable
+      PG_SSLMODE: require
     networks:
       - pg_net
 
