@@ -31,6 +31,9 @@ x-common-mounts: &common_mounts
     # 3) Centralized run logs on host
     - /opt/run-logs/reports:/opt/run-logs/reports
 
+    # 4) Shared PG SSL cert (read-only) — required by PG_SSLMODE=verify-full
+    - /opt/resources/ssl:/opt/resources/ssl:ro
+
 # ---------- Services ----------
 services:
   app:
@@ -43,7 +46,10 @@ services:
       # Local PG container overrides
       PGHOST: pg_db
       PGPORT: "5432"
-      PG_SSLMODE: require
+      # verify-full: CA-verified TLS with hostname check (cert SAN covers pg_db).
+      # pg-pool.js fails closed if the CA at PG_SSL_PATH is missing.
+      PG_SSLMODE: verify-full
+      PG_SSL_PATH: /opt/resources/ssl/pg_ssl.crt
     networks:
       - pg_net
 
