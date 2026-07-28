@@ -11,3 +11,4 @@ FROM
 WHERE
     email_schedule ->> $1 = 'true'
     AND field_name = $2;
+    --AND author = 'matt.teixeira@avantehs.com';
