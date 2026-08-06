@@ -139,7 +139,7 @@ const fallback_thresholds = (vendor) => ({
     med_lt: null,
     source: "oem_constant"
   },
-  helium: { low_high: null, low_med: null }
+  helium: { low_high: null, low_med: null, units: null }
 });
 
 // systems.manufacturer is free text ("Philips", "GE Medical", ...); match loosely.

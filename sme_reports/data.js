@@ -205,7 +205,7 @@ const fetch_thresholds = async (system_id, vendor) => {
     med_lt: null,
     source: "default_models"
   };
-  const he = { low_high: null, low_med: null };
+  const he = { low_high: null, low_med: null, units: null };
 
   const keep_min = (cur, v) => (cur === null ? v : Math.min(cur, v));
   const keep_max = (cur, v) => (cur === null ? v : Math.max(cur, v));
@@ -223,6 +223,7 @@ const fetch_thresholds = async (system_id, vendor) => {
         else p.med_lt = keep_max(p.med_lt, v);
       }
     } else if (r.operator === "less_than") {
+      if (r.threshold_units) he.units = r.threshold_units;
       if (r.severity === "high") he.low_high = keep_max(he.low_high, v);
       else he.low_med = keep_max(he.low_med, v);
     }

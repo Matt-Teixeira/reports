@@ -16,6 +16,16 @@ const he_sfx = (facts) =>
 const comp_via = (facts) =>
   facts.compressor_source === "edu_comp_vib" ? " (per EDU vibration sensor)" : "";
 
+// Single-reading dropouts with no thermal response are reported as probable
+// sensor flickers, not treated as true compressor stops.
+const flicker_sentence = (facts) => {
+  const fl = facts.compressor_flickers;
+  if (!fl) return "";
+  const listed = fl.times.slice(0, 3).map(fmt.ts).join(", ");
+  const more = fl.times.length > 3 ? `, +${fl.times.length - 3} more` : "";
+  return ` The compressor signal dropped for a single reading ${fl.count === 1 ? "once" : `${fl.count} times`} (${listed}${more}) with no ${p_name(facts).toLowerCase()} response — <b>likely sensor flicker${fl.count === 1 ? "" : "s"}, not true stops</b>.`;
+};
+
 const baseline_sentence = (facts) => {
   const p = facts.pressure;
   const he = facts.helium;
@@ -111,8 +121,8 @@ const STORIES = {
     return (
       `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
       `<b>${fmt.ts(ev.start)}: the compressor stopped</b>${comp_via(f)}${cycles}.${alarm_sentence(f)} ` +
-      `${peak_sentence(f)} <b>The compressor recovered ${fmt.ts(ev.end)}</b> and has held since. ` +
-      `${helium_sentence(f)} ${now_sentence(f)}`
+      `${peak_sentence(f)} <b>The compressor recovered ${fmt.ts(ev.end)}</b> and has held since.` +
+      `${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
     );
   },
   compressor_stop_ongoing: (f) => {
@@ -126,13 +136,13 @@ const STORIES = {
   },
   threshold_exceeded: (f) =>
     `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop was detected in the window, but ` +
-    `${peak_sentence(f)}${alarm_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`,
+    `${peak_sentence(f)}${alarm_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`,
   pressure_rising: (f) =>
-    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop and no threshold breach in the window, but pressure is trending up: ` +
-    `${peak_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`,
+    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop and no threshold breach in the window, but ${p_name(f).toLowerCase()} is trending up: ` +
+    `${peak_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`,
   stable_healthy: (f) =>
     `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor events, alarms, or threshold breaches detected across ` +
-    `${fmt.count(f.counts.captures)} captures. ${helium_sentence(f)} ${now_sentence(f)}`
+    `${fmt.count(f.counts.captures)} captures.${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
 };
 
 const build_cards = (f) => {

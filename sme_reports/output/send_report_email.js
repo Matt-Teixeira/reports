@@ -1,5 +1,6 @@
 const path = require("path");
 const build_transporter = require("../../email/build-transporter");
+const send_with_retry = require("./send_with_retry");
 
 const [addLogEvent] = require("../../utils/logger/log");
 const {
@@ -30,7 +31,7 @@ const send_report_email = async (run_log, job_id, request, identity, pdf_path) =
 
   const transporter = await build_transporter();
   try {
-    const info = await transporter.sendMail(message);
+    const info = await send_with_retry(transporter, message);
     const note = {
       job_id,
       system_id: identity.system_id,

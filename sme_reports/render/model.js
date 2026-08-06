@@ -5,7 +5,9 @@ const {
   chart_points
 } = require("../compute/series");
 const {
-  detect_compressor_event,
+  find_off_runs,
+  build_compressor_event,
+  classify_compressor_runs,
   detect_temp_alarm,
   detect_quench
 } = require("../compute/events");
@@ -62,8 +64,18 @@ const build_render_model = ({
           .filter((r) => r.comp_vib !== null)
           .map((r) => ({ t: r.t, compressor_on: r.comp_vib }))
       : rows;
+  // Split single-reading, thermally-uncorroborated dropouts (sensor
+  // flickers) from real stops; only real runs form the event.
+  const { real_runs, flicker_runs } = classify_compressor_runs(
+    find_off_runs(compressor_rows),
+    p_points,
+    { response_epsilon: thr.high_gt !== null ? thr.high_gt * 0.02 : null }
+  );
   const compressor_event =
-    request.event_window || detect_compressor_event(compressor_rows);
+    request.event_window || build_compressor_event(real_runs);
+  const compressor_flickers = flicker_runs.length
+    ? { count: flicker_runs.length, times: flicker_runs.map((r) => r.start) }
+    : null;
   const temp_alarm = detect_temp_alarm(rows);
   const quenched = detect_quench(rows);
   const pressure = metric_facts(p_points, compressor_event);
@@ -125,6 +137,7 @@ const build_render_model = ({
     room_temp,
     edu: edu_facts,
     compressor_source: vendor.compressor.source,
+    compressor_flickers,
     last_compressor_on: stateful.length
       ? stateful[stateful.length - 1].compressor_on
       : null,

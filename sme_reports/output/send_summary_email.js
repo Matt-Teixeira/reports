@@ -1,4 +1,5 @@
 const build_transporter = require("../../email/build-transporter");
+const send_with_retry = require("./send_with_retry");
 
 const [addLogEvent] = require("../../utils/logger/log");
 const {
@@ -75,7 +76,7 @@ const send_summary_email = async (run_log, job_id, batch_email, results, failure
 
   const transporter = await build_transporter();
   try {
-    const info = await transporter.sendMail(message);
+    const info = await send_with_retry(transporter, message);
     const note = {
       job_id,
       to: message.to,

@@ -51,6 +51,7 @@ const he_suffix = (units) => (units === "%" ? "%" : ` ${units}`);
 const BUILDERS = {
   compressor: (f) => {
     const ev = f.compressor_event;
+    const fl = f.compressor_flickers;
     if (!ev) {
       const on = f.last_compressor_on;
       return {
@@ -60,7 +61,9 @@ const BUILDERS = {
         s:
           on === false
             ? "off at last reading"
-            : "running continuously through the window"
+            : fl
+              ? `running · ${fl.count} brief dropout${fl.count === 1 ? "" : "s"} — likely sensor flicker${fl.count === 1 ? "" : "s"}`
+              : "running continuously through the window"
       };
     }
     if (ev.end === null)
@@ -179,15 +182,19 @@ const BUILDERS = {
     if (f.quenched)
       return { cls: "bad", k: "HELIUM", v: value, s: "QUENCH detected in window" };
     const delta = he.delta_vs_baseline;
-    // Per-system low-helium thresholds from alert.models defaults, when set.
-    if (f.he_thr.low_high !== null && he.last.v < f.he_thr.low_high)
+    // Per-system low-helium thresholds from alert.models defaults — applied
+    // only when the model's units match the display units (a % threshold is
+    // meaningless against an LTRS reading).
+    const he_thr_applies =
+      f.he_thr.units === null || f.he_thr.units === f.units.helium;
+    if (he_thr_applies && f.he_thr.low_high !== null && he.last.v < f.he_thr.low_high)
       return {
         cls: "bad",
         k: "HELIUM",
         v: value,
         s: `below the ${f.he_thr.low_high}${he_suffix(f.units.helium)} alert level`
       };
-    if (f.he_thr.low_med !== null && he.last.v < f.he_thr.low_med)
+    if (he_thr_applies && f.he_thr.low_med !== null && he.last.v < f.he_thr.low_med)
       return {
         cls: "warn",
         k: "HELIUM",

@@ -9,6 +9,8 @@ const {
   clean_series
 } = require("../compute/series");
 const {
+  find_off_runs,
+  classify_compressor_runs,
   detect_compressor_event,
   detect_temp_alarm,
   detect_quench
@@ -63,6 +65,48 @@ const row = (h, over = {}) => ({
   const ev = detect_compressor_event(s);
   assert.strictEqual(ev.end, null, "open event when series ends off");
   assert.strictEqual(detect_compressor_event([row(0), row(1)]), null, "no event when always on");
+}
+
+// --- flicker classification -------------------------------------------------
+{
+  // Two single-reading dropouts + one 3-reading run; metric flat except a
+  // real rise after the second single dropout (corroborated -> real).
+  const s = [
+    row(0),
+    row(1, { compressor_on: false }), // flicker candidate 1 — no response
+    row(2),
+    row(3),
+    row(4, { compressor_on: false }), // candidate 2 — metric responds -> real
+    row(5),
+    row(6, { compressor_on: false }),
+    row(7, { compressor_on: false }),
+    row(8, { compressor_on: false }), // 3-reading run -> real by length
+    row(9)
+  ];
+  const metric = s.map((r, i) => ({
+    t: r.t,
+    v: i === 5 ? 50 : 30 // rise within lag of candidate 2 only
+  }));
+  const { real_runs, flicker_runs } = classify_compressor_runs(
+    find_off_runs(s),
+    metric,
+    { response_epsilon: 2 }
+  );
+  assert.strictEqual(flicker_runs.length, 1, "one uncorroborated flicker");
+  assert.strictEqual(flicker_runs[0].start, T0 + 1 * HOUR);
+  assert.strictEqual(real_runs.length, 2, "corroborated + long runs are real");
+
+  // Trailing single dropout (no recovery) is never a flicker.
+  const tail = [row(0), row(1), row(2, { compressor_on: false })];
+  const c = classify_compressor_runs(find_off_runs(tail), metric, {
+    response_epsilon: 2
+  });
+  assert.strictEqual(c.real_runs.length, 1, "trailing dropout treated as real");
+  assert.strictEqual(c.flicker_runs.length, 0);
+
+  // No epsilon (no threshold configured): short runs default to flicker.
+  const d = classify_compressor_runs(find_off_runs(s), [], {});
+  assert.strictEqual(d.flicker_runs.length, 2, "no corroboration data -> both short runs flicker");
 }
 
 // --- temp alarm / quench ----------------------------------------------------
