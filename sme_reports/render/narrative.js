@@ -8,8 +8,13 @@ const fmt = require("./fmt");
 const p_fmt = (facts, v) => fmt.num(v, facts.vendor.pressure.decimals);
 const units = (facts) => facts.units.pressure;
 const thr = (facts) => facts.thr.high_gt;
+// Display name of the primary escalation metric ("He pressure", "Shield temp")
+const p_name = (facts) => facts.vendor.primary.name;
 const he_sfx = (facts) =>
   facts.units.helium === "%" ? "%" : ` ${facts.units.helium}`;
+// Compressor state inferred from the EDU vibration sensor gets called out.
+const comp_via = (facts) =>
+  facts.compressor_source === "edu_comp_vib" ? " (per EDU vibration sensor)" : "";
 
 const baseline_sentence = (facts) => {
   const p = facts.pressure;
@@ -17,7 +22,7 @@ const baseline_sentence = (facts) => {
   const parts = [];
   if (p && p.baseline)
     parts.push(
-      `pressure held ${p_fmt(facts, p.baseline.min.v)}–${p_fmt(facts, p.baseline.max.v)} ${units(facts)}`
+      `${p_name(facts).toLowerCase()} held ${p_fmt(facts, p.baseline.min.v)}–${p_fmt(facts, p.baseline.max.v)} ${units(facts)}`
     );
   if (he && he.baseline)
     parts.push(
@@ -42,7 +47,7 @@ const peak_sentence = (facts) => {
     p.rate_per_hr !== null
       ? ` (${fmt.signed(p.rate_per_hr, facts.vendor.pressure.decimals)} ${units(facts)}/h avg on the ramp)`
       : "";
-  return `He pressure rose from ${p_fmt(facts, p.baseline_value)} to a <b>peak of ${p_fmt(facts, p.peak.v)} ${units(facts)} at ${fmt.ts(p.peak.t)}</b> — ${vs}${rate}.`;
+  return `${p_name(facts)} rose from ${p_fmt(facts, p.baseline_value)} to a <b>peak of ${p_fmt(facts, p.peak.v)} ${units(facts)} at ${fmt.ts(p.peak.t)}</b> — ${vs}${rate}.`;
 };
 
 const helium_sentence = (facts) => {
@@ -66,14 +71,14 @@ const now_sentence = (facts) => {
         : p.last.v <= facts.thr.high_lt
           ? `below the ${band} band`
           : `within the ${band} band`;
-    return `Pressure now reads ${p_fmt(facts, p.last.v)} ${units(facts)} (${fmt.ts(p.last.t)}) — ${state}.`;
+    return `${p_name(facts)} now reads ${p_fmt(facts, p.last.v)} ${units(facts)} (${fmt.ts(p.last.t)}) — ${state}.`;
   }
   const over = p.last.v - thr(facts);
   const vs =
     over >= 0
       ? `still ${p_fmt(facts, over)} ${units(facts)} over the line`
       : `${Math.round((p.last.v / thr(facts)) * 100)}% of the line`;
-  return `Pressure now reads ${p_fmt(facts, p.last.v)} ${units(facts)} (${fmt.ts(p.last.t)}) — ${vs}.`;
+  return `${p_name(facts)} now reads ${p_fmt(facts, p.last.v)} ${units(facts)} (${fmt.ts(p.last.t)}) — ${vs}.`;
 };
 
 const alarm_sentence = (facts) => {
@@ -105,7 +110,7 @@ const STORIES = {
         : ` and stayed off ${fmt.hours(ev.off_hours)} (${ev.off_count} readings off)`;
     return (
       `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
-      `<b>${fmt.ts(ev.start)}: the compressor stopped</b>${cycles}.${alarm_sentence(f)} ` +
+      `<b>${fmt.ts(ev.start)}: the compressor stopped</b>${comp_via(f)}${cycles}.${alarm_sentence(f)} ` +
       `${peak_sentence(f)} <b>The compressor recovered ${fmt.ts(ev.end)}</b> and has held since. ` +
       `${helium_sentence(f)} ${now_sentence(f)}`
     );
@@ -114,7 +119,7 @@ const STORIES = {
     const ev = f.compressor_event;
     return (
       `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
-      `<b>${fmt.ts(ev.start)}: the compressor stopped and has not recovered</b> — off ${fmt.hours(ev.off_hours)} at the last capture (${ev.off_count} readings off).${alarm_sentence(f)} ` +
+      `<b>${fmt.ts(ev.start)}: the compressor stopped and has not recovered</b>${comp_via(f)} — off ${fmt.hours(ev.off_hours)} at the last capture (${ev.off_count} readings off).${alarm_sentence(f)} ` +
       `${peak_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)} ` +
       `<b>Warming event OPEN at end of data.</b>`
     );
@@ -142,7 +147,7 @@ const build_cards = (f) => {
   }
   if (p)
     current.push(
-      `He pressure ${p_fmt(f, p.last.v)} ${units(f)} (${fmt.time(p.last.t)})`
+      `${p_name(f)} ${p_fmt(f, p.last.v)} ${units(f)} (${fmt.time(p.last.t)})`
     );
   if (he)
     current.push(
@@ -152,7 +157,7 @@ const build_cards = (f) => {
   const rates = [];
   if (p) {
     rates.push(
-      `Pressure ${fmt.signed(p.last.v - p.baseline_value, f.vendor.pressure.decimals)} ${units(f)} vs baseline (${p_fmt(f, p.baseline_value)} → ${p_fmt(f, p.last.v)}); peak ${p_fmt(f, p.peak.v)}.`
+      `${p_name(f)} ${fmt.signed(p.last.v - p.baseline_value, f.vendor.pressure.decimals)} ${units(f)} vs baseline (${p_fmt(f, p.baseline_value)} → ${p_fmt(f, p.last.v)}); peak ${p_fmt(f, p.peak.v)}.`
     );
     // A ramp rate is only meaningful against an event window.
     if (p.rate_per_hr !== null && f.compressor_event)

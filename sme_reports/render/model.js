@@ -54,8 +54,16 @@ const build_render_model = ({
   const p_points = metric_points(rows, "pressure");
   const he_points = metric_points(rows, "helium");
 
+  // Compressor state normally rides on the mag rows; vendors flagged
+  // edu_comp_vib (Siemens non-TIM) read the EDU vibration sensor instead.
+  const compressor_rows =
+    vendor.compressor.source === "edu_comp_vib"
+      ? edu
+          .filter((r) => r.comp_vib !== null)
+          .map((r) => ({ t: r.t, compressor_on: r.comp_vib }))
+      : rows;
   const compressor_event =
-    request.event_window || detect_compressor_event(rows);
+    request.event_window || detect_compressor_event(compressor_rows);
   const temp_alarm = detect_temp_alarm(rows);
   const quenched = detect_quench(rows);
   const pressure = metric_facts(p_points, compressor_event);
@@ -83,9 +91,23 @@ const build_render_model = ({
     );
   }
 
+  // Cabinet temperature (Siemens non-TIM) judged against its own
+  // system-reported warn/alarm levels carried on each row.
+  const cab_stats = stats_for(metric_points(rows, "cab_temp"));
+  const last_cab_row = [...rows]
+    .reverse()
+    .find((r) => r.cab_warn != null || r.cab_alarm != null);
+  const cabinet = cab_stats
+    ? {
+        ...cab_stats,
+        warn: last_cab_row ? last_cab_row.cab_warn : null,
+        alarm: last_cab_row ? last_cab_row.cab_alarm : null
+      }
+    : null;
+
   const window_start = request.window.start.toMillis();
   const window_end = request.window.end.toMillis();
-  const stateful = rows.filter((r) => r.compressor_on !== null);
+  const stateful = compressor_rows.filter((r) => r.compressor_on !== null);
   const facts = {
     vendor,
     thr,
@@ -99,8 +121,10 @@ const build_render_model = ({
     pressure,
     helium,
     coldhead,
+    cabinet,
     room_temp,
     edu: edu_facts,
+    compressor_source: vendor.compressor.source,
     last_compressor_on: stateful.length
       ? stateful[stateful.length - 1].compressor_on
       : null,
@@ -118,17 +142,18 @@ const build_render_model = ({
 
   // Threshold line(s): single OEM-style line, or high+low pair for
   // band-alerted metrics (Siemens absolute PSIA).
+  const alert_prefix = vendor.key.split("_")[0]; // SIEMENS_NON_TIM -> SIEMENS
   const threshold_lines = [];
   if (thr.high_gt !== null)
     threshold_lines.push({
       value: thr.high_gt,
-      label: `${vendor.key} ALERT — ${thr.high_lt !== null ? ">" : ""}${thr.high_gt} ${units.pressure}`
+      label: `${alert_prefix} ALERT — ${thr.high_lt !== null ? ">" : ""}${thr.high_gt} ${units.pressure}`
     });
   if (thr.high_lt !== null)
     threshold_lines.push({
       value: thr.high_lt,
       // &lt; — a literal "<" inside SVG text is unsafe markup
-      label: `${vendor.key} ALERT — &lt;${thr.high_lt} ${units.pressure}`
+      label: `${alert_prefix} ALERT — &lt;${thr.high_lt} ${units.pressure}`
     });
 
   // Pressure chart markers: peak is red when breaching, orange otherwise;
@@ -155,7 +180,12 @@ const build_render_model = ({
     pressure_chart_svg = render_timeseries_chart({
       points: chart_points(p_points, mode),
       x_domain,
-      y_spec: pressure_domain(pressure.all.min.v, pressure.all.max.v, thr),
+      y_spec: pressure_domain(
+        pressure.all.min.v,
+        pressure.all.max.v,
+        thr,
+        vendor.primary.zero_anchor
+      ),
       y_format: (v) => `${Number.isInteger(v) ? v : v.toFixed(1)}`,
       event_window: compressor_event,
       thresholds: threshold_lines,
@@ -230,7 +260,7 @@ const build_render_model = ({
       .filter(Boolean)
       .join(" · "),
     tiles: build_tiles(facts),
-    pressure_heading: `HE PRESSURE — ${win_span_caps}`,
+    pressure_heading: `${vendor.primary.heading} — ${win_span_caps}`,
     pressure_heading_note: `(${mode_desc}, ${units.pressure}${orange})`,
     pressure_chart_svg,
     helium_heading: `HELIUM LEVEL — ${win_span_caps}`,

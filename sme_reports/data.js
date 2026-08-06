@@ -5,13 +5,14 @@ const {
   ge_mm3_series,
   ge_mm4_series,
   siemens_series,
+  siemens_non_tim_series,
   get_default_thresholds,
   get_mag_routing,
   units_queries,
   edu_config,
   edu_series
 } = require("./sql/sql");
-const { resolve_vendor, fallback_thresholds } = require("./vendors");
+const { VENDORS, resolve_vendor, fallback_thresholds } = require("./vendors");
 
 // Fetches system identity + vendor time series and normalizes vendor rows to
 // one canonical shape so everything downstream is vendor-agnostic:
@@ -40,6 +41,27 @@ const normalize_philips = (rows, vendor) =>
       quenched: num(r.quenched_state) === 1
     };
   });
+
+const normalize_siemens_non_tim = (rows) =>
+  rows.map((r) => ({
+    t: ms(r.capture_datetime),
+    host_t: ms(r.host_datetime),
+    // Primary-metric slot: non-TIM has no pressure channel; shield
+    // temperature is the warm-event signal (see vendors.SIEMENS_NON_TIM).
+    pressure: num(r.shield_temp_value),
+    pressure_avg: null,
+    helium: num(r.he_level_1_value),
+    compressor_on: null, // comes from the EDU vibration sensor, not mag data
+    coldhead_k: null,
+    shield_k: num(r.shield_temp_value),
+    cab_temp: num(r.cca_cab_temp_value),
+    cab_warn: num(r.cca_cab_temp_warn_value),
+    cab_alarm: num(r.cca_cab_temp_alarm_value),
+    temp_alarm: null,
+    temp_alarm_minutes: null,
+    room_temp_c: null,
+    quenched: null
+  }));
 
 const normalize_siemens = (rows) =>
   rows.map((r) => {
@@ -100,13 +122,29 @@ const fetch_mag_routing = async (system_id) => {
   return rows.flatMap((r) => r.pg_tables || []);
 };
 
-const fetch_series = async (identity, window) => {
-  const vendor = resolve_vendor(identity.manufacturer);
-  if (!vendor)
+// Resolves the concrete vendor for a system: manufacturer string first, then
+// config.mag routing to split Siemens TIM vs non-TIM. Returned routing is
+// reused by fetch_series to pick GE tables.
+const resolve_system_vendor = async (identity) => {
+  const base = resolve_vendor(identity.manufacturer);
+  if (!base)
     throw new Error(
       `unsupported manufacturer "${identity.manufacturer}" for ${identity.system_id} (PHILIPS, GE, SIEMENS)`
     );
+  if (base.key === "GE" || base.key === "SIEMENS") {
+    const routing = await fetch_mag_routing(identity.system_id);
+    if (
+      base.key === "SIEMENS" &&
+      routing.includes("mmb_siemens_non_tim") &&
+      !routing.includes("mmb_siemens")
+    )
+      return { vendor: VENDORS.SIEMENS_NON_TIM, routing };
+    return { vendor: base, routing };
+  }
+  return { vendor: base, routing: [] };
+};
 
+const fetch_series = async (identity, window, vendor, routing = []) => {
   const params = [
     identity.system_id,
     window.start.toISO(),
@@ -115,11 +153,12 @@ const fetch_series = async (identity, window) => {
 
   let rows;
   let source;
+  let series;
   if (vendor.key === "PHILIPS") {
     rows = await db.any(philips_series, params);
     source = "mag.philips_mri_monitoring_data_agg";
+    series = normalize_philips(rows, vendor);
   } else if (vendor.key === "GE") {
-    const routing = await fetch_mag_routing(identity.system_id);
     if (routing.includes("mmb_ge_mm3") && !routing.includes("mmb_ge_mm4")) {
       rows = await db.any(ge_mm3_series, params);
       source = "mag.ge_mm3";
@@ -135,25 +174,16 @@ const fetch_series = async (identity, window) => {
         source = "mag.ge_mm3";
       }
     }
+    series = normalize_ge(rows, vendor);
+  } else if (vendor.key === "SIEMENS_NON_TIM") {
+    rows = await db.any(siemens_non_tim_series, params);
+    source = "mag.siemens_non_tim";
+    series = normalize_siemens_non_tim(rows);
   } else {
-    const routing = await fetch_mag_routing(identity.system_id);
-    if (
-      routing.includes("mmb_siemens_non_tim") &&
-      !routing.includes("mmb_siemens")
-    )
-      throw new Error(
-        `${identity.system_id} is a Siemens non-TIM system (mag.siemens_non_tim) — not supported yet`
-      );
     rows = await db.any(siemens_series, params);
     source = "mag.siemens";
+    series = normalize_siemens(rows);
   }
-
-  const series =
-    vendor.key === "PHILIPS"
-      ? normalize_philips(rows, vendor)
-      : vendor.key === "GE"
-        ? normalize_ge(rows, vendor)
-        : normalize_siemens(rows);
 
   return { vendor, source, series: series.filter((r) => r.t !== null) };
 };
@@ -246,7 +276,12 @@ const fetch_edu_series = async (system_id, window) => {
         room_temp_f: num(r.room_temp_value),
         humidity_pct: num(r.room_humidity_value),
         probe_0_f: num(r.temp_probe_0_value),
-        probe_1_f: num(r.temp_probe_1_value)
+        probe_1_f: num(r.temp_probe_1_value),
+        // Compressor vibration sensor (edu.v2/v3 only; null on v1).
+        comp_vib:
+          r.comp_vib_status === null || r.comp_vib_status === undefined
+            ? null
+            : r.comp_vib_status === true
       }))
       .filter((r) => r.t !== null)
   };
@@ -254,6 +289,7 @@ const fetch_edu_series = async (system_id, window) => {
 
 module.exports = {
   fetch_identity,
+  resolve_system_vendor,
   fetch_series,
   fetch_edu_series,
   fetch_thresholds,

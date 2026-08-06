@@ -15,12 +15,14 @@ module.exports = {
   ge_mm3_series: sql("ge-mm3-series.sql"),
   ge_mm4_series: sql("ge-mm4-series.sql"),
   siemens_series: sql("siemens-series.sql"),
+  siemens_non_tim_series: sql("siemens-non-tim-series.sql"),
   get_default_thresholds: sql("get-default-thresholds.sql"),
   get_mag_routing: sql("get-mag-routing.sql"),
   units_queries: {
     PHILIPS: sql("units-philips.sql"),
     GE: sql("units-ge.sql"),
-    SIEMENS: sql("units-siemens.sql")
+    SIEMENS: sql("units-siemens.sql"),
+    SIEMENS_NON_TIM: sql("units-siemens-non-tim.sql")
   },
   edu_config: sql("edu-config.sql"),
   edu_series: {

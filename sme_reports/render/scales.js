@@ -25,11 +25,13 @@ const nice_step = (span, max_intervals) => {
 // the exemplars: Philips peak 272/threshold 100 -> [0,300]; GE peak
 // 3.7/threshold 5 -> [0,5.5]. Band metrics (Siemens absolute PSIA with a low
 // AND high alert line) instead pad around the band + data, like padded_domain.
-const pressure_domain = (data_min, data_max, thr) => {
+const pressure_domain = (data_min, data_max, thr, zero_anchor = true) => {
   const high = thr.high_gt === null ? data_max : thr.high_gt;
-  if (thr.high_lt !== null) {
+  // Band metrics, and metrics that live far from zero (non-TIM shield temp
+  // ~41-59 K), pad around the data + alert line instead of anchoring at 0.
+  if (thr.high_lt !== null || !zero_anchor) {
     return padded_domain(
-      Math.min(data_min, thr.high_lt),
+      Math.min(data_min, thr.high_lt !== null ? thr.high_lt : data_min),
       Math.max(data_max, high)
     );
   }

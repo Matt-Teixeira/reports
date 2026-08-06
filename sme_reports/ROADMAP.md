@@ -18,6 +18,13 @@ Status checklist for the single-SME report paradigm. Update as items land.
 - [x] `config.mag` table routing (GE mm3/mm4, Siemens TIM vs non-TIM)
 - [x] Siemens support (mag.siemens, compressor_status, band chart, coldhead)
 - [x] Live batch tests: 3 Philips + 3 GE (one email), 3 Siemens (one email)
+- [x] Summary email option (`batch_email.summary`) — condition per system,
+      attention items first, failures listed, no attachments;
+      `attachments: false` makes it summary-only
+- [x] Size-chunked split sends — batches over ~12 MB of PDFs go out as
+      multiple "part n/N" emails (throttled), each auto-zipped
+- [x] `output.archive` flag (default true) to skip repo-tracked PDF copies
+      on bulk sweeps
 
 ## Next up
 
@@ -32,6 +39,10 @@ Status checklist for the single-SME report paradigm. Update as items land.
       alert.notifications) instead of log files only, so the frontend can
       show delivery status
 
+- [x] Generation efficiency: shared Chromium instance across a batch
+      (was one launch per PDF) + parallel per-system DB pulls — roughly
+      halves large-batch runtime
+
 ## Validation backlog (opportunistic)
 
 - [ ] Eyeball the first report from a **real Siemens warm event**
@@ -44,10 +55,12 @@ Status checklist for the single-SME report paradigm. Update as items land.
 
 ## Later polish
 
-- [ ] Send throttle for batches beyond ~10 systems (O365 limits)
-- [ ] Default `zip: true` for large batches
-- [ ] Siemens non-TIM support (different schema: no pressure/compressor;
-      shield & cabinet temps — treat as its own vendor entry)
+- [x] Send throttle between chunked batch emails (O365 limits)
+- [x] Auto-zip batches larger than 4 PDFs (`zip: true` still forces it for
+      smaller batches)
+- [x] Siemens non-TIM support — shield temp as the primary metric (alert
+      >100 K / >90 K from alert.models), compressor from the EDU vibration
+      sensor (comp_vib_status), CABINET tile vs system-reported warn/alarm
 - [ ] Third chart or temp-series overlay from EDU probe data (page-space
       decision)
 - [ ] Monday.com tie-in (exemplar referenced the Monday item; API PoC exists

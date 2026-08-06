@@ -107,9 +107,33 @@ const BUILDERS = {
       return { cls: "ink", k: "PRESSURE NOW", v: "—", s: "no pressure data" };
     return {
       cls: pressure_cls(p.last.v, f.thr, p.last.v < p.peak.v * 0.995),
-      k: "PRESSURE NOW",
+      k: f.vendor.primary.tile_now,
       v: `${fmt.num(p.last.v, f.vendor.pressure.decimals)} ${f.units.pressure}`,
       s: vs_line(p.last.v, f.thr, f.units.pressure) + trend_word(p)
+    };
+  },
+
+  // Siemens non-TIM electronics-cabinet temperature, judged against the
+  // system's own warn/alarm levels reported alongside each reading.
+  cabinet: (f) => {
+    const cab = f.cabinet;
+    if (!cab)
+      return { cls: "ink", k: "CABINET", v: "—", s: "no cabinet temp data" };
+    const cls =
+      cab.alarm !== null && cab.last.v >= cab.alarm
+        ? "bad"
+        : cab.warn !== null && cab.last.v >= cab.warn
+          ? "warn"
+          : "good";
+    const levels =
+      cab.warn !== null && cab.alarm !== null
+        ? `warn ${cab.warn} · alarm ${cab.alarm} °C`
+        : "no warn/alarm levels reported";
+    return {
+      cls,
+      k: "CABINET",
+      v: `${fmt.num(cab.last.v, 1)} °C`,
+      s: `${fmt.num(cab.min.v, 1)}–${fmt.num(cab.max.v, 1)} °C in window · ${levels}`
     };
   },
 

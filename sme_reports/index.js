@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require("uuid");
 const { load_requests } = require("./request_loader");
 const {
   fetch_identity,
+  resolve_system_vendor,
   fetch_series,
   fetch_edu_series,
   fetch_thresholds,
@@ -29,16 +30,15 @@ const run_one = async (run_log, job_id, request) => {
   await addLogEvent(I, run_log, "run_sme_report", cal, note, null);
 
   const identity = await fetch_identity(request.system_id);
-  const { vendor, source, series } = await fetch_series(
-    identity,
-    request.window
-  );
-  const { edu_source, edu } = await fetch_edu_series(
-    request.system_id,
-    request.window
-  );
-  const thresholds = await fetch_thresholds(request.system_id, vendor);
-  const units = await fetch_units(request.system_id, vendor);
+  const { vendor, routing } = await resolve_system_vendor(identity);
+  // The four remaining pulls are independent once the vendor is known.
+  const [{ source, series }, { edu_source, edu }, thresholds, units] =
+    await Promise.all([
+      fetch_series(identity, request.window, vendor, routing),
+      fetch_edu_series(request.system_id, request.window),
+      fetch_thresholds(request.system_id, vendor),
+      fetch_units(request.system_id, vendor)
+    ]);
 
   note = {
     job_id,
@@ -76,19 +76,22 @@ const run_one = async (run_log, job_id, request) => {
   }
 
   if (request.output.pdf) {
-    const render_pdf = require("./output/render_pdf");
+    const { render_pdf } = require("./output/render_pdf");
     outputs.pdf_path = await render_pdf(
       request.output.out_dir,
       request.system_id,
       html
     );
     // Keep a dated, version-controlled copy for self-reference — out/ is
-    // gitignored scratch that gets overwritten every run.
-    const archive_dir = path.join(__dirname, "archive");
-    fs.mkdirSync(archive_dir, { recursive: true });
-    const dated = `Avante-${request.system_id}-Magnet-Health-${new Date().toISOString().slice(0, 10)}.pdf`;
-    outputs.archive_path = path.join(archive_dir, dated);
-    fs.copyFileSync(outputs.pdf_path, outputs.archive_path);
+    // gitignored scratch that gets overwritten every run. output.archive
+    // false skips this (bulk sweeps would bloat the repo).
+    if (request.output.archive) {
+      const archive_dir = path.join(__dirname, "archive");
+      fs.mkdirSync(archive_dir, { recursive: true });
+      const dated = `Avante-${request.system_id}-Magnet-Health-${new Date().toISOString().slice(0, 10)}.pdf`;
+      outputs.archive_path = path.join(archive_dir, dated);
+      fs.copyFileSync(outputs.pdf_path, outputs.archive_path);
+    }
   }
 
   if (request.output.email) {
@@ -111,14 +114,17 @@ const run_one = async (run_log, job_id, request) => {
 
 const run_sme_report = async (run_log, request_path) => {
   const job_id = uuidv4();
+  const { close_pdf_renderer } = require("./output/render_pdf");
   try {
     const { requests, batch_email } = load_requests(request_path);
     const results = [];
+    const failures = [];
     for (const request of requests) {
       // Per-report try/catch so one failure doesn't kill a bulk batch.
       try {
         results.push(await run_one(run_log, job_id, request));
       } catch (error) {
+        failures.push({ system_id: request.system_id, message: error.message });
         const note = { job_id, system_id: request.system_id };
         await addLogEvent(E, run_log, "run_sme_report", cat, note, error);
         console.error(
@@ -129,7 +135,11 @@ const run_sme_report = async (run_log, request_path) => {
 
     if (batch_email) {
       const sendable = results.filter((r) => r.pdf_path);
-      if (sendable.length) {
+      if (batch_email.summary && (sendable.length || failures.length)) {
+        const send_summary_email = require("./output/send_summary_email");
+        await send_summary_email(run_log, job_id, batch_email, sendable, failures);
+      }
+      if (batch_email.attachments && sendable.length) {
         const send_batch_email = require("./output/send_batch_email");
         await send_batch_email(
           run_log,
@@ -138,7 +148,7 @@ const run_sme_report = async (run_log, request_path) => {
           sendable,
           requests[0].output.out_dir
         );
-      } else {
+      } else if (!sendable.length) {
         await addLogEvent(
           W,
           run_log,
@@ -154,6 +164,9 @@ const run_sme_report = async (run_log, request_path) => {
     await addLogEvent(E, run_log, "run_sme_report", cat, { job_id }, error);
     console.error(`sme_report failed: ${error.message}`);
     return [];
+  } finally {
+    // Shared Chromium instance — without this the process never exits.
+    await close_pdf_renderer();
   }
 };
 

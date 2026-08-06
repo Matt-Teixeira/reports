@@ -251,4 +251,91 @@ const philips_series = [];
   write_html(path.join(__dirname, "..", "out"), "dev-synthetic-siemens", build_page(vm));
 }
 
+// --- full page render, Siemens non-TIM synthetic (shield primary metric,
+// --- EDU-vibration compressor, ongoing stop) --------------------------------
+{
+  const N0 = Date.UTC(2026, 7, 1);
+  const nt_series = [];
+  const nt_edu = [];
+  for (let i = 0; i < 300; i++) {
+    const t = N0 + i * HOUR;
+    const warm = i >= 270; // compressor stops at hour 270, never recovers
+    nt_series.push({
+      t,
+      host_t: t,
+      pressure: warm ? 45 + (i - 270) * 2 : 45, // shield K in the primary slot
+      pressure_avg: null,
+      helium: 80,
+      compressor_on: null, // non-TIM mag data has no compressor state
+      coldhead_k: null,
+      shield_k: warm ? 45 + (i - 270) * 2 : 45,
+      cab_temp: 25,
+      cab_warn: 38,
+      cab_alarm: 43,
+      temp_alarm: null,
+      temp_alarm_minutes: null,
+      room_temp_c: null,
+      quenched: null
+    });
+    nt_edu.push({
+      t,
+      room_temp_f: 70,
+      humidity_pct: 45,
+      probe_0_f: 66,
+      probe_1_f: 68,
+      comp_vib: !warm
+    });
+  }
+  const request = normalize_request({
+    report_type: "magnet_health",
+    system_id: "SME01136",
+    recipients: ["dev@example.com"],
+    window: { start: "2026-08-01", end: "2026-08-13" },
+    output: { html: false, pdf: false, email: false }
+  });
+  const vm = build_render_model({
+    identity: {
+      system_id: "SME01136",
+      manufacturer: "Siemens",
+      modality: "MRI",
+      site_name: "Piedmont Newnan",
+      city: "Newnan",
+      state: "GA",
+      customer_name: "Piedmont"
+    },
+    vendor: VENDORS.SIEMENS_NON_TIM,
+    series: nt_series,
+    source: "synthetic",
+    request,
+    edu: nt_edu,
+    edu_source: "edu.v2"
+  });
+  assert.strictEqual(
+    vm.facts.archetype,
+    "compressor_stop_ongoing",
+    "EDU-vibration compressor stop detected"
+  );
+  assert.deepStrictEqual(
+    vm.tiles.map((t) => t.k),
+    ["COMPRESSOR", "SHIELD NOW", "EVENT PEAK", "CABINET", "HELIUM"]
+  );
+  assert.ok(vm.pressure_heading.startsWith("SHIELD TEMP"), vm.pressure_heading);
+  assert.ok(vm.pressure_chart_svg.includes("SIEMENS ALERT — 100 K"), "shield alert line");
+  assert.ok(vm.tiles[3].s.includes("warn 38 · alarm 43"), `cabinet tile: ${vm.tiles[3].s}`);
+  assert.ok(
+    vm.story_html.includes("per EDU vibration sensor"),
+    "narrative cites EDU vibration source"
+  );
+  assert.ok(
+    vm.story_html.includes("Shield temp rose"),
+    "narrative uses primary-metric name"
+  );
+  // Padded (non-anchored) domain must never produce negative axis ticks
+  assert.ok(
+    !/>-\d/.test(vm.pressure_chart_svg),
+    "no negative shield-temp axis ticks"
+  );
+  write_html(path.join(__dirname, "..", "out"), "dev-synthetic-non-tim", build_page(vm));
+}
+
 console.log("check_chart: all assertions passed");

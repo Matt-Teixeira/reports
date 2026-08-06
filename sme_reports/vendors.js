@@ -9,9 +9,21 @@
 // Adding a vendor means: one entry here, one series SQL file in
 // sme_reports/sql/, and one normalizer branch in sme_reports/data.js.
 
+// Every vendor names a PRIMARY escalation metric that drives the first chart,
+// the NOW/EVENT PEAK tiles, the alert line(s), and the archetypes. For
+// magnet-monitored vendors that's He pressure; Siemens non-TIM has no
+// pressure channel, so shield temperature takes the slot. Internally the
+// normalized series always carries the primary metric in the `pressure`
+// field; `primary` holds the display strings.
 const VENDORS = {
   PHILIPS: {
     key: "PHILIPS",
+    primary: {
+      name: "He pressure",
+      heading: "HE PRESSURE",
+      tile_now: "PRESSURE NOW",
+      zero_anchor: true
+    },
     pressure: {
       units: "mbar",
       decimals: 0,
@@ -30,6 +42,12 @@ const VENDORS = {
   },
   GE: {
     key: "GE",
+    primary: {
+      name: "He pressure",
+      heading: "HE PRESSURE",
+      tile_now: "PRESSURE NOW",
+      zero_anchor: true
+    },
     pressure: {
       units: "PSI",
       decimals: 3,
@@ -50,6 +68,14 @@ const VENDORS = {
   },
   SIEMENS: {
     key: "SIEMENS",
+    primary: {
+      name: "He pressure",
+      heading: "HE PRESSURE",
+      tile_now: "PRESSURE NOW",
+      // Absolute PSIA band — non-zero-anchored domain comes from the band
+      // handling in scales.pressure_domain.
+      zero_anchor: true
+    },
     pressure: {
       // mag_psia_value is ABSOLUTE pressure (~15.3 PSIA at baseline); the
       // default alert model is a band (e.g. high: >16.4 or <14.4 PSI).
@@ -70,6 +96,34 @@ const VENDORS = {
     // than GE's ~4 K coldhead RUO); no default alert model exists for it.
     coldhead: { warm_k: 55 },
     tiles: ["compressor", "coldhead", "pressure_now", "event_peak", "helium"]
+  },
+  SIEMENS_NON_TIM: {
+    key: "SIEMENS_NON_TIM",
+    // Older Siemens magnets: no pressure channel at all. Shield temperature
+    // is the warm-event signal and takes the primary-metric slot (~41-59 K
+    // at base; alert.models default alerts >100 K high / >90 K medium).
+    primary: {
+      name: "Shield temp",
+      heading: "SHIELD TEMP",
+      tile_now: "SHIELD NOW",
+      zero_anchor: false
+    },
+    pressure: {
+      units: "K",
+      decimals: 1,
+      model_fields: ["shield_temp_value"],
+      fallback: { high_gt: 100, high_lt: null }
+    },
+    helium: {
+      units: "%",
+      decimals: 1,
+      model_fields: ["he_level_1_value"]
+    },
+    // No compressor state in mag data — the EDU vibration sensor is the
+    // compressor signal (same source alert.models' default compressor
+    // model watches: comp_vib_status equals false).
+    compressor: { source: "edu_comp_vib" },
+    tiles: ["compressor", "pressure_now", "event_peak", "cabinet", "helium"]
   }
 };
 

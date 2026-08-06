@@ -66,6 +66,7 @@ const normalize_request = (raw) => {
       html: out.html !== false,
       pdf: out.pdf !== false,
       email: out.email !== false,
+      archive: out.archive !== false,
       out_dir: out.out_dir || path.join(__dirname, "out")
     }
   };
@@ -84,7 +85,16 @@ const normalize_batch_email = (raw) => {
   const cc_list = raw.cc_list || [];
   for (const c of cc_list)
     if (!EMAIL_RE.test(c)) fail(`batch cc "${c}" is not an email address`);
-  return { recipients: raw.recipients, cc_list, zip: raw.zip === true };
+  return {
+    recipients: raw.recipients,
+    cc_list,
+    zip: raw.zip === true,
+    // summary: one extra email listing every system + detected condition
+    // (no attachments). attachments: false turns the PDF emails off entirely,
+    // making summary-only delivery possible for very large batches.
+    summary: raw.summary === true,
+    attachments: raw.attachments !== false
+  };
 };
 
 // Accepts a single request, or { "reports": [ ... ], "batch_email": {...} }.
