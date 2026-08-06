@@ -1,0 +1,77 @@
+// Metric aggregation over the normalized series. All pure functions —
+// no DB, no date formatting (display formatting lives in render/model.js).
+
+const HOUR_MS = 3600000;
+
+const stats_for = (points) => {
+  if (!points.length) return null;
+  let min = points[0];
+  let max = points[0];
+  for (const p of points) {
+    if (p.v < min.v) min = p;
+    if (p.v > max.v) max = p;
+  }
+  const first = points[0];
+  const last = points[points.length - 1];
+  return {
+    first: { ...first },
+    last: { ...last },
+    min: { ...min },
+    max: { ...max },
+    count: points.length
+  };
+};
+
+// Splits points around an event window; peak/rate facts are computed within
+// the event when one exists, otherwise globally.
+const metric_facts = (points, event) => {
+  const all = stats_for(points);
+  if (!all) return null;
+
+  let baseline = null;
+  let during = null;
+  if (event) {
+    baseline = stats_for(points.filter((p) => p.t < event.start));
+    during = stats_for(
+      points.filter(
+        (p) => p.t >= event.start && (event.end === null || p.t <= event.end)
+      )
+    );
+  }
+
+  const scope = during || all;
+  const base_v = baseline ? baseline.last.v : all.first.v;
+  const peak = scope.max;
+  const ramp_hours = (peak.t - (event ? event.start : all.first.t)) / HOUR_MS;
+  const rate_per_hr =
+    ramp_hours > 0.5 ? (peak.v - base_v) / ramp_hours : null;
+
+  return {
+    all,
+    baseline,
+    during,
+    peak: { ...peak },
+    last: { ...all.last },
+    baseline_value: base_v,
+    delta_vs_baseline: all.last.v - base_v,
+    rate_per_hr
+  };
+};
+
+// Median |capture - host| clock skew in minutes over rows carrying both.
+const clock_skew_minutes = (series) => {
+  const diffs = series
+    .filter((r) => r.host_t !== null)
+    .map((r) => Math.abs(r.t - r.host_t) / 60000)
+    .sort((a, b) => a - b);
+  if (!diffs.length) return null;
+  return diffs[Math.floor(diffs.length / 2)];
+};
+
+const valid_counts = (series) => ({
+  captures: series.length,
+  pressure: series.filter((r) => r.pressure !== null).length,
+  helium: series.filter((r) => r.helium !== null).length
+});
+
+module.exports = { stats_for, metric_facts, clock_skew_minutes, valid_counts };

@@ -158,6 +158,18 @@ async function on_boot() {
   // GET PROCESS ARG TO DETERMIN REPORT TYPE FOR QUERY
   const report_type = process.argv[2];
 
+  // SINGLE-SME MAGNET HEALTH BRIEF (new paradigm) — dispatches to its own
+  // engine under sme_reports/ and skips the alert.reports schema flow entirely.
+  // Usage: npm start sme_report -- ./requests/<name>.json
+  if (report_type === "sme_report") {
+    const run_sme_report = require("./sme_reports");
+    const run_log = await makeAppRunLog();
+    const request_path = process.argv.slice(3).find((a) => a.endsWith(".json"));
+    await run_sme_report(run_log, request_path);
+    await writeLogEvents(run_log);
+    return;
+  }
+
   if (report_type === "monday") {
     let users_report_rpp_data = {
       field_name: "monday"

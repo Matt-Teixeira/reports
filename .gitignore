@@ -2,3 +2,5 @@
 node_modules/
 utils/
 *.txt
+sme_reports/out/
+*Zone.Identifier
