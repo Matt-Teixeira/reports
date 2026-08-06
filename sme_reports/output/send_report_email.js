@@ -1,6 +1,7 @@
 const path = require("path");
 const build_transporter = require("../../email/build-transporter");
 const send_with_retry = require("./send_with_retry");
+const { COLORS, FONT, logo_attachment, wrap_email } = require("./email_theme");
 
 const [addLogEvent] = require("../../utils/logger/log");
 const {
@@ -14,18 +15,21 @@ const {
 
 const send_report_email = async (run_log, job_id, request, identity, pdf_path) => {
   const subject = `Magnet Health Brief — ${identity.system_id} — ${identity.site_name}`;
+  const date = new Date().toISOString().slice(0, 10);
   const body_html =
-    `<p>Attached is the one-page Magnet Health Brief for ` +
-    `<b>${identity.system_id}</b> (${identity.site_name} — ${identity.manufacturer} ${identity.modality || ""}).</p>` +
-    `<p>Data window: ${request.window.start.toFormat("yyyy-MM-dd")} to ${request.window.end.toFormat("yyyy-MM-dd")}.</p>` +
-    `<p>Avante · Remote Solutions</p>`;
+    `<p style="${FONT}font-size:14px;color:${COLORS.navy};margin:0 0 10px 0;">Attached is the one-page Magnet Health Brief for ` +
+    `<b>${identity.system_id}</b> — ${identity.site_name} (${identity.manufacturer} ${identity.modality || ""}).</p>` +
+    `<p style="${FONT}font-size:13px;color:${COLORS.grey};margin:0;">Data window: ${request.window.start.toFormat("yyyy-MM-dd")} to ${request.window.end.toFormat("yyyy-MM-dd")}.</p>`;
 
   const message = {
     from: process.env.OUTLOOK_USER,
     to: request.recipients.join(","),
     subject,
-    html: body_html,
-    attachments: [{ filename: path.basename(pdf_path), path: pdf_path }]
+    html: wrap_email({ title: "Magnet Health Brief", date, body_html }),
+    attachments: [
+      logo_attachment(),
+      { filename: path.basename(pdf_path), path: pdf_path }
+    ]
   };
   if (request.cc_list.length) message.cc = request.cc_list.join(",");
 

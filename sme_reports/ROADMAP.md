@@ -26,6 +26,10 @@ Status checklist for the single-SME report paradigm. Update as items land.
 - [x] `output.archive` flag (default true) to skip repo-tracked PDF copies
       on bulk sweeps
 
+- [x] Themed email bodies (email_theme.js) — Avante header/band/footer,
+      brand palette, condition tables; email-safe HTML (table layout, inline
+      styles, CID logo) across summary, part, and single-report emails
+
 ## Next up
 
 - [ ] **Deploy-readiness on the prod VM**: `npm install` pulls ~170 MB

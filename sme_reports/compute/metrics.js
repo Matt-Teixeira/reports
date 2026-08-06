@@ -23,7 +23,12 @@ const stats_for = (points) => {
 };
 
 // Splits points around an event window; peak/rate facts are computed within
-// the event when one exists, otherwise globally.
+// the event when one exists, otherwise globally. The event scope extends
+// THERMAL_LAG_MS past recovery — pressure/temperature routinely keeps
+// climbing for hours after a compressor restarts, and the honest event peak
+// includes that tail.
+const THERMAL_LAG_MS = 24 * 3600000;
+
 const metric_facts = (points, event) => {
   const all = stats_for(points);
   if (!all) return null;
@@ -34,7 +39,9 @@ const metric_facts = (points, event) => {
     baseline = stats_for(points.filter((p) => p.t < event.start));
     during = stats_for(
       points.filter(
-        (p) => p.t >= event.start && (event.end === null || p.t <= event.end)
+        (p) =>
+          p.t >= event.start &&
+          (event.end === null || p.t <= event.end + THERMAL_LAG_MS)
       )
     );
   }

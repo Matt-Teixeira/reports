@@ -6,6 +6,13 @@ const exec_file = promisify(execFile);
 
 const build_transporter = require("../../email/build-transporter");
 const send_with_retry = require("./send_with_retry");
+const {
+  COLORS,
+  FONT,
+  logo_attachment,
+  wrap_email,
+  themed_table
+} = require("./email_theme");
 
 const [addLogEvent] = require("../../utils/logger/log");
 const {
@@ -47,15 +54,21 @@ const send_one = async (run_log, job_id, batch_email, chunk, out_dir, part, tota
   const subject = `Magnet Health Briefs — ${total_systems} systems${part_tag} — ${date}`;
   const use_zip = batch_email.zip || chunk.length > AUTO_ZIP_THRESHOLD;
 
-  const rows = chunk
-    .map(
-      (r) =>
-        `<li><b>${r.system_id}</b> — ${r.site_name} (${r.manufacturer} ${r.modality || ""}) · ${r.archetype.replace(/_/g, " ")}</li>`
-    )
-    .join("");
+  const rows = chunk.map((r) => [
+    `<b>${r.system_id}</b>`,
+    `${r.site_name}<br><span style="font-size:11px;color:${COLORS.grey};">${r.manufacturer} ${r.modality || ""}</span>`,
+    `<span style="color:${COLORS.grey};">${r.archetype.replace(/_/g, " ")}</span>`
+  ]);
   const body_html =
-    `<p>Attached are the one-page Magnet Health Briefs for ${chunk.length} of ${total_systems} systems${use_zip ? " (bundled as a zip)" : ""}${part_tag}:</p>` +
-    `<ul>${rows}</ul><p>Avante · Remote Solutions</p>`;
+    `<p style="${FONT}font-size:14px;color:${COLORS.navy};margin:0 0 14px 0;">Attached are the one-page Magnet Health Briefs for <b>${chunk.length}</b> of ${total_systems} systems${use_zip ? " (bundled as a zip)" : ""}${part_tag}.</p>` +
+    themed_table(
+      [
+        { label: "SYSTEM", width: "90" },
+        { label: "SITE" },
+        { label: "CONDITION", width: "190" }
+      ],
+      rows
+    );
 
   let attachments;
   if (use_zip) {
@@ -77,8 +90,12 @@ const send_one = async (run_log, job_id, batch_email, chunk, out_dir, part, tota
     from: process.env.OUTLOOK_USER,
     to: batch_email.recipients.join(","),
     subject,
-    html: body_html,
-    attachments
+    html: wrap_email({
+      title: `Magnet Health Briefs${part_tag}`,
+      date,
+      body_html
+    }),
+    attachments: [logo_attachment(), ...attachments]
   };
   if (batch_email.cc_list.length) message.cc = batch_email.cc_list.join(",");
 

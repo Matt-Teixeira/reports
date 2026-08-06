@@ -1,7 +1,9 @@
 {
   "batch_email": {
     "recipients": [
-      "matt.teixeira@avantehs.com"
+      "matt.teixeira@avantehs.com",
+      "joe.anello@AvanteHS.com",
+      "jonathan.pope@avantehs.com"
     ],
     "cc_list": [],
     "summary": true
