@@ -313,7 +313,14 @@ const build_render_model = ({
   // for the same reason.
   const offline = offline_state(facts);
   facts.left_censored = offline.left_censored;
-  facts.offline_kind = offline.offline_kind;
+  // Suspect conviction outranks the left-censor overlays — the same
+  // precedence conditions.effective_status applies among data issues on the
+  // fleet. facts.offline_kind is the ONE effective overlay driving banner,
+  // tiles, story, and cards: a convicted page must not carry a second
+  // verdict ("no compressor signalᶜ") stated with confidence the page has
+  // just disclaimed.
+  facts.offline_kind =
+    last_suspect && !quenched ? null : offline.offline_kind;
 
   const x_domain = [window_start, window_end];
   const { decimals } = vendor.pressure;

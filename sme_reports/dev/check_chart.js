@@ -1171,6 +1171,52 @@ const philips_series = [];
   assert.ok(is_data_issue(rec), "fleet files it as a data issue");
 }
 
+// --- suspect precedence over the left-censor overlays (review F3) -----------
+{
+  // A Philips whose malf channel claims "off" since before the period AND
+  // whose latest capture combines impossible values qualifies for both the
+  // no-signal overlay and the suspect conviction. The page must carry ONE
+  // verdict: the wider conviction. Banner, tiles, story, and cards all say
+  // suspect; "no compressor signalᶜ" — a confident deduction from a chain
+  // the page just disclaimed — appears nowhere.
+  const { normalize_philips } = require("../normalize");
+  const { build_summary_facts } = require("../compute/summary_facts");
+  const { effective_status, STATUS_LABELS } = require("../conditions");
+  const raw = [];
+  for (let h = 0; h < 720; h++) {
+    const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+    const last = h === 719;
+    raw.push({
+      capture_datetime: iso, host_datetime: iso,
+      monitor_magnet_pressure_value: last ? "-50" : "29",
+      he_psi_avg_value: last ? "-50" : "29",
+      helium_level_value: last ? "0.0" : "76.5",
+      cryo_comp_malf_value: "60",
+      cryo_comp_temp_alarm_state: "0", tech_room_temp_value: "21", quenched_state: "0"
+    });
+  }
+  const identity = { system_id: "SME99008", manufacturer: "Philips", modality: "MRI", site_name: "Two Verdicts General", city: "X", state: "TN", customer_name: "X" };
+  const vm = build_render_model({
+    identity, vendor: VENDORS.PHILIPS, series: normalize_philips(raw, VENDORS.PHILIPS), source: "synthetic",
+    request: normalize_request({
+      report_type: "magnet_health", system_id: "SME99008", recipients: ["dev@example.com"],
+      window: { start: "2026-07-01", end: "2026-07-31" }, output: { html: false, pdf: false, email: false }
+    })
+  });
+  assert.strictEqual(vm.facts.last_suspect, true);
+  assert.strictEqual(vm.facts.left_censored, true, "the censoring fact still holds");
+  assert.strictEqual(vm.facts.offline_kind, null, "suspect wins: one effective overlay");
+  assert.ok(vm.banner.label.startsWith(STATUS_LABELS.sensor_suspect.toUpperCase()), vm.banner.label);
+  assert.ok(vm.story_html.startsWith("<b>Monitoring suspect:</b>"), "one verdict in the story");
+  assert.ok(!vm.story_html.includes("No compressor signal"), "no second verdict in the story");
+  const comp = vm.tiles[0];
+  assert.strictEqual(comp.cls, "dim", "scanner-sourced compressor claim is suspended");
+  assert.ok(comp.s.includes("sensor's claim"), comp.s);
+  assert.ok(!vm.rx_cards[0].body.includes("no signal"), vm.rx_cards[0].body);
+  const rec = build_summary_facts(vm.facts, identity);
+  assert.strictEqual(effective_status(rec), "sensor_suspect", "fleet label applies the same precedence");
+}
+
 // --- stale NOW and single-channel ‡ without a conviction --------------------
 {
   // The plausibility screen's silent failure mode: a channel that stops
