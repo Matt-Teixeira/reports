@@ -244,49 +244,76 @@ const BUILDERS = {
   }
 };
 
-// A convicted sensor chain (facts.last_suspect — RULES.md §5) suspends every
-// judgment on the page: channels whose last raw reading failed its bounds
-// show that RAW value greyed with ‡ (the same treatment the fleet columns
-// use), and clean channels keep their value but drop status colors and
-// claims — 0.00% helium on a convicted chain is the sensor's claim, not a
-// live emergency. The one exception is an EDU-measured compressor: a
-// vibration sensor on separate hardware, outside the convicted chain, so its
-// state stays confident — matching the fleet, which keeps the compressor
-// cell on a sensor-suspect row. A recorded quench overrides suspect
-// entirely; missing a real quench is the costlier error.
+// Data-quality degradation pass over the built tiles (RULES.md §4/§5), in
+// priority order:
+//
+// 1. A channel whose LAST RAW reading failed its plausibility bounds shows
+//    that raw value greyed with ‡ and judges nothing — conviction or not,
+//    exactly like the fleet columns. The helium tile steps aside for a
+//    recorded quench, which owns that tile's statement.
+// 2. A clean channel whose newest plausible reading is more than a day older
+//    than the period end says which day it is from ("as of Aug 5") rather
+//    than passing an old reading off as current.
+// 3. A convicted sensor chain (facts.last_suspect) suspends every remaining
+//    judgment: tiles keep their value but drop status colors and claims —
+//    0.00% helium on a convicted chain is the sensor's claim, not a live
+//    emergency. The one exception is an EDU-measured compressor: a vibration
+//    sensor on separate hardware, outside the convicted chain, so its state
+//    stays confident — matching the fleet, which keeps the compressor cell
+//    on a sensor-suspect row. A recorded quench overrides the conviction
+//    entirely; missing a real quench is the costlier error.
 const NOT_JUDGED = "sensor's claim — not judged";
 const OUT_OF_BOUNDS = "outside plausible bounds — not judged";
+const STALE_MS = 24 * 3600000;
 
-const suspect_tile = (key, tile, f) => {
-  const flags = f.data_flags || {};
-  const raw = f.raw_last || {};
-  if (key === "compressor" && f.compressor_source === "edu_comp_vib")
-    return tile;
-  if (key === "pressure_now" && flags.primary)
-    return {
-      cls: "dim",
-      k: tile.k,
-      v: `${fmt.num(raw.pressure, f.vendor.pressure.decimals)} ${f.units.pressure}‡`,
-      s: OUT_OF_BOUNDS
-    };
-  if (key === "coldhead" && flags.coldhead)
-    return { cls: "dim", k: tile.k, v: `${fmt.num(raw.coldhead_k, 0)} K‡`, s: OUT_OF_BOUNDS };
-  if (key === "helium" && flags.helium)
-    return {
-      cls: "dim",
-      k: tile.k,
-      v: `${fmt.num(raw.helium, f.vendor.helium.decimals)}${he_suffix(f.units.helium)}‡`,
-      s: OUT_OF_BOUNDS
-    };
-  if (key === "cabinet" && flags.cabinet)
-    return { cls: "dim", k: tile.k, v: `${fmt.num(raw.cab_temp, 0)} °C‡`, s: OUT_OF_BOUNDS };
-  return { ...tile, cls: "dim", s: NOT_JUDGED };
+// The channel behind each now-value tile: which last-raw flag greys it, how
+// its raw value renders, and where its newest plausible reading lives.
+const NOW_CHANNELS = {
+  pressure_now: {
+    flag: "primary",
+    raw_v: (f) =>
+      `${fmt.num(f.raw_last.pressure, f.vendor.pressure.decimals)} ${f.units.pressure}‡`,
+    last: (f) => (f.pressure ? f.pressure.last : null)
+  },
+  helium: {
+    flag: "helium",
+    raw_v: (f) =>
+      `${fmt.num(f.raw_last.helium, f.vendor.helium.decimals)}${he_suffix(f.units.helium)}‡`,
+    last: (f) => (f.helium ? f.helium.last : null)
+  },
+  coldhead: {
+    flag: "coldhead",
+    raw_v: (f) => `${fmt.num(f.raw_last.coldhead_k, 0)} K‡`,
+    last: (f) => (f.coldhead ? f.coldhead.last : null)
+  },
+  cabinet: {
+    flag: "cabinet",
+    raw_v: (f) => `${fmt.num(f.raw_last.cab_temp, 0)} °C‡`,
+    last: (f) => (f.cabinet ? f.cabinet.last : null)
+  }
+};
+
+const degrade_tile = (key, tile, f, suspect) => {
+  const ch = NOW_CHANNELS[key];
+  if (ch && (f.data_flags || {})[ch.flag] && !(key === "helium" && f.quenched))
+    return { cls: "dim", k: tile.k, v: ch.raw_v(f), s: OUT_OF_BOUNDS };
+  const last = ch ? ch.last(f) : null;
+  const stale =
+    last && f.window_end - last.t > STALE_MS ? `as of ${fmt.day(last.t)} · ` : "";
+  if (suspect) {
+    if (key === "compressor" && f.compressor_source === "edu_comp_vib")
+      return tile;
+    return { ...tile, cls: "dim", s: stale + NOT_JUDGED };
+  }
+  return stale ? { ...tile, s: stale + tile.s } : tile;
 };
 
 const build_tiles = (facts) => {
   const tiles = facts.vendor.tiles.map((key) => BUILDERS[key](facts));
-  if (!facts.last_suspect || facts.quenched) return tiles;
-  return facts.vendor.tiles.map((key, i) => suspect_tile(key, tiles[i], facts));
+  const suspect = facts.last_suspect === true && facts.quenched !== true;
+  return facts.vendor.tiles.map((key, i) =>
+    degrade_tile(key, tiles[i], facts, suspect)
+  );
 };
 
 // p_severity / he_suffix / trend_of are shared with the fleet summary so the
