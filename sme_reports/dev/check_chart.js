@@ -986,4 +986,207 @@ const philips_series = [];
   write_html(path.join(__dirname, "..", "out"), "dev-synthetic-non-tim", build_page(vm));
 }
 
+// --- brief/fleet parity: sensor-suspect conviction --------------------------
+{
+  // The SME20122 disagreement, as a regression test: the fleet convicted the
+  // sensor chain while the brief reported a live helium emergency with full
+  // confidence. Whatever the design, a convicted system's brief must NOT
+  // claim confident magnet state. Raw rows go through the REAL GE mapper;
+  // the EDU (separate hardware) measures a real ongoing stop underneath the
+  // garbage, exactly like the live case.
+  const { normalize_ge } = require("../normalize");
+  const { build_summary_facts } = require("../compute/summary_facts");
+  const { effective_status, is_data_issue, STATUS_LABELS } = require("../conditions");
+  const raw = [];
+  const edu_rows = [];
+  const GARBAGE_H = 600; // day 25 of 30
+  for (let h = 0; h < 720; h++) {
+    const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+    const bad = h >= GARBAGE_H;
+    raw.push({
+      capture_datetime: iso, host_datetime: iso,
+      he_pressure_value: bad ? "-3.625" : "1.2",
+      he_level_value: bad ? "0.0" : "70",
+      coldhead_ruo_value: bad ? "383" : "4.2",
+      shield_si410_value: bad ? "382.8" : "45"
+    });
+    edu_rows.push({ t: Date.UTC(2026, 6, 1, h), room_temp_f: 70, humidity_pct: 45, probe_0_f: 66, probe_1_f: 68, comp_vib: !bad });
+  }
+  const series = normalize_ge(raw, VENDORS.GE);
+  const request = normalize_request({
+    report_type: "magnet_health", system_id: "SME99004", recipients: ["dev@example.com"],
+    window: { start: "2026-07-01", end: "2026-07-31" }, output: { html: false, pdf: false, email: false }
+  });
+  const identity = { system_id: "SME99004", manufacturer: "GE", modality: "MRI", site_name: "Suspect Memorial", city: "X", state: "TX", customer_name: "X" };
+  const vm = build_render_model({ identity, vendor: VENDORS.GE, series, source: "synthetic", request, edu: edu_rows, edu_source: "edu.v2" });
+  assert.strictEqual(vm.facts.last_suspect, true, "latest capture combines impossible values");
+  assert.strictEqual(vm.facts.compressor_source, "edu_comp_vib", "EDU outranks the poisoned inference");
+  assert.strictEqual(vm.facts.archetype, "compressor_stop_ongoing", "the EDU stop underneath is real");
+  // The banner reframes the page, in the fleet's shared words.
+  assert.ok(vm.banner, "suspect page carries the banner");
+  assert.ok(vm.banner.label.startsWith(STATUS_LABELS.sensor_suspect.toUpperCase()), `shared label: ${vm.banner.label}`);
+  assert.ok(vm.banner.text.includes("impossible reading"), vm.banner.text);
+  // Tiles: EDU compressor stays confident; every other tile suspends judgment.
+  const [comp, coldhead, p_now, peak, helium] = vm.tiles;
+  assert.strictEqual(comp.cls, "bad", "EDU-measured OFF stays confident");
+  assert.strictEqual(comp.v, "OFF", "measured state carries no ᶜ");
+  for (const t of [coldhead, p_now, peak, helium])
+    assert.strictEqual(t.cls, "dim", `no confident magnet state on a convicted page: ${t.k} is ${t.cls}`);
+  assert.ok(p_now.v.includes("-3.625") && p_now.v.includes("‡"), `raw greyed with ‡: ${p_now.v}`);
+  assert.ok(coldhead.v.includes("383") && coldhead.v.includes("‡"), `flagged coldhead shows raw: ${coldhead.v}`);
+  assert.strictEqual(helium.v, "0.00%", "the sensor's helium claim is shown");
+  assert.ok(!helium.s.includes("below the"), `no alert-level claim on a convicted page: ${helium.s}`);
+  assert.ok(vm.story_html.startsWith("<b>Monitoring suspect:</b>"), "story leads with the monitoring problem");
+  assert.ok(vm.rx_cards[0].heading.includes("sensor's claims"), vm.rx_cards[0].heading);
+  // Banner pages trade chart height for the banner's room.
+  assert.ok(vm.pressure_chart_svg.includes('viewBox="0 0 640 100"'), "suspect charts render short");
+  assert.ok(build_page(vm).includes('class="banner"'), "banner div rendered");
+  // Parity: the fleet record reaches the same verdict from the same facts.
+  const rec = build_summary_facts(vm.facts, identity);
+  assert.strictEqual(rec.sensor_suspect, true);
+  assert.strictEqual(effective_status(rec), "sensor_suspect");
+  assert.ok(is_data_issue(rec), "fleet files it as a data issue");
+  write_html(path.join(__dirname, "..", "out"), "dev-synthetic-suspect", build_page(vm));
+  // A recorded quench overrides the conviction: no banner, no dimming —
+  // missing a real quench is the costlier error.
+  const q_series = series.map((r, i) => (i === series.length - 1 ? { ...r, quenched: true } : r));
+  const qvm = build_render_model({ identity, vendor: VENDORS.GE, series: q_series, source: "synthetic", request, edu: edu_rows, edu_source: "edu.v2" });
+  assert.strictEqual(qvm.banner, null, "quench overrides the suspect banner");
+  assert.ok(qvm.tiles[4].s.includes("QUENCH"), "helium tile states the quench");
+  assert.ok(!qvm.tiles[4].s.includes("not judged"), "quench page is not reframed as claims");
+}
+
+// --- brief/fleet parity: left-censored, corroborated warm -------------------
+{
+  // A magnet whose compressor was never seen ON, with coverage from the
+  // period start and a warm coldhead vouching for the stop: the brief must
+  // not headline an observed stop with a fabricated month-long hour count.
+  const { normalize_ge } = require("../normalize");
+  const { build_summary_facts } = require("../compute/summary_facts");
+  const { effective_status, is_urgent, STATUS_LABELS } = require("../conditions");
+  const raw = [];
+  for (let h = 0; h < 720; h++) {
+    const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+    raw.push({
+      capture_datetime: iso, host_datetime: iso,
+      he_pressure_value: "2.1", he_level_value: "60",
+      coldhead_ruo_value: "146", shield_si410_value: "140"
+    });
+  }
+  const identity = { system_id: "SME99005", manufacturer: "GE", modality: "MRI", site_name: "Warm Springs Imaging", city: "X", state: "TX", customer_name: "X" };
+  const vm = build_render_model({
+    identity, vendor: VENDORS.GE, series: normalize_ge(raw, VENDORS.GE), source: "synthetic",
+    request: normalize_request({
+      report_type: "magnet_health", system_id: "SME99005", recipients: ["dev@example.com"],
+      window: { start: "2026-07-01", end: "2026-07-31" }, output: { html: false, pdf: false, email: false }
+    })
+  });
+  assert.strictEqual(vm.facts.left_censored, true);
+  assert.strictEqual(vm.facts.offline_kind, "warm");
+  const comp = vm.tiles[0];
+  assert.strictEqual(comp.cls, "warn", "amber, matching the fleet's never-urgent stance");
+  assert.strictEqual(comp.v, "OFFᶜ", "inferred state keeps its mark");
+  assert.ok(comp.s.includes(`${STATUS_LABELS.warm_offline.toLowerCase()}ᶜ`), `shared vocabulary: ${comp.s}`);
+  assert.ok(!comp.s.includes("off ~"), `no fabricated hour count: ${comp.s}`);
+  assert.ok(vm.story_html.includes("off the entire periodᶜ"), "story states the overlay");
+  assert.ok(!vm.story_html.includes("Warming event OPEN"), "no open-event alarm line");
+  assert.ok(!vm.story_html.includes("off ~"), "no fabricated downtime in the story");
+  assert.strictEqual(vm.banner, null, "warm offline is a magnet state, not a banner");
+  assert.ok(vm.rx_cards[0].body.includes("off entire periodᶜ"), vm.rx_cards[0].body);
+  assert.ok(vm.rx_cards[2].body.includes("ᶜ = concluded"), "legend line on a marked, bannerless page");
+  const rec = build_summary_facts(vm.facts, identity);
+  assert.strictEqual(rec.offline_kind, "warm");
+  assert.strictEqual(effective_status(rec), "warm_offline");
+  assert.ok(!is_urgent(rec), "never urgent");
+}
+
+// --- brief/fleet parity: left-censored, no thermal response (no signal) -----
+{
+  // A Philips whose malf channel has claimed "off" since before the period
+  // opened while the magnet sits cold and calm: the signal is lying. The
+  // brief gets the data-issue banner; the other channels keep their
+  // judgments — only the compressor channel is convicted.
+  const { normalize_philips } = require("../normalize");
+  const { build_summary_facts } = require("../compute/summary_facts");
+  const { effective_status, is_data_issue, STATUS_LABELS } = require("../conditions");
+  const raw = [];
+  for (let h = 0; h < 720; h++) {
+    const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+    raw.push({
+      capture_datetime: iso, host_datetime: iso,
+      monitor_magnet_pressure_value: "29", he_psi_avg_value: "29",
+      helium_level_value: "76.5",
+      cryo_comp_malf_value: "60", // alarm-minutes: "off" all period
+      cryo_comp_temp_alarm_state: "0", tech_room_temp_value: "21", quenched_state: "0"
+    });
+  }
+  const identity = { system_id: "SME99006", manufacturer: "Philips", modality: "MRI", site_name: "Dead Signal Clinic", city: "X", state: "TN", customer_name: "X" };
+  const vm = build_render_model({
+    identity, vendor: VENDORS.PHILIPS, series: normalize_philips(raw, VENDORS.PHILIPS), source: "synthetic",
+    request: normalize_request({
+      report_type: "magnet_health", system_id: "SME99006", recipients: ["dev@example.com"],
+      window: { start: "2026-07-01", end: "2026-07-31" }, output: { html: false, pdf: false, email: false }
+    })
+  });
+  assert.strictEqual(vm.facts.left_censored, true);
+  assert.strictEqual(vm.facts.offline_kind, "no_signal");
+  assert.ok(vm.banner, "no-signal page carries the data-issue banner");
+  assert.ok(vm.banner.label.startsWith(STATUS_LABELS.no_signal.toUpperCase()), `shared label: ${vm.banner.label}`);
+  const comp = vm.tiles[0];
+  assert.strictEqual(comp.v, "—", "no state claimed from a lying signal");
+  assert.strictEqual(comp.s, `${STATUS_LABELS.no_signal}ᶜ`, `shared vocabulary: ${comp.s}`);
+  // Unlike sensor-suspect, the magnet's own channels stay judged.
+  const p_now = vm.tiles.find((t) => t.k === "PRESSURE NOW");
+  assert.strictEqual(p_now.cls, "good", "pressure keeps its judgment — only the compressor channel is convicted");
+  assert.ok(vm.story_html.includes("No compressor signalᶜ"), "story states the overlay");
+  assert.ok(!vm.story_html.includes("off ~"), "no fabricated downtime");
+  assert.ok(vm.pressure_chart_svg.includes('viewBox="0 0 640 100"'), "banner pages render short charts");
+  const rec = build_summary_facts(vm.facts, identity);
+  assert.strictEqual(rec.offline_kind, "no_signal");
+  assert.strictEqual(effective_status(rec), "no_signal");
+  assert.ok(is_data_issue(rec), "fleet files it as a data issue");
+}
+
+// --- stale NOW and single-channel ‡ without a conviction --------------------
+{
+  // The plausibility screen's silent failure mode: a channel that stops
+  // reporting shows its last clean reading — days old — as "NOW". And one
+  // garbage channel alone (helium 250%, not bone-dry) is a flag, not a
+  // conviction: that tile greys, the rest of the page stays judged.
+  const { normalize_ge } = require("../normalize");
+  const { build_summary_facts } = require("../compute/summary_facts");
+  const raw = [];
+  const P_SILENT_H = 576; // pressure channel goes silent on day 24 of 30
+  for (let h = 0; h < 720; h++) {
+    const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+    raw.push({
+      capture_datetime: iso, host_datetime: iso,
+      he_pressure_value: h >= P_SILENT_H ? null : "1.2",
+      he_level_value: h === 719 ? "250" : "70", // garbage only at the end
+      coldhead_ruo_value: "4.2", shield_si410_value: "45"
+    });
+  }
+  const identity = { system_id: "SME99007", manufacturer: "GE", modality: "MRI", site_name: "Stale Acres", city: "X", state: "TX", customer_name: "X" };
+  const vm = build_render_model({
+    identity, vendor: VENDORS.GE, series: normalize_ge(raw, VENDORS.GE), source: "synthetic",
+    request: normalize_request({
+      report_type: "magnet_health", system_id: "SME99007", recipients: ["dev@example.com"],
+      window: { start: "2026-07-01", end: "2026-07-31" }, output: { html: false, pdf: false, email: false }
+    })
+  });
+  assert.strictEqual(vm.facts.last_suspect, false, "one impossible channel alone never convicts");
+  assert.strictEqual(vm.banner, null);
+  const p_now = vm.tiles.find((t) => t.k === "PRESSURE NOW");
+  assert.ok(p_now.s.startsWith("as of Jul 24 · "), `stale reading says which day it is from: ${p_now.s}`);
+  assert.strictEqual(p_now.cls, "good", "stale is a caveat, not a conviction — judgment stands");
+  const helium = vm.tiles.find((t) => t.k === "HELIUM");
+  assert.strictEqual(helium.cls, "dim");
+  assert.ok(helium.v.includes("250") && helium.v.includes("‡"), `flagged channel shows raw greyed: ${helium.v}`);
+  assert.ok(helium.s.includes("not judged"), helium.s);
+  assert.ok(vm.pressure_chart_svg.includes('viewBox="0 0 640 152"'), "no banner, full-height charts");
+  const rec = build_summary_facts(vm.facts, identity);
+  assert.strictEqual(rec.sensor_suspect, false);
+  assert.strictEqual(rec.data_flags.helium, true, "fleet greys the same channel");
+}
+
 console.log("check_chart: all assertions passed");
