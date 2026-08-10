@@ -125,12 +125,20 @@ const offline_state = (facts) => {
     primary !== undefined &&
     facts.compressor_first_on_t === null &&
     boundary_covered;
+  // Start-truncation needs BOUNDARY-STATE EVIDENCE, not just timestamp
+  // equality: the first stateful reading must itself be OFF (the first ON
+  // postdates it). A request-supplied event_window whose start coincides
+  // with an ON first reading matches the timestamps but was observed
+  // running at the boundary — nothing about its start is unknown (review
+  // round-4 F1).
   const start_truncated =
     !left_censored &&
     facts.archetype === "compressor_stop_ongoing" &&
     primary !== null &&
     primary !== undefined &&
     primary.start === facts.compressor_first_stateful_t &&
+    facts.compressor_first_on_t !== null &&
+    facts.compressor_first_on_t > facts.compressor_first_stateful_t &&
     boundary_covered;
   const warm_corroborated =
     (p_ok &&

@@ -1380,6 +1380,86 @@ const philips_series = [];
   assert.ok(qvm.tiles[0].s.includes("already off at first reading"), qvm.tiles[0].s);
   assert.ok(!qvm.story_html.includes("at every reading"), "quench page carries no categorical claim");
   assert.ok(qvm.story_html.includes("stopped again Jul 1 10:00Z"), "quench page keeps the observed anchor");
+  // Scanner-reported source: the truncated-start conclusions carry no ᶜ
+  // (review round-4 F2 counterexample).
+  assert.ok(!vm.story_html.includes("ᶜ"), "scanner-reported truncation is unmarked");
+
+  // --- round-4 F1: the event_window path -------------------------------
+  // A request-supplied window's start is used verbatim, so it can coincide
+  // with the first stateful reading while the boundary state was ON —
+  // timestamp equality alone must not claim "already off at first
+  // reading". And a genuine OFF→ON→OFF override must anchor on the
+  // observed trailing stop via describe_event_window's last_stop_t.
+  const ew_request = normalize_request({
+    report_type: "magnet_health", system_id: "SME99009", recipients: ["dev@example.com"],
+    window: { start: "2026-07-01", end: "2026-07-31" },
+    event_window: { start: "2026-07-01" },
+    output: { html: false, pdf: false, email: false }
+  });
+  const ew_off = build_render_model({ identity, vendor: VENDORS.PHILIPS, series: rows_for(false), source: "synthetic", request: ew_request });
+  assert.strictEqual(ew_off.facts.compressor_start_truncated, true, "OFF-boundary override is truncated");
+  assert.strictEqual(
+    ew_off.facts.compressor_event.last_stop_t,
+    Date.UTC(2026, 6, 1, 10),
+    "describe_event_window carries the observed trailing-stop anchor"
+  );
+  assert.strictEqual(
+    ew_off.facts.compressor_event.last_stop_t,
+    vm.facts.compressor_event.last_stop_t,
+    "both event constructors agree on last_stop_t"
+  );
+  assert.ok(ew_off.tiles[0].s.includes("off again Jul 1 10:00Z"), ew_off.tiles[0].s);
+  // ON at the boundary: nothing about the start is unknown, however the
+  // timestamps line up.
+  const on_first = [];
+  for (let h = 0; h < 720; h++) {
+    const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+    on_first.push({
+      capture_datetime: iso, host_datetime: iso,
+      monitor_magnet_pressure_value: "29", he_psi_avg_value: "29",
+      helium_level_value: "76.5",
+      cryo_comp_malf_value: h <= 4 ? "0" : "60",
+      cryo_comp_temp_alarm_state: "0", tech_room_temp_value: "21", quenched_state: "0"
+    });
+  }
+  const ew_on = build_render_model({
+    identity, vendor: VENDORS.PHILIPS, series: normalize_philips(on_first, VENDORS.PHILIPS),
+    source: "synthetic", request: ew_request
+  });
+  assert.strictEqual(ew_on.facts.compressor_start_truncated, false, "an ON first reading is boundary-state evidence against truncation");
+  assert.ok(!ew_on.tiles[0].s.includes("already off"), ew_on.tiles[0].s);
+  assert.ok(!ew_on.story_html.includes("already off when the data begins"), "no self-contradicting story");
+}
+
+// --- start-truncated provenance: inferred marks, measured stays clean -------
+{
+  // Round-4 F2: on a GE without an EDU every truncated-start conclusion —
+  // including the intervening "first seen running" — is a coldhead
+  // inference and carries ᶜ.
+  const { normalize_ge } = require("../normalize");
+  const raw = [];
+  for (let h = 0; h < 720; h++) {
+    const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+    const on = h >= 5 && h <= 9;
+    raw.push({
+      capture_datetime: iso, host_datetime: iso,
+      he_pressure_value: "1.2", he_level_value: "70",
+      coldhead_ruo_value: on ? "4.2" : "30", shield_si410_value: "45"
+    });
+  }
+  const vm = build_render_model({
+    identity: { system_id: "SME99015", manufacturer: "GE", modality: "MRI", site_name: "X", city: "X", state: "TX", customer_name: "X" },
+    vendor: VENDORS.GE, series: normalize_ge(raw, VENDORS.GE), source: "synthetic",
+    request: normalize_request({
+      report_type: "magnet_health", system_id: "SME99015", recipients: ["dev@example.com"],
+      window: { start: "2026-07-01", end: "2026-07-31" }, output: { html: false, pdf: false, email: false }
+    })
+  });
+  assert.strictEqual(vm.facts.compressor_start_truncated, true);
+  assert.strictEqual(vm.tiles[0].v, "OFFᶜ", "inferred tile keeps its mark");
+  assert.ok(vm.story_html.includes("already off when the data beginsᶜ"), "truncation conclusion is marked");
+  assert.ok(vm.story_html.includes("first seen running Jul 1 05:00Zᶜ"), "the intervening ON conclusion is marked");
+  assert.ok(vm.story_html.includes("stopped again Jul 1 10:00Zᶜ"), "the trailing stop conclusion is marked");
 }
 
 // --- stale NOW and single-channel ‡ without a conviction --------------------

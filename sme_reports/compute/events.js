@@ -95,6 +95,10 @@ const describe_event_window = (
   let cycles = 0;
   let off_count = 0;
   let off_ms = 0;
+  // First off reading of the LAST intersecting run (clipped to the window)
+  // — the same observed trailing-stop anchor build_compressor_events
+  // carries, so start-truncated wording works through this path too.
+  let last_stop_t = null;
   for (const run of off_runs) {
     if (run.end < window.start || run.start > w_end) continue;
     const readings = stateful.filter(
@@ -115,8 +119,16 @@ const describe_event_window = (
     cycles += 1;
     off_count += readings.length;
     off_ms += run_off_ms(clipped, interval_ms);
+    last_stop_t = clipped.start;
   }
-  return { start: window.start, end, cycles, off_count, off_hours: off_ms / 3600000 };
+  return {
+    start: window.start,
+    end,
+    last_stop_t,
+    cycles,
+    off_count,
+    off_hours: off_ms / 3600000
+  };
 };
 
 // The report anchors on one event: an open trailing event always wins

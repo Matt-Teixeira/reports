@@ -217,7 +217,7 @@ const STORIES = {
       return (
         `<b>Timeline (UTC):</b> <b>The compressor was already off when the data begins${comp_c(f)}</b>${comp_via(f)} — ` +
         `that initial stop predates the period, so its start and earlier downtime are unknown. ` +
-        `It was first seen running ${fmt.ts(f.compressor_first_on_t)}, then <b>stopped again ${ev.last_stop_t != null ? fmt.ts(ev.last_stop_t) : "later in the period"}${comp_c(f)} and has not recovered</b> — ` +
+        `It was first seen running ${fmt.ts(f.compressor_first_on_t)}${comp_c(f)}, then <b>stopped again ${ev.last_stop_t != null ? fmt.ts(ev.last_stop_t) : "later in the period"}${comp_c(f)} and has not recovered</b> — ` +
         `off ${fmt.hours(ev.off_hours)} observed across ${ev.cycles} off-runs (${ev.off_count} readings off).${alarm_sentence(f)} ` +
         `${peak_sentence(f)}${other_events_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)} ` +
         `<b>Warming event OPEN at end of data.</b>`
