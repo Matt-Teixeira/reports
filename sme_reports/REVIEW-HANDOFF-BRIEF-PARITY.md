@@ -316,3 +316,24 @@ by the reviewer.
 Live probes after round 3: SME20122 (compact, suspect banner, 171px) and
 SME20292 (normal, `OFFᶜ`, observed stop timing intact, 61px) unchanged.
 All three dev checks pass.
+
+---
+
+## Round-4 outcome (2026-08-10) — both findings fixed
+
+Round 4 verdict was DO NOT SHIP on two residuals of the round-3
+start-truncated work: the `event_window` path and one missing provenance
+mark.
+
+| # | Fix | Where | Regression test |
+|---|---|---|---|
+| R4-F1 | Start-truncation now requires **boundary-state evidence**, not timestamp equality: `compressor_first_on_t > compressor_first_stateful_t` (the first stateful reading is itself OFF). A request-supplied `event_window` whose verbatim start coincides with an ON first reading was observed running at the boundary — no truncation claim, no self-contradicting story. `describe_event_window` now produces `last_stop_t` from its final clipped off-run, so a genuine OFF→ON→OFF override anchors on the observed trailing stop instead of "later in the period". RULES.md §5 gained the boundary-state-evidence sentence in the same commit | `compute/summary_facts.js`, `compute/events.js`, `RULES.md` | `check_chart.js` round-4 block: ON-boundary override → not truncated, no "already off" anywhere; OFF-boundary override → truncated, `last_stop_t` equal across BOTH event constructors and rendered on the tile ("off again Jul 1 10:00Z") |
+| R4-F2 | The intervening "first seen running <ts>" conclusion carries `comp_c(f)` — it is a coldhead inference exactly like the state claims around it | `render/narrative.js` | GE-inference truncated fixture asserting ᶜ on all three conclusions ("already off when the data beginsᶜ", "first seen running …ᶜ", "stopped again …ᶜ"); the Philips scanner-reported fixture asserts the whole story carries no mark |
+
+Also closed from the round-4 gap list: event_window start-truncated
+coverage (both boundary states), `last_stop_t` verified across both event
+constructors, and a GE-inference start-truncated fixture with a
+no-mark counterexample. Still accepted: non-TIM cabinet suspect tile,
+`narrative_overrides` geometry, and live DB reruns recorded here rather
+than executed by the reviewer (both probes re-run after this round:
+SME20122 compact/banner/171px, SME20292 normal/`OFFᶜ`/61px, unchanged).
