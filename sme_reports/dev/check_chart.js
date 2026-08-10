@@ -1233,6 +1233,10 @@ const philips_series = [];
   assert.strictEqual(stable.facts.archetype, "stable_healthy");
   assert.ok(stable.story_html.includes("No compressor eventsᶜ"), "negative conclusion carries the mark");
   assert.ok(stable.story_html.includes(`sensor flickerᶜ`), "flicker deduction carries the mark");
+  // No-event coldhead baseline (round-3 gap): the whole period is the
+  // baseline, and this fixture's 15 K flicker excursion sits over the
+  // 10 K warm line — the base-temperature claim must be withheld.
+  assert.ok(!stable.story_html.includes("at base temperature"), "excursion withholds the baseline claim");
 
   // recovered with cycles + a distinct second event.
   const cyc = (h) =>
@@ -1264,6 +1268,8 @@ const philips_series = [];
   assert.strictEqual(measured.facts.compressor_source, "edu_comp_vib");
   assert.ok(measured.story_html.includes("No compressor events,"), "measured story keeps the clause");
   assert.ok(!measured.story_html.includes("ᶜ"), "a measured page carries no mark anywhere");
+  // No-event cold counterexample: every reading at 4.2 K earns the claim.
+  assert.ok(measured.story_html.includes("coldhead at base temperature"), "clean whole-period baseline earns the claim");
 }
 
 // --- suspect precedence over the left-censor overlays (review F3) -----------
