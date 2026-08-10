@@ -21,6 +21,7 @@ const {
   valid_counts
 } = require("../compute/metrics");
 const { classify } = require("../compute/archetype");
+const { offline_state } = require("../compute/summary_facts");
 const {
   PLAUSIBLE,
   outside,
@@ -306,6 +307,15 @@ const build_render_model = ({
     chart_mode: mode
   };
   facts.archetype = classify({ compressor_event, pressure, thr });
+  // Left-censored ongoing stops (RULES.md §5), via the classifier shared
+  // with the fleet record so the two documents cannot split the same stop
+  // into different stories. A recorded quench overrides every overlay —
+  // the quench story must never be reframed as a monitoring caveat.
+  const offline = quenched
+    ? { left_censored: false, offline_kind: null }
+    : offline_state(facts);
+  facts.left_censored = offline.left_censored;
+  facts.offline_kind = offline.offline_kind;
 
   const x_domain = [window_start, window_end];
   const { decimals } = vendor.pressure;
@@ -329,10 +339,36 @@ const build_render_model = ({
       label: `${alert_prefix} ALERT — &lt;${thr.high_lt} ${units.pressure}`
     });
 
-  // A sensor-suspect page (banner + suspended tiles, RULES.md §5) must still
-  // fit ONE page: the charts give up height to buy the banner its room.
-  // Measured in Chromium — at 152 the rx cards run past the footer.
-  const chart_height = last_suspect && !quenched ? 100 : 152;
+  // Data-quality banner (RULES.md §5): a convicted sensor chain reframes the
+  // whole page; failing that, a dead compressor signal explains why the page
+  // carries no stop headline. Suspect wins when both apply — it is the wider
+  // conviction. Labels are shared with the fleet document and summary email
+  // via conditions.js so the views cannot drift. A recorded quench overrides
+  // both (offline_kind is already null when quenched).
+  const rejected_total = Object.values(implausible).reduce((n, c) => n + c, 0);
+  const banner =
+    last_suspect && !quenched
+      ? {
+          label: `${STATUS_LABELS.sensor_suspect.toUpperCase()}ᶜ`,
+          text:
+            `${rejected_total} impossible reading${rejected_total === 1 ? "" : "s"} this period; the latest capture combines impossible values — ` +
+            `the monitoring chain, not the magnet, is the likely fault. Values below are the sensor's claims, not magnet state. ` +
+            `ᶜ = concluded, not measured · ‡ = outside plausible bounds.`
+        }
+      : facts.offline_kind === "no_signal"
+        ? {
+            label: `${STATUS_LABELS.no_signal.toUpperCase()}ᶜ`,
+            text:
+              `the compressor channel has read "off" since before the period began, and the magnet shows no thermal response — ` +
+              `the signal, not the compressor, is the likely fault. Compressor state and downtime are not reported. ` +
+              `ᶜ = concluded, not measured.`
+          }
+        : null;
+
+  // A banner page must still fit ONE page: the charts give up height to buy
+  // the banner its room. Measured in Chromium — at 152 the rx cards run
+  // past the footer.
+  const chart_height = banner ? 100 : 152;
 
   // Pressure chart markers: peak is red when breaching, orange otherwise;
   // "now" is one notch softer (orange breaching / green not) — exemplar convention.
@@ -428,7 +464,6 @@ const build_render_model = ({
       : " · orange shade = the event span";
   const prepared_by =
     overrides.prepared_by || process.env.SME_REPORT_AUTHOR || "Remote Solutions";
-  const rejected_total = Object.values(implausible).reduce((n, c) => n + c, 0);
   const data_source =
     overrides.data_source ||
     `${fmt.count(facts.counts.captures)} captures · ${source}` +
@@ -452,21 +487,7 @@ const build_render_model = ({
       .filter(Boolean)
       .join(" · "),
     tiles: build_tiles(facts),
-    // Sensor-suspect banner (RULES.md §5): the latest capture combines
-    // impossible readings, so the page must reframe every unmeasured value
-    // below it as the sensor's claim. Label shared with the fleet document
-    // and summary email via conditions.js so the two cannot drift. A
-    // recorded quench overrides suspect (RULES.md §5) — missing a real
-    // quench is the costlier error.
-    banner: last_suspect && !quenched
-      ? {
-          label: `${STATUS_LABELS.sensor_suspect.toUpperCase()}ᶜ`,
-          text:
-            `${rejected_total} impossible reading${rejected_total === 1 ? "" : "s"} this period; the latest capture combines impossible values — ` +
-            `the monitoring chain, not the magnet, is the likely fault. Values below are the sensor's claims, not magnet state. ` +
-            `ᶜ = concluded, not measured · ‡ = outside plausible bounds.`
-        }
-      : null,
+    banner,
     pressure_heading: `${vendor.primary.heading} — ${win_span_caps}`,
     pressure_heading_note: `(${mode_desc}, ${units.pressure}${orange})`,
     pressure_chart_svg,

@@ -86,6 +86,52 @@ const metric_value = (metric) => (metric ? metric.last.v : null);
 // nothing about each other. Documented in RULES.md §5.
 const { PLAUSIBLE, last_raw_flags } = require("./plausible");
 
+// --- left-censored stops (RULES.md §5) ---------------------------------
+// Shared by the fleet record and the per-system brief so the two documents
+// classify the same ongoing stop identically. An ongoing stop whose channel
+// had coverage from (near) the period start but was never seen ON predates
+// the period — its true start is unknown. The magnet's body then decides:
+// thermal corroboration -> "warm" (OFF ENTIRE PERIOD, a real finished
+// state); no response at all -> "no_signal" (the signal is lying, a
+// monitoring problem).
+const LEFT_CENSOR_GRACE_MS = 24 * HOUR_MS;
+
+const offline_state = (facts) => {
+  const { vendor, thr, units, pressure } = facts;
+  const shield_alias = vendor.key === "SIEMENS_NON_TIM";
+  const data_flags = last_raw_flags(facts.raw_last || {}, units, {
+    shield_alias
+  });
+  const primary = facts.compressor_event;
+  const p_ok = !data_flags.primary;
+  const p_now = pressure ? pressure.last.v : null;
+  const coldhead_k =
+    !data_flags.coldhead && facts.coldhead ? facts.coldhead.last.v : null;
+  const primary_trend = p_ok ? trend_of(pressure) : null;
+  const left_censored =
+    facts.archetype === "compressor_stop_ongoing" &&
+    primary !== null &&
+    primary !== undefined &&
+    (facts.compressor_first_on_t === null ||
+      facts.compressor_first_on_t > primary.start) &&
+    facts.compressor_first_stateful_t !== null &&
+    facts.compressor_first_stateful_t - facts.window_start <=
+      LEFT_CENSOR_GRACE_MS;
+  const warm_corroborated =
+    (p_ok &&
+      p_now !== null &&
+      (breach_direction(p_now, thr) !== null ||
+        p_severity(p_now, thr) === "high")) ||
+    (coldhead_k !== null &&
+      vendor.coldhead &&
+      coldhead_k >= vendor.coldhead.warm_k) ||
+    primary_trend === "rising";
+  return {
+    left_censored,
+    offline_kind: !left_censored ? null : warm_corroborated ? "warm" : "no_signal"
+  };
+};
+
 const build_summary_facts = (facts, identity) => {
   const { vendor, thr, he_thr, units, pressure, helium } = facts;
 
@@ -134,42 +180,12 @@ const build_summary_facts = (facts, identity) => {
   const p_ok = !data_flags.primary;
   const primary_trend = p_ok ? trend_of(pressure) : null;
 
-  // Left-censored: the compressor was never seen ON before the stop began,
-  // so the stop itself was never observed — it predates the window and its
-  // true start is unknown. The magnet's body then decides what this is:
-  //   corroborated warm (over its limit / warm coldhead)  -> WARM / OFFLINE,
-  //     a real but finished state; nothing left to page anyone about
-  //   no thermal response at all -> the signal is lying   -> NO SIGNAL,
-  //     a monitoring problem, not a magnet problem
-  // Nothing left-censored is urgent: after 31+ days off a magnet is either
-  // already warm or the sensor is wrong — the "still dying" window passed.
-  // Left-censoring additionally requires COVERAGE from (near) the period
-  // start: the first stateful compressor reading must fall within the grace
-  // span of the period opening. A channel that stays silent until hour 199
-  // and then reads OFF is an observed ongoing stop with an unknown start —
-  // real, and urgent-eligible — not a stop that predates the period; calling
-  // it "off the entire period" would overclaim by three weeks.
-  const LEFT_CENSOR_GRACE_MS = 24 * HOUR_MS;
-  const left_censored =
-    facts.archetype === "compressor_stop_ongoing" &&
-    primary !== null &&
-    (facts.compressor_first_on_t === null ||
-      facts.compressor_first_on_t > primary.start) &&
-    facts.compressor_first_stateful_t !== null &&
-    facts.compressor_first_stateful_t - facts.window_start <=
-      LEFT_CENSOR_GRACE_MS;
-  const warm_corroborated =
-    (p_ok && (breach_direction(p_now, thr) !== null || p_severity(p_now, thr) === "high")) ||
-    (!data_flags.coldhead &&
-      coldhead_k !== null &&
-      vendor.coldhead &&
-      coldhead_k >= vendor.coldhead.warm_k) ||
-    primary_trend === "rising";
-  const offline_kind = !left_censored
-    ? null
-    : warm_corroborated
-      ? "warm"
-      : "no_signal";
+  // Left-censoring and its warm/no-signal split — the shared classifier
+  // above, so the brief's overlay can never disagree with this record. A
+  // channel that stays silent until hour 199 and then reads OFF is an
+  // observed ongoing stop with an unknown start — real, and urgent-eligible
+  // — not a stop that predates the period.
+  const { left_censored, offline_kind } = offline_state(facts);
 
   return {
     // --- identity -----------------------------------------------------
@@ -275,6 +291,7 @@ const build_summary_facts = (facts, identity) => {
 
 module.exports = {
   build_summary_facts,
+  offline_state,
   PLAUSIBLE,
   pct_of_line,
   band_state,

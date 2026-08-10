@@ -166,6 +166,24 @@ const STORIES = {
   },
   compressor_stop_ongoing: (f) => {
     const ev = f.compressor_event;
+    // Left-censored overlays (RULES.md §5): the stop was never observed
+    // starting, so the ongoing-stop story would fabricate a start time and
+    // an hour count. A corroborated all-period stop is a real but finished
+    // state; a dead signal is a monitoring problem wearing a stop's clothes.
+    if (f.offline_kind === "warm")
+      return (
+        `<b>Timeline (UTC):</b> <b>The compressor was off the entire periodᶜ</b>${comp_via(f)} — ` +
+        `already off at the first compressor reading (${fmt.ts(f.compressor_first_stateful_t)}), so its true start and total downtime are unknown. ` +
+        `The magnet's own readings corroborate the stopᶜ. ` +
+        `${peak_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
+      );
+    if (f.offline_kind === "no_signal")
+      return (
+        `<b>Timeline (UTC):</b> <b>No compressor signalᶜ</b>${comp_via(f)} — ` +
+        `the channel has read "off" since before the period began (first reading ${fmt.ts(f.compressor_first_stateful_t)}), with no thermal response from the magnet — ` +
+        `the signal, not the compressor, is the likely faultᶜ. Compressor downtime is not reported. ` +
+        `${baseline_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
+      );
     return (
       `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
       `<b>${fmt.ts(ev.start)}: the compressor stopped${comp_c(f)} and has not recovered</b>${comp_via(f)} — off ${fmt.hours(ev.off_hours)} at the last capture (${ev.off_count} readings off).${alarm_sentence(f)} ` +
@@ -192,7 +210,11 @@ const build_cards = (f) => {
     const on = f.compressor_event
       ? f.compressor_event.end !== null
       : f.last_compressor_on;
-    current.push(`Compressor ${on ? "ON" : "OFF"}${comp_c(f)}`);
+    if (f.offline_kind === "warm")
+      current.push(`Compressor off entire periodᶜ`);
+    else if (f.offline_kind === "no_signal")
+      current.push(`Compressor: no signalᶜ`);
+    else current.push(`Compressor ${on ? "ON" : "OFF"}${comp_c(f)}`);
   }
   if (p)
     current.push(
@@ -254,10 +276,13 @@ const build_cards = (f) => {
       `Host clock ~${Math.round(f.clock_skew_minutes)} min off vs capture time — times shown use capture time.`
     );
   // The brief's one legend line (RULES.md §6): defines the ᶜ mark on the
-  // pages that carry it. Suspect pages skip it — their banner already
-  // defines ᶜ and ‡ inline.
-  if (comp_c(f) && !(f.last_suspect === true && !f.quenched))
-    notes.push("ᶜ = concluded (coldhead-inferred compressor state), not measured.");
+  // pages that carry it — a coldhead-inferred compressor state, or a
+  // corroborated all-period stop. Banner pages (sensor suspect, no signal)
+  // skip it: their banner already defines the mark inline.
+  const has_banner =
+    (f.last_suspect === true && !f.quenched) || f.offline_kind === "no_signal";
+  if ((comp_c(f) || f.offline_kind === "warm") && !has_banner)
+    notes.push("ᶜ = concluded — inferred or corroborated, not directly measured.");
 
   return [
     {

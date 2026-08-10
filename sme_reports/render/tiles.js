@@ -1,4 +1,5 @@
 const fmt = require("./fmt");
+const { STATUS_LABELS } = require("../conditions");
 
 // Builds the 5 KPI tile view-models {cls, k, v, s} for the vendor's tile set.
 // Status classes: good (teal) / warn (amber) / bad (red) / ink (navy).
@@ -99,13 +100,32 @@ const BUILDERS = {
               : "running continuously through the period"
       };
     }
-    if (ev.end === null)
+    if (ev.end === null) {
+      // Left-censored overlays (RULES.md §5), labels from conditions.js.
+      // A corroborated all-period stop is amber, not red — the fleet never
+      // counts it urgent, and its start (and downtime) is unknown, so no
+      // hour count is fabricated. A dead signal claims nothing at all.
+      if (f.offline_kind === "warm")
+        return {
+          cls: "warn",
+          k: "COMPRESSOR",
+          v: `OFF${c}`,
+          s: `${STATUS_LABELS.warm_offline.toLowerCase()}ᶜ · start predates the data`
+        };
+      if (f.offline_kind === "no_signal")
+        return {
+          cls: "ink",
+          k: "COMPRESSOR",
+          v: "—",
+          s: `${STATUS_LABELS.no_signal}ᶜ`
+        };
       return {
         cls: "bad",
         k: "COMPRESSOR",
         v: `OFF${c}`,
         s: `stopped ${fmt.ts(ev.start)} · off ${fmt.hours(ev.off_hours)}${more}`
       };
+    }
     if (ev.cycles > 1)
       return {
         cls: "good",
