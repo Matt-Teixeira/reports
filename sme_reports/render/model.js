@@ -25,8 +25,10 @@ const {
   PLAUSIBLE,
   outside,
   primary_bounds,
-  helium_bounds
+  helium_bounds,
+  last_raw_flags
 } = require("../compute/plausible");
+const { STATUS_LABELS } = require("../conditions");
 const { fallback_thresholds } = require("../vendors");
 const {
   pressure_domain,
@@ -126,6 +128,12 @@ const build_render_model = ({
   const last_suspect = rows.length
     ? suspect_capture(rows[rows.length - 1])
     : false;
+  // Same per-channel "last raw reading is impossible" flags the fleet columns
+  // grey — shared helper so the brief tiles and the fleet row can never
+  // disagree about which sensor is currently emitting garbage.
+  const data_flags = last_raw_flags(raw_last, units, {
+    shield_alias: shield_aliases_primary
+  });
 
   const p_points = screen(metric_points(rows, "pressure"), "pressure");
   const he_points = screen(metric_points(rows, "helium"), "helium");
@@ -292,6 +300,7 @@ const build_render_model = ({
     suspect_rows,
     last_suspect,
     raw_last,
+    data_flags,
     counts: valid_counts(rows),
     clock_skew_minutes: clock_skew_minutes(rows),
     chart_mode: mode
@@ -319,6 +328,11 @@ const build_render_model = ({
       // &lt; — a literal "<" inside SVG text is unsafe markup
       label: `${alert_prefix} ALERT — &lt;${thr.high_lt} ${units.pressure}`
     });
+
+  // A sensor-suspect page (banner + suspended tiles, RULES.md §5) must still
+  // fit ONE page: the charts give up height to buy the banner its room.
+  // Measured in Chromium — at 152 the rx cards run past the footer.
+  const chart_height = last_suspect && !quenched ? 100 : 152;
 
   // Pressure chart markers: peak is red when breaching, orange otherwise;
   // "now" is one notch softer (orange breaching / green not) — exemplar convention.
@@ -355,7 +369,8 @@ const build_render_model = ({
       thresholds: threshold_lines,
       markers,
       stroke_width: 2,
-      alarm_runs: temp_alarm ? temp_alarm.intervals : null
+      alarm_runs: temp_alarm ? temp_alarm.intervals : null,
+      height: chart_height
     });
   }
 
@@ -388,7 +403,8 @@ const build_render_model = ({
         }
       ],
       stroke_width: 2.4,
-      start_label: `${fmt.num(helium.all.first.v, vendor.helium.decimals)}${he_sfx}`
+      start_label: `${fmt.num(helium.all.first.v, vendor.helium.decimals)}${he_sfx}`,
+      height: chart_height
     });
   }
 
@@ -436,6 +452,21 @@ const build_render_model = ({
       .filter(Boolean)
       .join(" · "),
     tiles: build_tiles(facts),
+    // Sensor-suspect banner (RULES.md §5): the latest capture combines
+    // impossible readings, so the page must reframe every unmeasured value
+    // below it as the sensor's claim. Label shared with the fleet document
+    // and summary email via conditions.js so the two cannot drift. A
+    // recorded quench overrides suspect (RULES.md §5) — missing a real
+    // quench is the costlier error.
+    banner: last_suspect && !quenched
+      ? {
+          label: `${STATUS_LABELS.sensor_suspect.toUpperCase()}ᶜ`,
+          text:
+            `${rejected_total} impossible reading${rejected_total === 1 ? "" : "s"} this period; the latest capture combines impossible values — ` +
+            `the monitoring chain, not the magnet, is the likely fault. Values below are the sensor's claims, not magnet state. ` +
+            `ᶜ = concluded, not measured · ‡ = outside plausible bounds.`
+        }
+      : null,
     pressure_heading: `${vendor.primary.heading} — ${win_span_caps}`,
     pressure_heading_note: `(${mode_desc}, ${units.pressure}${orange})`,
     pressure_chart_svg,

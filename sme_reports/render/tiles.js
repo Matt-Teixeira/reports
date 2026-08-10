@@ -244,8 +244,50 @@ const BUILDERS = {
   }
 };
 
-const build_tiles = (facts) =>
-  facts.vendor.tiles.map((key) => BUILDERS[key](facts));
+// A convicted sensor chain (facts.last_suspect — RULES.md §5) suspends every
+// judgment on the page: channels whose last raw reading failed its bounds
+// show that RAW value greyed with ‡ (the same treatment the fleet columns
+// use), and clean channels keep their value but drop status colors and
+// claims — 0.00% helium on a convicted chain is the sensor's claim, not a
+// live emergency. The one exception is an EDU-measured compressor: a
+// vibration sensor on separate hardware, outside the convicted chain, so its
+// state stays confident — matching the fleet, which keeps the compressor
+// cell on a sensor-suspect row. A recorded quench overrides suspect
+// entirely; missing a real quench is the costlier error.
+const NOT_JUDGED = "sensor's claim — not judged";
+const OUT_OF_BOUNDS = "outside plausible bounds — not judged";
+
+const suspect_tile = (key, tile, f) => {
+  const flags = f.data_flags || {};
+  const raw = f.raw_last || {};
+  if (key === "compressor" && f.compressor_source === "edu_comp_vib")
+    return tile;
+  if (key === "pressure_now" && flags.primary)
+    return {
+      cls: "dim",
+      k: tile.k,
+      v: `${fmt.num(raw.pressure, f.vendor.pressure.decimals)} ${f.units.pressure}‡`,
+      s: OUT_OF_BOUNDS
+    };
+  if (key === "coldhead" && flags.coldhead)
+    return { cls: "dim", k: tile.k, v: `${fmt.num(raw.coldhead_k, 0)} K‡`, s: OUT_OF_BOUNDS };
+  if (key === "helium" && flags.helium)
+    return {
+      cls: "dim",
+      k: tile.k,
+      v: `${fmt.num(raw.helium, f.vendor.helium.decimals)}${he_suffix(f.units.helium)}‡`,
+      s: OUT_OF_BOUNDS
+    };
+  if (key === "cabinet" && flags.cabinet)
+    return { cls: "dim", k: tile.k, v: `${fmt.num(raw.cab_temp, 0)} °C‡`, s: OUT_OF_BOUNDS };
+  return { ...tile, cls: "dim", s: NOT_JUDGED };
+};
+
+const build_tiles = (facts) => {
+  const tiles = facts.vendor.tiles.map((key) => BUILDERS[key](facts));
+  if (!facts.last_suspect || facts.quenched) return tiles;
+  return facts.vendor.tiles.map((key, i) => suspect_tile(key, tiles[i], facts));
+};
 
 // p_severity / he_suffix / trend_of are shared with the fleet summary so the
 // two documents grade and format the same reading identically.

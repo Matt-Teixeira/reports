@@ -84,12 +84,7 @@ const metric_value = (metric) => (metric ? metric.last.v : null);
 // helium, in the SAME row — model.js `last_suspect`) is a monitoring
 // problem, not a magnet problem. Two impossible readings weeks apart prove
 // nothing about each other. Documented in RULES.md §5.
-const {
-  PLAUSIBLE,
-  outside,
-  primary_bounds,
-  helium_bounds
-} = require("./plausible");
+const { PLAUSIBLE, last_raw_flags } = require("./plausible");
 
 const build_summary_facts = (facts, identity) => {
   const { vendor, thr, he_thr, units, pressure, helium } = facts;
@@ -106,15 +101,7 @@ const build_summary_facts = (facts, identity) => {
   // physical sensor. The record drops the alias entirely: its value would
   // render twice, and its flag would count one impossible reading as two.
   const shield_alias = vendor.key === "SIEMENS_NON_TIM";
-  const data_flags = {
-    primary: outside(raw_last.pressure, primary_bounds(units.pressure)),
-    helium: outside(raw_last.helium, helium_bounds(units.helium)),
-    coldhead: outside(raw_last.coldhead_k, PLAUSIBLE.coldhead_k),
-    shield: shield_alias
-      ? false
-      : outside(raw_last.shield_k, PLAUSIBLE.shield_k),
-    cabinet: outside(raw_last.cab_temp, PLAUSIBLE.cabinet_c)
-  };
+  const data_flags = last_raw_flags(raw_last, units, { shield_alias });
   // Display values: the raw garbage when flagged (rendered greyed with ‡),
   // otherwise the last plausible reading from the screened metrics.
   const p_now = data_flags.primary ? raw_last.pressure : metric_value(pressure);

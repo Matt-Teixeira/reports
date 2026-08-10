@@ -18,6 +18,9 @@ h1 { font-size: 17.5pt; color: #002B43; } .sub { font-size: 10.5pt; color: #5758
 .tile .k { font-size: 7.5pt; letter-spacing: .1em; color: #57585A; } .tile .v { font-size: 15pt; font-weight: 800; margin-top: .02in; }
 .tile .s { font-size: 8pt; color: #57585A; margin-top: .015in; }
 .good .v { color: #00695C; } .bad .v { color: #E50B14; } .warn .v { color: #C25E00; } .ink .v { color: #002B43; }
+.dim .v { color: #57585A; }
+.banner { margin-top: .1in; border: 1.5px solid #C9CDD2; border-radius: .1in; padding: .06in .12in; background: #F4F4F5; font-size: 8.4pt; line-height: 1.4; color: #57585A; }
+.banner b { color: #070809; letter-spacing: .06em; }
 h2 { font-size: 10pt; letter-spacing: .1em; color: #004E79; margin: .18in 0 .04in; }
 .story { margin-top: .16in; background: #EBF0F5; border-radius: .12in; padding: .12in .15in; font-size: 9.6pt; line-height: 1.5; }
 .story b { color: #002B43; }
@@ -34,6 +37,11 @@ const tile_html = (t) =>
 
 const card_html = (c) => `<div class="card"><b>${c.heading}</b>${c.body}</div>`;
 
+// Sensor-suspect strip (RULES.md §5) — sits between the sub-line and the
+// tiles so it reframes every value below it before the reader meets one.
+const banner_html = (b) =>
+  b ? `<div class="banner">⚠ <b>${b.label}</b> — ${b.text}</div>\n` : "";
+
 const heading_note = (note) =>
   `<span style="color:#57585A;font-weight:400;letter-spacing:0">${note}</span>`;
 
@@ -42,7 +50,7 @@ const build_page = (vm) => `<!DOCTYPE html><html lang="en"><head><meta charset="
 <div class="band"></div>
 <h1>${vm.h1_text}</h1>
 <div class="sub">${vm.sub_line}</div>
-<div class="tiles">
+${banner_html(vm.banner)}<div class="tiles">
 ${vm.tiles.map(tile_html).join("\n")}
 </div>
 <h2>${vm.pressure_heading} ${heading_note(vm.pressure_heading_note)}</h2>

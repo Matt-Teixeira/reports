@@ -29,4 +29,24 @@ const primary_bounds = (units) => {
 const helium_bounds = (units) =>
   units === "%" ? PLAUSIBLE.helium_pct : PLAUSIBLE.helium_ltrs;
 
-module.exports = { PLAUSIBLE, outside, primary_bounds, helium_bounds };
+// Which channels' LAST RAW (pre-screen) reading is outside its bounds — the
+// shared basis for the greyed-raw ‡ treatment on the fleet columns and the
+// brief tiles, so the two documents can never disagree about which sensor is
+// currently emitting garbage. `shield_alias` drops the non-TIM shield flag:
+// that channel is one physical sensor aliased into the primary slot, and its
+// flag would count one impossible reading as two.
+const last_raw_flags = (raw_last, units, { shield_alias = false } = {}) => ({
+  primary: outside(raw_last.pressure, primary_bounds(units.pressure)),
+  helium: outside(raw_last.helium, helium_bounds(units.helium)),
+  coldhead: outside(raw_last.coldhead_k, PLAUSIBLE.coldhead_k),
+  shield: shield_alias ? false : outside(raw_last.shield_k, PLAUSIBLE.shield_k),
+  cabinet: outside(raw_last.cab_temp, PLAUSIBLE.cabinet_c)
+});
+
+module.exports = {
+  PLAUSIBLE,
+  outside,
+  primary_bounds,
+  helium_bounds,
+  last_raw_flags
+};

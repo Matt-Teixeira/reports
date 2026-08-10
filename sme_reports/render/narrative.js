@@ -248,7 +248,9 @@ const build_cards = (f) => {
 
   return [
     {
-      heading: `CURRENT — ${fmt.day_caps(f.window_end)} (last readings)`,
+      // On a convicted sensor chain the "current" values are what the
+      // sensor says, not what the magnet is — the heading says so.
+      heading: `CURRENT — ${fmt.day_caps(f.window_end)} (${f.last_suspect === true && !f.quenched ? "sensor's claims" : "last readings"})`,
       body: `${current.join(". ")}.`
     },
     { heading: "RATES", body: rates.join(" ") },
@@ -256,8 +258,22 @@ const build_cards = (f) => {
   ];
 };
 
+// A convicted sensor chain (RULES.md §5) reframes the whole story: the
+// timeline still runs — its measured parts (an EDU compressor) are real —
+// but everything read from the convicted chain is the sensor's claim. A
+// recorded quench overrides suspect, so a quenched page never leads with a
+// monitoring caveat.
+const suspect_lead = (f) => {
+  if (f.last_suspect !== true || f.quenched) return "";
+  const total = Object.values(f.implausible || {}).reduce((n, c) => n + c, 0);
+  return (
+    `<b>Monitoring suspect:</b> ${fmt.count(total)} reading${total === 1 ? "" : "s"} this period fell outside plausible physical bounds, and the latest capture combines impossible values — ` +
+    `the sensor chain, not the magnet, is the likely fault. The timeline below reports the sensor's claims. `
+  );
+};
+
 const build_narrative = (facts) => ({
-  story_html: STORIES[facts.archetype](facts),
+  story_html: suspect_lead(facts) + STORIES[facts.archetype](facts),
   rx_cards: build_cards(facts)
 });
 

@@ -1,0 +1,10 @@
+{
+  "reports": [
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20122",
+      "recipients": ["dev@example.com"],
+      "output": { "html": true, "pdf": false, "email": false, "archive": false }
+    }
+  ]
+}
