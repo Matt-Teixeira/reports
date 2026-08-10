@@ -1341,6 +1341,52 @@ const philips_series = [];
   assert.strictEqual(rec.data_flags.helium, true, "fleet greys the same channel");
 }
 
+// --- stale boundary and null-metric NOW channels (tile pass edges) ----------
+{
+  const { build_tiles } = require("../render/tiles");
+  const DAY = 24 * HOUR;
+  const end = 1000 * DAY;
+  const stub = (over) => ({
+    vendor: {
+      key: "GE",
+      tiles: ["compressor", "coldhead", "pressure_now", "event_peak", "helium"],
+      pressure: { decimals: 3 }, helium: { decimals: 2 },
+      primary: { tile_now: "PRESSURE NOW", name: "He pressure" },
+      coldhead: { warm_k: 10 }
+    },
+    thr: { high_gt: 5.2, high_lt: 0.5, med_gt: null, med_lt: null },
+    he_thr: { low_high: 50, low_med: null, units: "%" },
+    units: { pressure: "PSI", helium: "%" },
+    window_end: end, quenched: false,
+    compressor_event: null, compressor_events: [], compressor_flickers: null,
+    last_compressor_on: true, compressor_source: "edu_comp_vib",
+    coldhead: { last: { t: end, v: 4.2 }, max: { v: 4.5 } },
+    pressure: { last: { t: end, v: 1.2 }, peak: { t: end, v: 1.2 }, rate_per_hr: null },
+    helium: { last: { t: end, v: 70 }, delta_vs_baseline: 0.1 },
+    raw_last: { pressure: 1.2, helium: 70, coldhead_k: 4.2, shield_k: null, cab_temp: null },
+    data_flags: { primary: false, helium: false, coldhead: false, shield: false, cabinet: false },
+    last_suspect: false, implausible: {},
+    ...over
+  });
+  const p_tile = (f) => build_tiles(f).find((t) => t.k === "PRESSURE NOW");
+  // Staleness is strictly MORE than 24 h: a reading exactly a day old keeps
+  // its plain sub-line; one millisecond older says which day it is from.
+  const at_24h = p_tile(stub({ pressure: { last: { t: end - 24 * HOUR, v: 1.2 }, peak: { t: end, v: 1.2 }, rate_per_hr: null } }));
+  assert.ok(!at_24h.s.startsWith("as of"), `exactly 24 h is not stale: ${at_24h.s}`);
+  const past_24h = p_tile(stub({ pressure: { last: { t: end - 24 * HOUR - 1, v: 1.2 }, peak: { t: end, v: 1.2 }, rate_per_hr: null } }));
+  assert.ok(past_24h.s.startsWith("as of"), `24 h + 1 ms is stale: ${past_24h.s}`);
+  // Null metrics must survive the degrade pass in both modes: the tile
+  // reads "—" and the suspect suspension does not crash on a missing
+  // channel.
+  for (const suspect of [false, true]) {
+    const tiles = build_tiles(stub({ pressure: null, coldhead: null, helium: null, last_suspect: suspect }));
+    for (const k of ["PRESSURE NOW", "COLDHEAD", "HELIUM", "EVENT PEAK"]) {
+      const t = tiles.find((x) => x.k === k);
+      assert.strictEqual(t.v, "—", `${k} with no data reads — (suspect=${suspect})`);
+    }
+  }
+}
+
 // --- one-page geometry, measured in Chromium (review F1) --------------------
 // The brief is 11in with overflow:hidden and an absolutely-positioned
 // footer: anything past the footer is clipped SILENTLY, so layout claims
@@ -1390,6 +1436,9 @@ const philips_series = [];
   assert.strictEqual(max_banner.density, "compact", "maximal banner page selects the compact tier");
   assert.strictEqual(max_plain.density, "compact", "maximal plain page selects the compact tier");
   assert.ok(max_banner.story_html.includes("+5 more"), "other-events day list is capped");
+  // Short charts recompute their geometry, not just their viewBox: at 92
+  // the x-label row sits at height − 6.
+  assert.ok(max_banner.pressure_chart_svg.includes('y="86"'), "compact-banner chart x-labels at height − 6");
   // A suspect Philips exercises the temp-alarm tile under the conviction.
   const ta = max_banner.tiles.find((t) => t.k === "TEMP ALARM");
   assert.strictEqual(ta.cls, "dim", "temp-alarm tile is suspended on a convicted page");
