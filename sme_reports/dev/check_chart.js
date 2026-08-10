@@ -1098,6 +1098,30 @@ const philips_series = [];
   assert.strictEqual(rec.offline_kind, "warm");
   assert.strictEqual(effective_status(rec), "warm_offline");
   assert.ok(!is_urgent(rec), "never urgent");
+  // Codex round-1 F2: the quench override must gate the overlay VERDICT in
+  // ONE place (offline_state), so the brief and the fleet record cannot
+  // reach different conclusions from the same facts. The censoring FACT
+  // survives: the fleet history cell still says "entire period".
+  {
+    const q_series = normalize_ge(raw, VENDORS.GE).map((r, i) =>
+      i === 719 ? { ...r, quenched: true } : r
+    );
+    const qvm = build_render_model({
+      identity, vendor: VENDORS.GE, series: q_series, source: "synthetic",
+      request: normalize_request({
+        report_type: "magnet_health", system_id: "SME99005", recipients: ["dev@example.com"],
+        window: { start: "2026-07-01", end: "2026-07-31" }, output: { html: false, pdf: false, email: false }
+      })
+    });
+    assert.strictEqual(qvm.facts.offline_kind, null, "quench suppresses the overlay on the brief");
+    assert.strictEqual(qvm.facts.left_censored, true, "the censoring fact is not erased");
+    assert.ok(!qvm.story_html.includes("off the entire periodᶜ"), "quench story is not reframed");
+    const qrec = build_summary_facts(qvm.facts, identity);
+    assert.strictEqual(qrec.offline_kind, null, "fleet record gates identically");
+    assert.strictEqual(qrec.left_censored, true, "history cell still reads entire period");
+    assert.strictEqual(effective_status(qrec), null, "no overlay label competes with QUENCH");
+    assert.ok(is_urgent(qrec), "the quench itself stays urgent");
+  }
 }
 
 // --- brief/fleet parity: left-censored, no thermal response (no signal) -----

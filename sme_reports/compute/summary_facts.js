@@ -126,9 +126,20 @@ const offline_state = (facts) => {
       vendor.coldhead &&
       coldhead_k >= vendor.coldhead.warm_k) ||
     primary_trend === "rising";
+  // A recorded quench overrides the overlay VERDICT — missing a real quench
+  // is the costlier error — but not the censoring FACT: whether the stop
+  // was observed starting is coverage arithmetic, and the fleet's history
+  // cell still reads "entire period" rather than fabricating an hour count.
+  // The override lives here, not in the callers, so the brief and the fleet
+  // record cannot gate it differently.
   return {
     left_censored,
-    offline_kind: !left_censored ? null : warm_corroborated ? "warm" : "no_signal"
+    offline_kind:
+      !left_censored || facts.quenched === true
+        ? null
+        : warm_corroborated
+          ? "warm"
+          : "no_signal"
   };
 };
 

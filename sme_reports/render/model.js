@@ -309,11 +309,9 @@ const build_render_model = ({
   facts.archetype = classify({ compressor_event, pressure, thr });
   // Left-censored ongoing stops (RULES.md §5), via the classifier shared
   // with the fleet record so the two documents cannot split the same stop
-  // into different stories. A recorded quench overrides every overlay —
-  // the quench story must never be reframed as a monitoring caveat.
-  const offline = quenched
-    ? { left_censored: false, offline_kind: null }
-    : offline_state(facts);
+  // into different stories. The quench override lives inside the classifier
+  // for the same reason.
+  const offline = offline_state(facts);
   facts.left_censored = offline.left_censored;
   facts.offline_kind = offline.offline_kind;
 
