@@ -4,3 +4,9 @@ utils/
 *.txt
 sme_reports/out/
 *Zone.Identifier
+
+# Generated report artifacts — never tracked (delivered PDFs live in email
+# and sme_reports/out|archive on the box that rendered them)
+sme_reports/archive/
+/Avante-*.pdf
+/Avante-*.html
