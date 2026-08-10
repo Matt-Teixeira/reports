@@ -233,3 +233,34 @@ access rather than assuming it.
    does it test the failure mode or a tautology?
 5. **Ran**: the exact commands you executed and their results.
 6. **Test gaps**: behaviors you judged correct but found unasserted.
+
+---
+
+## Round-1 outcome (2026-08-10) — all four findings fixed
+
+Verdict was DO NOT SHIP; every finding was reproduced, fixed, and given a
+regression test. For re-review: verify each fix holds and that no fix
+introduced a new defect.
+
+| # | Fix | Where | Regression test |
+|---|---|---|---|
+| F1 | Two-tier density: narrative is built before the charts; pages whose flowed text (story + cards + banner) exceeds `COMPACT_AT = 1400` chars render the compact tier (smaller story/card faces; charts banner 100→92, plain 152→128). Other-events day list capped at 4 named days ("+N more"), so story length is bounded while counts/totals stay exact. Calibration: normal capacity cliff ≈ 1,600 chars (1,577 fit at 35px, 1,648 clipped 22px); of 150 live briefs only SME20122 crosses the threshold (its margin went 35→171px) | `render/model.js` (density), `render/page.js` (`COMPACT_CSS`), `render/narrative.js` (day cap) | `check_chart.js` "one-page geometry, measured in Chromium": two maximal fixtures (10 events, 6 flickers, 2 alarm runs, EDU; ± suspect banner) must select compact, and EVERY synthetic page is laid out in headless Chromium and must clear the footer by ≥12px; sub-line ellipsis asserted active on the overflowing fixture |
+| F2 | Quench override moved INSIDE `offline_state`: it nulls the overlay VERDICT (`offline_kind`) for both documents while the censoring FACT (`left_censored`) survives, so the fleet history cell still reads "entire period" and `attention_reason` still leads with the quench | `compute/summary_facts.js`, `render/model.js` (local gate removed) | `check_chart.js` warm-fixture quench variant: both sides null the verdict, keep the fact, `effective_status` null, still urgent via the quench |
+| F3 | One effective overlay: `facts.offline_kind` is nulled on the brief when the suspect conviction wins (same precedence as `conditions.effective_status`), so banner, tiles, story, and CURRENT card all speak in the suspect framing and the scanner-sourced compressor claim is suspended like every other claim | `render/model.js` | `check_chart.js` "suspect precedence": Philips off-all-period + impossible final capture → one verdict end-to-end, no "No compressor signal" anywhere, fleet label `sensor_suspect` |
+| F4 | Every inferred compressor conclusion carries ᶜ — including the negatives ("No compressor eventsᶜ", "No compressor stopᶜ") and the deductions (flickerᶜ, cycled on/offᶜ, other stop eventsᶜ). Measured/scanner sources stay unmarked | `render/narrative.js` | `check_chart.js` "ᶜ provenance on every inferred narrative conclusion": one fixture per archetype on an EDU-less GE, plus a measured-EDU counterexample asserting zero marks on the whole page |
+
+Also closed from the test-gap list: exact-24h stale boundary (strictly
+more than 24 h), null-metric NOW channels through the degrade pass in both
+modes, short-chart coordinate recomputation (x-labels at height − 6),
+Philips temp-alarm tile suspended under conviction (inside the maximal
+fixture), sub-line ellipsis verified in Chromium, and a fleet parity
+assertion for the quench override. Still open, accepted: no suspect
+fixture for the non-TIM cabinet tile (the tile shares the degrade path
+asserted for temp-alarm), and `COMPACT_AT` is a calibrated constant rather
+than a per-page measurement — the Chromium check re-measures the bound on
+every run.
+
+Live probes after the fixes (no-send pattern): SME20122 renders compact
+with the suspect banner, 171px clear of the footer; SME20292 is unchanged
+(normal tier, `OFFᶜ`, 61px). All three dev checks pass, including the new
+Chromium geometry pass over nine synthetic pages.
