@@ -204,6 +204,13 @@ corroboration:
   unmarked: its off-runs were read, not concluded.
 - The summary email's condition cells carry the same mark, so the two views
   cannot disagree about foundations.
+- The per-system **brief** carries the same mark wherever it states a
+  coldhead-inferred compressor state: the tile value (**ONᶜ / OFFᶜ /
+  RESTARTEDᶜ**), the CURRENT card, and the narrative's state words
+  ("the compressor stoppedᶜ … (inferred from coldhead temperature)").
+  Measured (EDU) and scanner-reported states stay unmarked. The brief's one
+  legend line lives in the DATA NOTES card, only on pages that carry a mark;
+  a sensor-suspect banner defines ᶜ and ‡ inline instead.
 
 The legend defines the mark in one line. Marking everything "d" was
 considered and rejected: ~1,500 marks per document on cells nobody doubts

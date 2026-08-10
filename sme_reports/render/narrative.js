@@ -12,9 +12,17 @@ const thr = (facts) => facts.thr.high_gt;
 const p_name = (facts) => facts.vendor.primary.name;
 const he_sfx = (facts) =>
   facts.units.helium === "%" ? "%" : ` ${facts.units.helium}`;
-// Compressor state inferred from the EDU vibration sensor gets called out.
+// How the compressor state is known: measured on the EDU, or concluded from
+// the coldhead (RULES.md §6). Inferred state words carry the ᶜ mark — the
+// same convention as the fleet document, defined in the DATA NOTES card.
 const comp_via = (facts) =>
-  facts.compressor_source === "edu_comp_vib" ? " (per EDU vibration sensor)" : "";
+  facts.compressor_source === "edu_comp_vib"
+    ? " (per EDU vibration sensor)"
+    : facts.compressor_source === "coldhead_ruo_value"
+      ? " (inferred from coldhead temperature)"
+      : "";
+const comp_c = (facts) =>
+  facts.compressor_source === "coldhead_ruo_value" ? "ᶜ" : "";
 
 // Single-reading dropouts with no thermal response are reported as probable
 // sensor flickers, not treated as true compressor stops.
@@ -151,8 +159,8 @@ const STORIES = {
     );
     return (
       `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
-      `<b>${fmt.ts(ev.start)}: the compressor stopped</b>${comp_via(f)}${cycles}.${alarm_sentence(f)} ` +
-      `${peak_sentence(f)} <b>The compressor recovered ${fmt.ts(ev.end)}</b>${later ? "" : " and has held since"}.` +
+      `<b>${fmt.ts(ev.start)}: the compressor stopped${comp_c(f)}</b>${comp_via(f)}${cycles}.${alarm_sentence(f)} ` +
+      `${peak_sentence(f)} <b>The compressor recovered${comp_c(f)} ${fmt.ts(ev.end)}</b>${later ? "" : " and has held since"}.` +
       `${other_events_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
     );
   },
@@ -160,7 +168,7 @@ const STORIES = {
     const ev = f.compressor_event;
     return (
       `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
-      `<b>${fmt.ts(ev.start)}: the compressor stopped and has not recovered</b>${comp_via(f)} — off ${fmt.hours(ev.off_hours)} at the last capture (${ev.off_count} readings off).${alarm_sentence(f)} ` +
+      `<b>${fmt.ts(ev.start)}: the compressor stopped${comp_c(f)} and has not recovered</b>${comp_via(f)} — off ${fmt.hours(ev.off_hours)} at the last capture (${ev.off_count} readings off).${alarm_sentence(f)} ` +
       `${peak_sentence(f)}${other_events_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)} ` +
       `<b>Warming event OPEN at end of data.</b>`
     );
@@ -184,7 +192,7 @@ const build_cards = (f) => {
     const on = f.compressor_event
       ? f.compressor_event.end !== null
       : f.last_compressor_on;
-    current.push(`Compressor ${on ? "ON" : "OFF"}`);
+    current.push(`Compressor ${on ? "ON" : "OFF"}${comp_c(f)}`);
   }
   if (p)
     current.push(
@@ -245,6 +253,11 @@ const build_cards = (f) => {
     notes.push(
       `Host clock ~${Math.round(f.clock_skew_minutes)} min off vs capture time — times shown use capture time.`
     );
+  // The brief's one legend line (RULES.md §6): defines the ᶜ mark on the
+  // pages that carry it. Suspect pages skip it — their banner already
+  // defines ᶜ and ‡ inline.
+  if (comp_c(f) && !(f.last_suspect === true && !f.quenched))
+    notes.push("ᶜ = concluded (coldhead-inferred compressor state), not measured.");
 
   return [
     {

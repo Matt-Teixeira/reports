@@ -56,6 +56,10 @@ const BUILDERS = {
   compressor: (f) => {
     const ev = f.compressor_event;
     const fl = f.compressor_flickers;
+    // The ᶜ provenance mark (RULES.md §6): a coldhead-inferred state is a
+    // conclusion, not a reading — every ON/OFF this tile prints from that
+    // source carries the mark, exactly like the fleet's compressor cells.
+    const c = f.compressor_source === "coldhead_ruo_value" ? "ᶜ" : "";
     // Distinct clustered events beyond the primary; "other", not "earlier" —
     // they can fall on either side of it.
     const others = (f.compressor_events || []).length - 1;
@@ -86,7 +90,7 @@ const BUILDERS = {
       return {
         cls: on === false ? "bad" : "good",
         k: "COMPRESSOR",
-        v: on === false ? "OFF" : "ON",
+        v: (on === false ? "OFF" : "ON") + c,
         s:
           on === false
             ? "off at last reading"
@@ -99,20 +103,20 @@ const BUILDERS = {
       return {
         cls: "bad",
         k: "COMPRESSOR",
-        v: "OFF",
+        v: `OFF${c}`,
         s: `stopped ${fmt.ts(ev.start)} · off ${fmt.hours(ev.off_hours)}${more}`
       };
     if (ev.cycles > 1)
       return {
         cls: "good",
         k: "COMPRESSOR",
-        v: "ON",
+        v: `ON${c}`,
         s: `recovered ${fmt.ts(ev.end)} · ${ev.cycles} cycles from ${fmt.ts(ev.start)}${more}`
       };
     return {
       cls: "good",
       k: "COMPRESSOR",
-      v: "RESTARTED",
+      v: `RESTARTED${c}`,
       s: `recovered ${fmt.ts(ev.end)} · off ${fmt.hours(ev.off_hours)}${more}`
     };
   },
