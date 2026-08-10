@@ -122,13 +122,27 @@ const BUILDERS = {
       // Left-censored but the overlay verdict was suppressed (quench or
       // suspect precedence): the FACT that the stop predates the data
       // still holds, so the tile must not fabricate a start time or an
-      // hour count from the period boundary (review round-2 F1).
+      // hour count from the period boundary (review round-2 F1). "Every
+      // reading" is only claimed when it is literally true — left_censored
+      // requires no ON reading ever.
       if (f.left_censored)
         return {
           cls: "bad",
           k: "COMPRESSOR",
           v: `OFF${c}`,
           s: "off at every reading this period · start and downtime unknown"
+        };
+      // Start-truncated (review round-3 F1): the event's first off-run was
+      // already underway when coverage began, but the compressor was later
+      // seen running and stopped AGAIN — that trailing stop is observed
+      // and anchors the claim; the event's `start` (the coverage boundary)
+      // must not be presented as when the stop began.
+      if (f.compressor_start_truncated)
+        return {
+          cls: "bad",
+          k: "COMPRESSOR",
+          v: `OFF${c}`,
+          s: `already off at first reading · off again ${ev.last_stop_t != null ? fmt.ts(ev.last_stop_t) : "later in the period"}${more}`
         };
       return {
         cls: "bad",

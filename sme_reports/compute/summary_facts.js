@@ -108,15 +108,30 @@ const offline_state = (facts) => {
   const coldhead_k =
     !data_flags.coldhead && facts.coldhead ? facts.coldhead.last.v : null;
   const primary_trend = p_ok ? trend_of(pressure) : null;
+  const boundary_covered =
+    facts.compressor_first_stateful_t !== null &&
+    facts.compressor_first_stateful_t - facts.window_start <=
+      LEFT_CENSOR_GRACE_MS;
+  // Left-censored means NO ON reading EVER — "off the entire period" is a
+  // categorical claim and one observed ON reading falsifies it (review
+  // round-3 F1: an OFF→ON→OFF boundary event clusters into one event whose
+  // first ON postdates its start; it must not be narrated "off at every
+  // reading"). Such an event is instead START-TRUNCATED: its trailing stop
+  // was observed — real, urgent-eligible — and only its initial run's
+  // start (and earlier downtime) is unknown.
   const left_censored =
     facts.archetype === "compressor_stop_ongoing" &&
     primary !== null &&
     primary !== undefined &&
-    (facts.compressor_first_on_t === null ||
-      facts.compressor_first_on_t > primary.start) &&
-    facts.compressor_first_stateful_t !== null &&
-    facts.compressor_first_stateful_t - facts.window_start <=
-      LEFT_CENSOR_GRACE_MS;
+    facts.compressor_first_on_t === null &&
+    boundary_covered;
+  const start_truncated =
+    !left_censored &&
+    facts.archetype === "compressor_stop_ongoing" &&
+    primary !== null &&
+    primary !== undefined &&
+    primary.start === facts.compressor_first_stateful_t &&
+    boundary_covered;
   const warm_corroborated =
     (p_ok &&
       p_now !== null &&
@@ -134,6 +149,7 @@ const offline_state = (facts) => {
   // record cannot gate it differently.
   return {
     left_censored,
+    start_truncated,
     offline_kind:
       !left_censored || facts.quenched === true
         ? null

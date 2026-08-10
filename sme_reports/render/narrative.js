@@ -200,12 +200,27 @@ const STORIES = {
     // precedence): the stop was never observed starting, so the story must
     // not invent the period boundary as its start, claim a downtime total,
     // or frame an event whose timing is unknown as OPEN (review round-2
-    // F1). The neutral coverage wording states exactly what was read.
+    // F1). The neutral coverage wording states exactly what was read —
+    // and "every reading" is only claimed when left_censored guarantees no
+    // ON reading exists.
     if (f.left_censored)
       return (
         `<b>Timeline (UTC):</b> <b>The compressor read OFF at every reading this period${comp_c(f)}</b>${comp_via(f)} — ` +
         `already off at the first compressor reading (${fmt.ts(f.compressor_first_stateful_t)}), so its true start and total downtime are unknown. ` +
         `${peak_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
+      );
+    // Start-truncated (review round-3 F1): the event's first off-run was
+    // underway when coverage began, but the compressor was later seen
+    // running and stopped again. The observed trailing stop anchors the
+    // story; the initial run's start and earlier downtime stay unclaimed.
+    if (f.compressor_start_truncated)
+      return (
+        `<b>Timeline (UTC):</b> <b>The compressor was already off when the data begins${comp_c(f)}</b>${comp_via(f)} — ` +
+        `that initial stop predates the period, so its start and earlier downtime are unknown. ` +
+        `It was first seen running ${fmt.ts(f.compressor_first_on_t)}, then <b>stopped again ${ev.last_stop_t != null ? fmt.ts(ev.last_stop_t) : "later in the period"}${comp_c(f)} and has not recovered</b> — ` +
+        `off ${fmt.hours(ev.off_hours)} observed across ${ev.cycles} off-runs (${ev.off_count} readings off).${alarm_sentence(f)} ` +
+        `${peak_sentence(f)}${other_events_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)} ` +
+        `<b>Warming event OPEN at end of data.</b>`
       );
     return (
       `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +

@@ -329,6 +329,7 @@ const build_render_model = ({
   // for the same reason.
   const offline = offline_state(facts);
   facts.left_censored = offline.left_censored;
+  facts.compressor_start_truncated = offline.start_truncated;
   // Suspect conviction outranks the left-censor overlays — the same
   // precedence conditions.effective_status applies among data issues on the
   // fleet. facts.offline_kind is the ONE effective overlay driving banner,

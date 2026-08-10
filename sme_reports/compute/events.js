@@ -64,6 +64,11 @@ const build_compressor_events = (
     return {
       start: runs[0].start,
       end: open ? null : last.recovered_t, // null => still off at end of window
+      // Start of the event's FINAL off-run: for a multi-run event whose
+      // first run is left-truncated (already off when coverage began), this
+      // is the observed moment the compressor went down for good — the
+      // event's `start` would misstate it by the truncated run's span.
+      last_stop_t: last.start,
       cycles: runs.length,
       off_count: runs.reduce((n, r) => n + r.count, 0),
       off_hours: off_ms / 3600000

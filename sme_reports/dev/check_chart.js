@@ -1317,6 +1317,65 @@ const philips_series = [];
   assert.strictEqual(effective_status(rec), "sensor_suspect", "fleet label applies the same precedence");
 }
 
+// --- start-truncated multi-cycle boundary event (review round-3 F1) ---------
+{
+  // OFF at hours 0–4, ON at 5–9, OFF from 10 to the end: one clustered
+  // event (cycles 2) whose FIRST run was already underway at coverage
+  // start. Five readings were ON, so "off at every reading" and "entire
+  // period" are categorically false — and the trailing stop's start WAS
+  // observed, so it anchors the claim and the stop stays urgent-eligible.
+  const { normalize_philips } = require("../normalize");
+  const { build_summary_facts } = require("../compute/summary_facts");
+  const { effective_status, is_urgent } = require("../conditions");
+  const rows_for = (quench) => {
+    const raw = [];
+    for (let h = 0; h < 720; h++) {
+      const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+      const on = h >= 5 && h <= 9;
+      raw.push({
+        capture_datetime: iso, host_datetime: iso,
+        monitor_magnet_pressure_value: "29", he_psi_avg_value: "29",
+        helium_level_value: "76.5",
+        cryo_comp_malf_value: on ? "0" : "60",
+        cryo_comp_temp_alarm_state: "0", tech_room_temp_value: "21",
+        quenched_state: quench && h === 719 ? "1" : "0"
+      });
+    }
+    return normalize_philips(raw, VENDORS.PHILIPS);
+  };
+  const identity = { system_id: "SME99009", manufacturer: "Philips", modality: "MRI", site_name: "Boundary Cycle Imaging", city: "X", state: "TN", customer_name: "X" };
+  const request = normalize_request({
+    report_type: "magnet_health", system_id: "SME99009", recipients: ["dev@example.com"],
+    window: { start: "2026-07-01", end: "2026-07-31" }, output: { html: false, pdf: false, email: false }
+  });
+  const vm = build_render_model({ identity, vendor: VENDORS.PHILIPS, series: rows_for(false), source: "synthetic", request });
+  assert.strictEqual(vm.facts.compressor_event.cycles, 2, "one clustered event, two off-runs");
+  assert.strictEqual(vm.facts.left_censored, false, "an observed ON falsifies 'entire period'");
+  assert.strictEqual(vm.facts.compressor_start_truncated, true, "the initial run is start-truncated");
+  assert.strictEqual(vm.facts.offline_kind, null, "no left-censor overlay");
+  const comp = vm.tiles[0];
+  assert.ok(comp.s.includes("already off at first reading"), comp.s);
+  assert.ok(comp.s.includes("off again Jul 1 10:00Z"), `observed trailing stop anchors the tile: ${comp.s}`);
+  assert.ok(!comp.s.includes("stopped Jul 1 00:00Z"), `boundary is not a start: ${comp.s}`);
+  assert.ok(!comp.s.includes("every reading"), comp.s);
+  assert.ok(vm.story_html.includes("already off when the data begins"), "story states the truncation");
+  assert.ok(vm.story_html.includes("first seen running Jul 1 05:00Z"), "observed ON is stated");
+  assert.ok(vm.story_html.includes("stopped again Jul 1 10:00Z"), "observed trailing stop is stated");
+  assert.ok(!vm.story_html.includes("at every reading"), "no categorical claim");
+  assert.ok(!vm.story_html.includes("entire period"), "no entire-period claim");
+  assert.ok(!vm.story_html.includes("No compressor signal"), "a signal that changed state is not dead");
+  const rec = build_summary_facts(vm.facts, identity);
+  assert.strictEqual(rec.left_censored, false, "fleet history cell reports measured hours, not 'entire period'");
+  assert.strictEqual(effective_status(rec), null, "ordinary ongoing-stop condition");
+  assert.ok(is_urgent(rec), "an observed stop stays urgent however long it has run");
+  // Quench variant: overlays are suppressed anyway; the truncated-start
+  // wording must hold, not regress to fabricated timing.
+  const qvm = build_render_model({ identity, vendor: VENDORS.PHILIPS, series: rows_for(true), source: "synthetic", request });
+  assert.ok(qvm.tiles[0].s.includes("already off at first reading"), qvm.tiles[0].s);
+  assert.ok(!qvm.story_html.includes("at every reading"), "quench page carries no categorical claim");
+  assert.ok(qvm.story_html.includes("stopped again Jul 1 10:00Z"), "quench page keeps the observed anchor");
+}
+
 // --- stale NOW and single-channel ‡ without a conviction --------------------
 {
   // The plausibility screen's silent failure mode: a channel that stops
