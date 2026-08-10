@@ -264,3 +264,28 @@ Live probes after the fixes (no-send pattern): SME20122 renders compact
 with the suspect banner, 171px clear of the footer; SME20292 is unchanged
 (normal tier, `OFFᶜ`, 61px). All three dev checks pass, including the new
 Chromium geometry pass over nine synthetic pages.
+
+---
+
+## Round-2 outcome (2026-08-10) — both findings fixed
+
+Round 2 verdict was DO NOT SHIP on a residual of the F2/F3 precedence
+work plus one pre-existing narrative defect; both reproduced and fixed.
+
+| # | Fix | Where | Regression test |
+|---|---|---|---|
+| R2-F1 | Censor-aware rendering is now independent of the overlay verdict: when `left_censored` holds but the verdict was suppressed (quench override, suspect precedence), the compressor tile and the ongoing story render neutral coverage wording — "off at every reading this period · start and downtime unknown" — consuming neither `event.start`, nor `off_hours`, nor the OPEN-event line. Observed ongoing stops are untouched | `render/tiles.js`, `render/narrative.js` | Both precedence fixtures (warm+quench variant, suspect-over-no-signal) now assert the RENDERED tile and story: no fabricated start, no hour count, no "Warming event OPEN", neutral wording present |
+| R2-F2 | `facts.coldhead_baseline_max` gained a real producer: the warmest screened coldhead reading before the primary event (whole period when no event; null when no pre-event reading exists). The narrative's "coldhead at base temperature" renders only when that maximum sits under the vendor's warm line; `!= null` also rejects stubs that never produce the field | `render/model.js`, `render/narrative.js` | All-warm left-censor fixture asserts the claim is ABSENT; the recovered fixture (4.2 K pre-event) asserts the earned claim survives |
+
+Live probes after round 2: SME20292's observed stop keeps its real timing
+("stopped Aug 10 03:45Z") and its base-temperature baseline claim is now
+EARNED (pre-event coldhead at 4.3 K before warming to ~146 K); SME20122
+unchanged (compact, banner, 171px). All three dev checks pass.
+
+Remaining accepted gaps (unchanged from your list): non-TIM suspect
+cabinet tile unasserted (shares the degrade path asserted for
+temp-alarm); geometry coverage does not constrain arbitrary
+`narrative_overrides` (hand-supplied prose is the requester's
+responsibility, same stance as the fleet's request overrides); a single
+compact tier (the Chromium check re-measures the bound every run and
+would catch a page that outgrows it).
