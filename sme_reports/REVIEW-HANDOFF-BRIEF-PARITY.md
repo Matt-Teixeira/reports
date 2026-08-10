@@ -1,5 +1,15 @@
 # Code Review Request — brief parity with the fleet's data-quality rules
 
+> **CLOSED — SHIP (2026-08-10, round 5).** Four review rounds produced
+> seven findings (2 blockers, 5 major); all reproduced, fixed, and
+> regression-tested — outcome tables below. Round 5 verified the round-4
+> fixes independently and returned SHIP with no findings. Remaining
+> accepted gaps: non-TIM suspect/cabinet tile rendering not directly
+> fixture-tested (shares the asserted degrade path); arbitrary
+> `narrative_overrides` outside geometry guarantees (requester's
+> responsibility); live DB reports verified by probe on this machine, not
+> by the reviewer.
+
 You are reviewing the committed series `8d2a611..1244115` (7 commits) on
 branch `DEV` of this repo (`/home/matt-teixeira/hep3/reports`). Review the
 range with `git diff 8d2a611..1244115` / `git log -p`. Your findings will be

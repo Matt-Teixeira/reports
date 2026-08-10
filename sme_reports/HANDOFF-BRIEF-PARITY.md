@@ -1,5 +1,10 @@
 # Handoff — per-system brief parity with the fleet summary's data-quality rules
 
+> **COMPLETED 2026-08-10.** All five work items (P1–P5) shipped, plus a
+> compact density tier, start-truncated boundary-event handling, and a
+> Chromium geometry check for the brief. External review: 5 rounds, SHIP —
+> see `REVIEW-HANDOFF-BRIEF-PARITY.md` for the full outcome tables.
+
 You are picking up work in `/home/matt-teixeira/hep3/reports` (branch `DEV`,
 clean tree as of commit `8d2a611`). Read `sme_reports/RULES.md` first — it is
 the rule-of-record — then `sme_reports/REVIEW-HANDOFF-PRECOMMIT.md` for how
