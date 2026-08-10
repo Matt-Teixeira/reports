@@ -19,6 +19,18 @@ const metric_points = (series, field) =>
     .filter((r) => r[field] != null && !Number.isNaN(r[field]))
     .map((r) => ({ t: r.t, v: r[field] }));
 
+// Median gap between consecutive captures. Used to charge each off reading
+// one capture period of downtime: a single-reading stop lasted at least the
+// period it was observed over, not zero. Null when there is nothing to
+// measure (fewer than two rows).
+const median_interval_ms = (series) => {
+  if (series.length < 2) return null;
+  const gaps = [];
+  for (let i = 1; i < series.length; i++) gaps.push(series[i].t - series[i - 1].t);
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)];
+};
+
 // Groups points into UTC days -> [{t: day_start_ms, min, max, last}]
 const daily_rollup = (points) => {
   const days = new Map();
@@ -57,6 +69,7 @@ module.exports = {
   clean_series,
   chart_mode,
   metric_points,
+  median_interval_ms,
   daily_rollup,
   chart_points
 };

@@ -1,8 +1,9 @@
 // Compressor event detection over the normalized series.
 // An "off run" is a contiguous stretch of rows with compressor_on === false
-// (nulls are skipped, they carry no state information). The overall event
-// window spans first stop -> recovery after the last off run, or stays open
-// (end = null) when the series ends with the compressor off.
+// (nulls are skipped, they carry no state information). Runs separated by
+// more than EVENT_GAP_MS of ON time are distinct events (clusters); each
+// event spans its first stop -> recovery after its last off run, or stays
+// open (end = null) when the series ends with the compressor off.
 
 const find_off_runs = (series) => {
   const stateful = series.filter((r) => r.compressor_on !== null);
@@ -25,17 +26,103 @@ const find_off_runs = (series) => {
   return off_runs;
 };
 
-const build_compressor_event = (off_runs) => {
-  if (!off_runs.length) return null;
-  const last = off_runs[off_runs.length - 1];
-  const off_count = off_runs.reduce((n, r) => n + r.count, 0);
-  return {
-    start: off_runs[0].start,
-    end: last.recovered_t || null, // null => compressor still off at end of window
-    cycles: off_runs.length,
-    off_count,
-    off_hours: (last.end - off_runs[0].start) / 3600000
-  };
+// Real off-runs whose ON gap (next stop minus previous recovery) exceeds
+// this are separate incidents, not one event. Time-based rather than
+// reading-count based — EDU-sourced compressor cadence differs from mag rows.
+const EVENT_GAP_MS = 48 * 3600000;
+
+// Off time contributed by one run: the span of its off readings plus one
+// capture period, because each off reading stands for the period it was
+// observed over — a single-reading stop counts as one period, not zero.
+// The trailing period is capped at the actual time to recovery, so a dense
+// burst of captures inside an otherwise sparse series can never report more
+// downtime than elapsed between the stop and the restart. An unrecovered run
+// has nothing to cap against and takes the full period.
+const run_off_ms = (run, interval_ms) => {
+  const tail = run.recovered_t
+    ? Math.min(interval_ms, Math.max(0, run.recovered_t - run.end))
+    : interval_ms;
+  return run.end - run.start + tail;
+};
+
+const build_compressor_events = (
+  off_runs,
+  { gap_ms = EVENT_GAP_MS, interval_ms = 0 } = {}
+) => {
+  if (!off_runs.length) return [];
+  const clusters = [[off_runs[0]]];
+  for (let i = 1; i < off_runs.length; i++) {
+    const prev = off_runs[i - 1];
+    const gap = off_runs[i].start - (prev.recovered_t || prev.end);
+    if (gap > gap_ms) clusters.push([off_runs[i]]);
+    else clusters[clusters.length - 1].push(off_runs[i]);
+  }
+  return clusters.map((runs) => {
+    const last = runs[runs.length - 1];
+    const open = !last.recovered_t;
+    const off_ms = runs.reduce((ms, r) => ms + run_off_ms(r, interval_ms), 0);
+    return {
+      start: runs[0].start,
+      end: open ? null : last.recovered_t, // null => still off at end of window
+      cycles: runs.length,
+      off_count: runs.reduce((n, r) => n + r.count, 0),
+      off_hours: off_ms / 3600000
+    };
+  });
+};
+
+// A request-supplied event window fixes start/end by hand, but the reading
+// counts still come from the data inside it — otherwise the tile and story
+// render "undefined readings off" and "off ~NaN h". A run overlapping either
+// boundary contributes only the part inside the window: its off readings are
+// re-counted from the series rather than taken wholesale, so a run that
+// starts before the window is not dropped and one that runs past the end is
+// not charged in full. off_count === 0 means the window contains no observed
+// stop, which the tile and story report as such.
+const describe_event_window = (
+  window,
+  off_runs,
+  stateful,
+  { interval_ms = 0 } = {}
+) => {
+  const end = window.end === undefined ? null : window.end;
+  const w_end = end === null ? Infinity : end;
+  let cycles = 0;
+  let off_count = 0;
+  let off_ms = 0;
+  for (const run of off_runs) {
+    if (run.end < window.start || run.start > w_end) continue;
+    const readings = stateful.filter(
+      (r) =>
+        r.compressor_on === false &&
+        r.t >= Math.max(run.start, window.start) &&
+        r.t <= Math.min(run.end, w_end)
+    );
+    if (!readings.length) continue;
+    const last_t = readings[readings.length - 1].t;
+    // Only cap against a recovery that actually falls inside the window;
+    // otherwise the clipped run is open as far as this window can tell.
+    const clipped = {
+      start: readings[0].t,
+      end: last_t,
+      recovered_t: run.recovered_t <= w_end ? run.recovered_t : undefined
+    };
+    cycles += 1;
+    off_count += readings.length;
+    off_ms += run_off_ms(clipped, interval_ms);
+  }
+  return { start: window.start, end, cycles, off_count, off_hours: off_ms / 3600000 };
+};
+
+// The report anchors on one event: an open trailing event always wins
+// (ongoing beats everything); otherwise the largest true off time, with
+// ties going to the most recent. Returns the same object reference held in
+// the array — callers identify the other events by identity.
+const select_primary_event = (events) => {
+  if (!events.length) return null;
+  const last = events[events.length - 1];
+  if (last.end === null) return last;
+  return events.reduce((best, ev) => (ev.off_hours >= best.off_hours ? ev : best));
 };
 
 // Flicker classification: compressor state sensors (especially the EDU
@@ -90,8 +177,8 @@ const classify_compressor_runs = (
 
 // Convenience wrapper preserving the original single-call shape (used by
 // callers that don't need flicker separation, e.g. dev checks).
-const detect_compressor_event = (series) =>
-  build_compressor_event(find_off_runs(series));
+const detect_compressor_event = (series, opts = {}) =>
+  select_primary_event(build_compressor_events(find_off_runs(series), opts));
 
 // Temp-alarm runs (Philips): rows with the alarm raised, grouped into
 // contiguous run intervals, plus the peak alarm-state reading (minutes).
@@ -127,9 +214,12 @@ const detect_quench = (series) => series.some((r) => r.quenched === true);
 
 module.exports = {
   find_off_runs,
-  build_compressor_event,
+  build_compressor_events,
+  describe_event_window,
+  select_primary_event,
   classify_compressor_runs,
   detect_compressor_event,
   detect_temp_alarm,
-  detect_quench
+  detect_quench,
+  EVENT_GAP_MS
 };

@@ -1,3 +1,5 @@
+const path = require("path");
+
 const build_transporter = require("../../email/build-transporter");
 const send_with_retry = require("./send_with_retry");
 const {
@@ -5,8 +7,17 @@ const {
   FONT,
   logo_attachment,
   wrap_email,
-  themed_table
+  themed_table,
+  esc
 } = require("./email_theme");
+
+const {
+  attention_sort,
+  is_attention,
+  is_urgent,
+  is_data_issue,
+  condition_cell_record
+} = require("../conditions");
 
 const [addLogEvent] = require("../../utils/logger/log");
 const {
@@ -14,55 +25,40 @@ const {
   tag: { det, cat }
 } = require("../../utils/logger/enums");
 
-// One attachment-free email summarizing every system in a batch run: detected
-// condition per system (most severe first) plus any systems that failed to
-// produce a report. Body is themed, email-client-safe HTML (table layout,
-// inline styles) matching the brief PDFs — see email_theme.js.
+// One email summarizing every system in a batch run: detected condition per
+// system (most severe first) plus any systems that failed to produce a
+// report. Body is themed, email-client-safe HTML (table layout, inline
+// styles) matching the brief PDFs — see email_theme.js. When the run built a
+// fleet summary document it rides along as the single attachment.
 
-const SEVERITY_ORDER = [
-  "compressor_stop_ongoing",
-  "threshold_exceeded",
-  "compressor_stop_recovered",
-  "pressure_rising",
-  "stable_healthy"
-];
-
-const CONDITION_LABELS = {
-  compressor_stop_ongoing: "COMPRESSOR STOP — ONGOING",
-  threshold_exceeded: "THRESHOLD EXCEEDED",
-  compressor_stop_recovered: "compressor stop, recovered",
-  pressure_rising: "pressure rising",
-  stable_healthy: "stable / healthy"
-};
-
-const ATTENTION = new Set([
-  "compressor_stop_ongoing",
-  "threshold_exceeded",
-  "pressure_rising"
-]);
-
-const condition_cell = (archetype) => {
-  const label = CONDITION_LABELS[archetype] || archetype;
-  if (ATTENTION.has(archetype))
-    return `<b style="color:${COLORS.red};">${label}</b>`;
-  if (archetype === "compressor_stop_recovered")
-    return `<span style="color:${COLORS.amber};">${label}</span>`;
-  return `<span style="color:${COLORS.teal};">${label}</span>`;
-};
-
-const send_summary_email = async (run_log, job_id, batch_email, results, failures) => {
+const send_summary_email = async (
+  run_log,
+  job_id,
+  batch_email,
+  results,
+  failures,
+  fleet_pdf_path
+) => {
   const date = new Date().toISOString().slice(0, 10);
   const subject = `Magnet Health Summary — ${results.length} systems — ${date}`;
 
-  const sorted = [...results].sort(
-    (a, b) =>
-      SEVERITY_ORDER.indexOf(a.archetype) - SEVERITY_ORDER.indexOf(b.archetype)
-  );
-  const attention = sorted.filter((r) => ATTENTION.has(r.archetype));
+  // Grade the distilled record, not the bare archetype: quench and current
+  // breach live there, and the attached fleet PDF grades the same way. When
+  // the two disagree the reader has no way to tell which count is right.
+  const facts_of = (r) => ({ ...(r.summary || {}), archetype: r.archetype });
+  const sorted = [...results].sort((a, b) => attention_sort(facts_of(a), facts_of(b)));
+  const attention = sorted.filter((r) => is_attention(facts_of(r)));
+  const urgent = attention.filter((r) => is_urgent(facts_of(r)));
+  const data_issues = sorted.filter((r) => is_data_issue(facts_of(r)));
 
-  const headline = attention.length
-    ? `<b>${results.length}</b> Magnet Health Briefs generated — <b style="color:${COLORS.red};">${attention.length} need${attention.length === 1 ? "s" : ""} attention</b>.`
-    : `<b>${results.length}</b> Magnet Health Briefs generated — no systems need attention.`;
+  const tiers =
+    `<b style="color:${COLORS.amber};">${attention.length} need${attention.length === 1 ? "s" : ""} attention</b>` +
+    (urgent.length ? `, <b style="color:${COLORS.red};">${urgent.length} urgent</b>` : "") +
+    (data_issues.length ? `, <b style="color:${COLORS.grey};">${data_issues.length} data issue${data_issues.length === 1 ? "" : "s"}</b>` : "");
+  const headline =
+    attention.length || data_issues.length
+      ? `<b>${results.length}</b> systems analyzed — ${tiers}.`
+      : `<b>${results.length}</b> systems analyzed — no systems need attention.`;
 
   const columns = [
     { label: "SYSTEM", width: "90" },
@@ -70,9 +66,9 @@ const send_summary_email = async (run_log, job_id, batch_email, results, failure
     { label: "CONDITION", width: "210" }
   ];
   const rows = sorted.map((r) => [
-    `<b>${r.system_id}</b>`,
-    `${r.site_name}<br><span style="font-size:11px;color:${COLORS.grey};">${r.manufacturer} ${r.modality || ""}</span>`,
-    condition_cell(r.archetype)
+    `<b>${esc(r.system_id)}</b>`,
+    `${esc(r.site_name)}<br><span style="font-size:11px;color:${COLORS.grey};">${esc(r.manufacturer)} ${esc(r.modality || "")}</span>`,
+    condition_cell_record(facts_of(r))
   ]);
 
   let body_html =
@@ -85,10 +81,22 @@ const send_summary_email = async (run_log, job_id, batch_email, results, failure
       themed_table(
         [{ label: "SYSTEM", width: "90" }, { label: "REASON" }],
         failures.map((f) => [
-          `<b>${f.system_id}</b>`,
-          `<span style="color:${COLORS.grey};">${f.message}</span>`
+          `<b>${esc(f.system_id)}</b>`,
+          `<span style="color:${COLORS.grey};">${esc(f.message)}</span>`
         ])
       );
+  }
+
+  const attachments = [logo_attachment()];
+  if (fleet_pdf_path) {
+    attachments.push({
+      filename: path.basename(fleet_pdf_path),
+      path: fleet_pdf_path
+    });
+    body_html =
+      `<p style="${FONT}font-size:13px;color:${COLORS.navy};margin:0 0 12px 0;">` +
+      `The attached <b>Fleet Magnet Health Summary</b> carries current helium, primary metric, and compressor state for every system below.</p>` +
+      body_html;
   }
 
   const message = {
@@ -96,7 +104,7 @@ const send_summary_email = async (run_log, job_id, batch_email, results, failure
     to: batch_email.recipients.join(","),
     subject,
     html: wrap_email({ title: "Magnet Health Summary", date, body_html }),
-    attachments: [logo_attachment()]
+    attachments
   };
   if (batch_email.cc_list.length) message.cc = batch_email.cc_list.join(",");
 
@@ -108,6 +116,9 @@ const send_summary_email = async (run_log, job_id, batch_email, results, failure
       to: message.to,
       systems: results.length,
       attention: attention.map((r) => r.system_id),
+      urgent: urgent.map((r) => r.system_id),
+      data_issues: data_issues.map((r) => r.system_id),
+      fleet_pdf: fleet_pdf_path || null,
       failures: (failures || []).length,
       status: "SENT",
       response: info && info.response

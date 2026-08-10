@@ -26,9 +26,28 @@ const flicker_sentence = (facts) => {
   return ` The compressor signal dropped for a single reading ${fl.count === 1 ? "once" : `${fl.count} times`} (${listed}${more}) with no ${p_name(facts).toLowerCase()} response — <b>likely sensor flicker${fl.count === 1 ? "" : "s"}, not true stops</b>.`;
 };
 
+// When clustering yields multiple events, the timeline narrates the primary
+// one; the rest get a single summary sentence so total downtime stays honest.
+// The primary is whichever event is ongoing, else the longest — which is not
+// necessarily the worst, so this deliberately does not call it the most
+// significant.
+const other_events_sentence = (facts) => {
+  const evs = facts.compressor_events || [];
+  if (evs.length <= 1) return "";
+  const others = evs.filter((e) => e !== facts.compressor_event);
+  const total = others.reduce((h, e) => h + (e.off_hours || 0), 0);
+  const days = others.map((e) => fmt.day(e.start)).join(", ");
+  return ` <b>${others.length} other compressor stop event${others.length === 1 ? "" : "s"}</b> occurred this period (${days}; ${fmt.hours(total)} off in total) — the timeline above covers the primary event, and the others are summarized here.`;
+};
+
 const baseline_sentence = (facts) => {
   const p = facts.pressure;
   const he = facts.helium;
+  const ev = facts.compressor_event;
+  // Earlier event windows are excluded from the baseline stats; say so.
+  const qualified = (facts.compressor_events || []).some(
+    (e) => e !== ev && e.start < ev.start
+  );
   const parts = [];
   if (p && p.baseline)
     parts.push(
@@ -41,7 +60,7 @@ const baseline_sentence = (facts) => {
   if (facts.coldhead && facts.coldhead_baseline_max !== null)
     parts.push(`coldhead at base temperature`);
   return parts.length
-    ? `<b>Baseline ${fmt.day(facts.window_start)} – ${fmt.day(facts.compressor_event ? facts.compressor_event.start : facts.window_end)}:</b> ${parts.join(", ")}.`
+    ? `<b>Baseline ${fmt.day(facts.window_start)} – ${fmt.day(ev ? ev.start : facts.window_end)}${qualified ? " (outside other event spans)" : ""}:</b> ${parts.join(", ")}.`
     : "";
 };
 
@@ -57,7 +76,13 @@ const peak_sentence = (facts) => {
     p.rate_per_hr !== null
       ? ` (${fmt.signed(p.rate_per_hr, facts.vendor.pressure.decimals)} ${units(facts)}/h avg on the ramp)`
       : "";
-  return `${p_name(facts)} rose from ${p_fmt(facts, p.baseline_value)} to a <b>peak of ${p_fmt(facts, p.peak.v)} ${units(facts)} at ${fmt.ts(p.peak.t)}</b> — ${vs}${rate}.`;
+  // No clean pre-event reading survived exclusion — report the peak on its
+  // own rather than a rise from a value the magnet never rested at.
+  const from =
+    p.baseline_value === null
+      ? `${p_name(facts)} reached a`
+      : `${p_name(facts)} rose from ${p_fmt(facts, p.baseline_value)} to a`;
+  return `${from} <b>peak of ${p_fmt(facts, p.peak.v)} ${units(facts)} at ${fmt.ts(p.peak.t)}</b> — ${vs}${rate}.`;
 };
 
 const helium_sentence = (facts) => {
@@ -65,9 +90,11 @@ const helium_sentence = (facts) => {
   if (!he) return "";
   const d = he.delta_vs_baseline;
   const quench = facts.quenched
-    ? " <b>A quench state was recorded in the window.</b>"
+    ? " <b>A quench state was recorded this period.</b>"
     : " No quench.";
-  return `Helium ${d >= 0 ? "rose" : "fell"} to <b>${fmt.num(he.last.v, facts.vendor.helium.decimals)}${he_sfx(facts)}</b> (${fmt.signed(d, 2)} vs baseline).${quench}`;
+  const move = d === null ? "now reads" : d >= 0 ? "rose to" : "fell to";
+  const vs = d === null ? "" : ` (${fmt.signed(d, 2)} vs baseline)`;
+  return `Helium ${move} <b>${fmt.num(he.last.v, facts.vendor.helium.decimals)}${he_sfx(facts)}</b>${vs}.${quench}`;
 };
 
 const now_sentence = (facts) => {
@@ -106,7 +133,7 @@ const alarm_sentence = (facts) => {
       : "";
   const room =
     facts.edu && facts.edu.alarm_room_temp
-      ? ` Room temperature held ${fmt.num(facts.edu.alarm_room_temp.min.v, 1)}–${fmt.num(facts.edu.alarm_room_temp.max.v, 1)} °F over the alarm window.`
+      ? ` Room temperature held ${fmt.num(facts.edu.alarm_room_temp.min.v, 1)}–${fmt.num(facts.edu.alarm_room_temp.max.v, 1)} °F while the alarm was active.`
       : "";
   return ` A compressor temperature alarm was triggered ${fmt.ts(ta.start)} → ${fmt.ts(ta.end)} (${ta.count} readings${peak_min}${retrigger}; amber strip on the pressure chart).${room}`;
 };
@@ -118,11 +145,15 @@ const STORIES = {
       ev.cycles > 1
         ? ` and then cycled on/off ${ev.cycles} times through ${fmt.ts(ev.end)} (${ev.off_count} readings off)`
         : ` and stayed off ${fmt.hours(ev.off_hours)} (${ev.off_count} readings off)`;
+    // "has held since" is only true when no other event postdates this one.
+    const later = (f.compressor_events || []).some(
+      (e) => e !== ev && e.start > ev.end
+    );
     return (
       `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
       `<b>${fmt.ts(ev.start)}: the compressor stopped</b>${comp_via(f)}${cycles}.${alarm_sentence(f)} ` +
-      `${peak_sentence(f)} <b>The compressor recovered ${fmt.ts(ev.end)}</b> and has held since.` +
-      `${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
+      `${peak_sentence(f)} <b>The compressor recovered ${fmt.ts(ev.end)}</b>${later ? "" : " and has held since"}.` +
+      `${other_events_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
     );
   },
   compressor_stop_ongoing: (f) => {
@@ -130,15 +161,15 @@ const STORIES = {
     return (
       `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
       `<b>${fmt.ts(ev.start)}: the compressor stopped and has not recovered</b>${comp_via(f)} — off ${fmt.hours(ev.off_hours)} at the last capture (${ev.off_count} readings off).${alarm_sentence(f)} ` +
-      `${peak_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)} ` +
+      `${peak_sentence(f)}${other_events_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)} ` +
       `<b>Warming event OPEN at end of data.</b>`
     );
   },
   threshold_exceeded: (f) =>
-    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop was detected in the window, but ` +
+    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop was detected this period, but ` +
     `${peak_sentence(f)}${alarm_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`,
   pressure_rising: (f) =>
-    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop and no threshold breach in the window, but ${p_name(f).toLowerCase()} is trending up: ` +
+    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop and no threshold breach this period, but ${p_name(f).toLowerCase()} is trending up: ` +
     `${peak_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`,
   stable_healthy: (f) =>
     `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor events, alarms, or threshold breaches detected across ` +
@@ -167,7 +198,9 @@ const build_cards = (f) => {
   const rates = [];
   if (p) {
     rates.push(
-      `${p_name(f)} ${fmt.signed(p.last.v - p.baseline_value, f.vendor.pressure.decimals)} ${units(f)} vs baseline (${p_fmt(f, p.baseline_value)} → ${p_fmt(f, p.last.v)}); peak ${p_fmt(f, p.peak.v)}.`
+      p.baseline_value === null
+        ? `${p_name(f)} ${p_fmt(f, p.last.v)} ${units(f)}; peak ${p_fmt(f, p.peak.v)} (no clean baseline this period).`
+        : `${p_name(f)} ${fmt.signed(p.last.v - p.baseline_value, f.vendor.pressure.decimals)} ${units(f)} vs baseline (${p_fmt(f, p.baseline_value)} → ${p_fmt(f, p.last.v)}); peak ${p_fmt(f, p.peak.v)}.`
     );
     // A ramp rate is only meaningful against an event window.
     if (p.rate_per_hr !== null && f.compressor_event)
@@ -175,7 +208,7 @@ const build_cards = (f) => {
         `Ramp averaged ${fmt.signed(p.rate_per_hr, f.vendor.pressure.decimals)} ${units(f)}/h.`
       );
   }
-  if (he)
+  if (he && he.delta_vs_baseline !== null)
     rates.push(
       `Helium ${fmt.signed(he.delta_vs_baseline, 2)} ${f.units.helium === "%" ? "points" : f.units.helium}.`
     );
@@ -189,7 +222,7 @@ const build_cards = (f) => {
   else notes.push("Charts plot every archived capture.");
   if (f.room_temp)
     notes.push(
-      `Tech Room Temp ${fmt.num(f.room_temp.min.v, 1)}–${fmt.num(f.room_temp.max.v, 1)} °C in window.`
+      `Tech Room Temp ${fmt.num(f.room_temp.min.v, 1)}–${fmt.num(f.room_temp.max.v, 1)} °C this period.`
     );
   if (f.edu) {
     const parts = [];

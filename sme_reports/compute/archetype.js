@@ -8,9 +8,11 @@ const RISING_PCT_OF_THRESHOLD = 0.6;
 // {high_gt, high_lt, med_gt, med_lt, units} — high_lt is the low alert line
 // on band-alerted metrics (Siemens absolute PSIA).
 const classify = ({ compressor_event, pressure, thr }) => {
-  if (compressor_event && compressor_event.end === null)
-    return "compressor_stop_ongoing";
-  if (compressor_event) return "compressor_stop_recovered";
+  // A hand-supplied event window containing no observed OFF readings still
+  // scopes the analysis, but must not narrate a stop that was never seen.
+  const observed = compressor_event && compressor_event.off_count !== 0;
+  if (observed && compressor_event.end === null) return "compressor_stop_ongoing";
+  if (observed) return "compressor_stop_recovered";
   if (
     pressure &&
     ((thr.high_gt !== null && pressure.peak.v >= thr.high_gt) ||

@@ -2,11 +2,14 @@ const {
   clean_series,
   chart_mode,
   metric_points,
+  median_interval_ms,
   chart_points
 } = require("../compute/series");
 const {
   find_off_runs,
-  build_compressor_event,
+  build_compressor_events,
+  describe_event_window,
+  select_primary_event,
   classify_compressor_runs,
   detect_temp_alarm,
   detect_quench
@@ -18,6 +21,12 @@ const {
   valid_counts
 } = require("../compute/metrics");
 const { classify } = require("../compute/archetype");
+const {
+  PLAUSIBLE,
+  outside,
+  primary_bounds,
+  helium_bounds
+} = require("../compute/plausible");
 const { fallback_thresholds } = require("../vendors");
 const {
   pressure_domain,
@@ -49,21 +58,125 @@ const build_render_model = ({
   const rows = clean_series(series);
   if (!rows.length)
     throw new Error(
-      `no ${vendor.key} monitor data for ${identity.system_id} in the requested window`
+      `no ${vendor.key} monitor data for ${identity.system_id} in the requested period`
     );
 
   const mode = chart_mode(rows);
-  const p_points = metric_points(rows, "pressure");
-  const he_points = metric_points(rows, "helium");
 
-  // Compressor state normally rides on the mag rows; vendors flagged
-  // edu_comp_vib (Siemens non-TIM) read the EDU vibration sensor instead.
-  const compressor_rows =
-    vendor.compressor.source === "edu_comp_vib"
-      ? edu
-          .filter((r) => r.comp_vib !== null)
-          .map((r) => ({ t: r.t, compressor_on: r.comp_vib }))
-      : rows;
+  // --- plausibility screen (RULES.md §5) --------------------------------
+  // Bounds are applied PER POINT, before any metric is computed: a
+  // disconnected sensor that emitted 200 PSI three weeks ago must not own
+  // the period's peak, drive the archetype, or wreck the chart scale. The
+  // last RAW value per channel is kept so the fleet summary can still show
+  // the garbage, greyed and footnoted, and rejected counts are reported as
+  // data-quality facts rather than silently vanishing.
+  // Siemens non-TIM has ONE physical shield sensor that the normalizer maps
+  // into both the primary slot and shield_k. For plausibility accounting the
+  // alias must not exist: counting the same impossible reading under two
+  // channel names convicted the sensor chain ("2 impossible readings") from
+  // one physical failure.
+  const shield_aliases_primary = vendor.key === "SIEMENS_NON_TIM";
+  const CHANNEL_BOUNDS = {
+    pressure: primary_bounds(units.pressure),
+    helium: helium_bounds(units.helium),
+    coldhead_k: PLAUSIBLE.coldhead_k,
+    ...(shield_aliases_primary ? {} : { shield_k: PLAUSIBLE.shield_k }),
+    cab_temp: PLAUSIBLE.cabinet_c
+  };
+  const raw_last_of = (field) => {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const v = rows[i][field];
+      if (v != null && !Number.isNaN(v)) return v;
+    }
+    return null;
+  };
+  const raw_last = {
+    pressure: raw_last_of("pressure"),
+    helium: raw_last_of("helium"),
+    coldhead_k: raw_last_of("coldhead_k"),
+    shield_k: raw_last_of("shield_k"),
+    cab_temp: raw_last_of("cab_temp")
+  };
+  const implausible = {};
+  // Aliased channels (non-TIM shield_k) still get FILTERED — the garbage
+  // point must not reach their metric either — but are never COUNTED: the
+  // physical reading already counts once under its canonical channel.
+  const screen = (points, key, bounds = CHANNEL_BOUNDS[key]) => {
+    const kept = points.filter((p) => !outside(p.v, bounds));
+    if (key in CHANNEL_BOUNDS) implausible[key] = points.length - kept.length;
+    return kept;
+  };
+  // One impossible reading might be a catastrophe telling the truth — 0.00%
+  // helium is exactly what a quenched magnet reports. It is the COMBINATION
+  // IN ONE CAPTURE that convicts the sensor chain: two impossible channels
+  // at once, or one impossible channel alongside bone-dry helium in the same
+  // row. Two impossible readings weeks apart prove nothing about each other.
+  const suspect_capture = (r) => {
+    let n = 0;
+    for (const [field, b] of Object.entries(CHANNEL_BOUNDS)) {
+      const v = r[field];
+      if (v != null && !Number.isNaN(v) && outside(v, b)) n++;
+    }
+    return n >= 2 || (n >= 1 && r.helium === 0);
+  };
+  const suspect_rows = rows.filter(suspect_capture).length;
+  // Conviction is about NOW: the LATEST capture carrying the combination.
+  // A single garbage row three weeks ago followed by clean data is history,
+  // not a current monitoring outage.
+  const last_suspect = rows.length
+    ? suspect_capture(rows[rows.length - 1])
+    : false;
+
+  const p_points = screen(metric_points(rows, "pressure"), "pressure");
+  const he_points = screen(metric_points(rows, "helium"), "helium");
+
+  const window_start = request.window.start.toMillis();
+  const window_end = request.window.end.toMillis();
+
+  // Compressor source is a per-SYSTEM choice, not a per-vendor one. The EDU
+  // vibration sensor is a direct measurement of the compressor itself, so
+  // where a system has one reporting, it outranks the GE coldhead INFERENCE
+  // and fills in when the scanner channel yields nothing (e.g. a Philips
+  // whose only malf readings are cable errors). Scanner-reported channels
+  // (Philips malf, Siemens status text) otherwise keep priority — measured
+  // beats inferred, but a report from the machine itself is not displaced.
+  // The floor keeps a nearly-empty EDU from displacing dense inference.
+  const EDU_MIN_READINGS = 24;
+  const edu_comp_rows = edu
+    .filter((r) => r.comp_vib !== null)
+    .map((r) => ({ t: r.t, compressor_on: r.comp_vib }));
+  const vendor_is_edu = vendor.compressor.source === "edu_comp_vib";
+  const vendor_is_inference =
+    vendor.compressor.source === "coldhead_ruo_value";
+  // An inferred state is only as good as the reading it was inferred FROM.
+  // The normalizer derives GE compressor_on from the RAW coldhead, so a
+  // 382.8 K garbage reading — rejected from every metric by the screen —
+  // still arrived here as compressor_on = false and manufactured an urgent
+  // "ongoing stop" out of data the report says it excluded. An implausible
+  // coldhead yields an UNKNOWN state, not "off".
+  const source_rows = vendor_is_inference
+    ? rows.map((r) =>
+        r.compressor_on !== null &&
+        outside(r.coldhead_k, CHANNEL_BOUNDS.coldhead_k)
+          ? { ...r, compressor_on: null }
+          : r
+      )
+    : rows;
+  const vendor_stateful = vendor_is_edu
+    ? []
+    : source_rows.filter((r) => r.compressor_on !== null);
+  // The floor is SYMMETRIC: just as a nearly-empty EDU cannot displace dense
+  // inference, a nearly-empty scanner channel cannot displace a dense EDU.
+  // Without this, a Philips with one stray malf reading and 1,400 EDU
+  // readings would keep the scanner source, detect zero events, and render
+  // "running continuously" over a measured six-hour stop.
+  const use_edu =
+    vendor_is_edu ||
+    (edu_comp_rows.length >= EDU_MIN_READINGS &&
+      (vendor_is_inference || vendor_stateful.length < EDU_MIN_READINGS));
+  const compressor_rows = use_edu ? edu_comp_rows : source_rows;
+  const compressor_source = use_edu ? "edu_comp_vib" : vendor.compressor.source;
+  const stateful = compressor_rows.filter((r) => r.compressor_on !== null);
   // Split single-reading, thermally-uncorroborated dropouts (sensor
   // flickers) from real stops; only real runs form the event.
   const { real_runs, flicker_runs } = classify_compressor_runs(
@@ -71,16 +184,33 @@ const build_render_model = ({
     p_points,
     { response_epsilon: thr.high_gt !== null ? thr.high_gt * 0.02 : null }
   );
-  const compressor_event =
-    request.event_window || build_compressor_event(real_runs);
+  // Distinct events (gap-clustered); the report anchors on the primary one.
+  // A request-supplied event_window overrides detection but still gets its
+  // reading counts from the data inside it.
+  const interval_ms = median_interval_ms(stateful) || 0;
+  const compressor_events = request.event_window
+    ? [
+        describe_event_window(request.event_window, real_runs, stateful, {
+          interval_ms
+        })
+      ]
+    : build_compressor_events(real_runs, { interval_ms });
+  const compressor_event = select_primary_event(compressor_events);
   const compressor_flickers = flicker_runs.length
     ? { count: flicker_runs.length, times: flicker_runs.map((r) => r.start) }
     : null;
   const temp_alarm = detect_temp_alarm(rows);
   const quenched = detect_quench(rows);
-  const pressure = metric_facts(p_points, compressor_event);
-  const helium = metric_facts(he_points, compressor_event);
-  const coldhead = stats_for(metric_points(rows, "coldhead_k"));
+  const other_events = compressor_events.filter((ev) => ev !== compressor_event);
+  const pressure = metric_facts(p_points, compressor_event, { other_events });
+  const helium = metric_facts(he_points, compressor_event, { other_events });
+  const coldhead = stats_for(screen(metric_points(rows, "coldhead_k"), "coldhead_k"));
+  // GE reports a shield sensor alongside the coldhead; Siemens non-TIM carries
+  // shield temp here too (it doubles as that vendor's primary metric). Null
+  // for Philips and Siemens TIM, which have no shield channel.
+  const shield = stats_for(
+    screen(metric_points(rows, "shield_k"), "shield_k", PLAUSIBLE.shield_k)
+  );
   const room_temp = stats_for(metric_points(rows, "room_temp_c"));
 
   // EDU environmental telemetry (vendor-independent, °F / %); supplemental.
@@ -105,7 +235,7 @@ const build_render_model = ({
 
   // Cabinet temperature (Siemens non-TIM) judged against its own
   // system-reported warn/alarm levels carried on each row.
-  const cab_stats = stats_for(metric_points(rows, "cab_temp"));
+  const cab_stats = stats_for(screen(metric_points(rows, "cab_temp"), "cab_temp"));
   const last_cab_row = [...rows]
     .reverse()
     .find((r) => r.cab_warn != null || r.cab_alarm != null);
@@ -117,9 +247,6 @@ const build_render_model = ({
       }
     : null;
 
-  const window_start = request.window.start.toMillis();
-  const window_end = request.window.end.toMillis();
-  const stateful = compressor_rows.filter((r) => r.compressor_on !== null);
   const facts = {
     vendor,
     thr,
@@ -128,19 +255,43 @@ const build_render_model = ({
     window_start,
     window_end,
     compressor_event,
+    compressor_events,
     temp_alarm,
     quenched,
     pressure,
     helium,
     coldhead,
+    shield,
     cabinet,
     room_temp,
     edu: edu_facts,
-    compressor_source: vendor.compressor.source,
+    // The source actually used for THIS system — drives the ᶜ provenance
+    // mark and the "(per EDU vibration sensor)" narrative note.
+    compressor_source,
     compressor_flickers,
     last_compressor_on: stateful.length
       ? stateful[stateful.length - 1].compressor_on
       : null,
+    // First reading that showed the compressor RUNNING, or null if it was
+    // never seen on. An ongoing stop with no ON reading before it began was
+    // never actually observed starting — it was already off when the window
+    // opened (left-censored), and "stopped N hours ago" would overclaim.
+    compressor_first_on_t: (() => {
+      const first_on = stateful.find((r) => r.compressor_on === true);
+      return first_on ? first_on.t : null;
+    })(),
+    // When compressor COVERAGE began — the first reading of either state.
+    // Distinguishes "off since before the period" (coverage from the start,
+    // all of it OFF) from "state unknown until hour 199, then OFF" (a late
+    // first reading), which is an observed ongoing stop, not left-censoring.
+    compressor_first_stateful_t: stateful.length ? stateful[0].t : null,
+    // Per-channel counts of readings rejected by the plausibility screen,
+    // the same-capture suspect-row count, and the last RAW value per channel
+    // (pre-screen) so a flagged sensor's output can still be displayed.
+    implausible,
+    suspect_rows,
+    last_suspect,
+    raw_last,
     counts: valid_counts(rows),
     clock_skew_minutes: clock_skew_minutes(rows),
     chart_mode: mode
@@ -200,7 +351,7 @@ const build_render_model = ({
         vendor.primary.zero_anchor
       ),
       y_format: (v) => `${Number.isInteger(v) ? v : v.toFixed(1)}`,
-      event_window: compressor_event,
+      event_windows: compressor_events,
       thresholds: threshold_lines,
       markers,
       stroke_width: 2,
@@ -221,14 +372,18 @@ const build_render_model = ({
       x_domain,
       y_spec: padded_domain(helium.all.min.v, helium.all.max.v),
       y_format: (v) => (units.helium === "%" ? `${v}%` : `${v}`),
-      event_window: compressor_event,
+      event_windows: compressor_events,
       thresholds: null,
       markers: [
         {
           t: helium.last.t,
           v: helium.last.v,
           color: "#004E79",
-          label: `${fmt.num(helium.last.v, vendor.helium.decimals)}${he_sfx} · ${fmt.signed(helium.delta_vs_baseline, 2)}${units.helium === "%" ? " pts" : ""}`,
+          label:
+            `${fmt.num(helium.last.v, vendor.helium.decimals)}${he_sfx}` +
+            (helium.delta_vs_baseline === null
+              ? ""
+              : ` · ${fmt.signed(helium.delta_vs_baseline, 2)}${units.helium === "%" ? " pts" : ""}`),
           dy: -8
         }
       ],
@@ -250,12 +405,20 @@ const build_render_model = ({
   const analyzed = fmt.iso_date(Date.now());
   // "every capture" keeps the line-mode pressure heading on one line.
   const mode_desc = mode === "band" ? "daily range" : "every capture";
-  const orange = compressor_event ? " · orange shade = the event window" : "";
+  const orange = !compressor_events.length
+    ? ""
+    : compressor_events.length > 1
+      ? " · orange shades = the event spans"
+      : " · orange shade = the event span";
   const prepared_by =
     overrides.prepared_by || process.env.SME_REPORT_AUTHOR || "Remote Solutions";
+  const rejected_total = Object.values(implausible).reduce((n, c) => n + c, 0);
   const data_source =
     overrides.data_source ||
-    `${fmt.count(facts.counts.captures)} captures · ${source}`;
+    `${fmt.count(facts.counts.captures)} captures · ${source}` +
+      (rejected_total
+        ? ` · ${rejected_total} implausible reading${rejected_total === 1 ? "" : "s"} excluded`
+        : "");
 
   return {
     title: `Avante — ${identity.system_id} Magnet Health`,

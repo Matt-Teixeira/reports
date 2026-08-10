@@ -165,8 +165,17 @@ async function on_boot() {
     const run_sme_report = require("./sme_reports");
     const run_log = await makeAppRunLog();
     const request_path = process.argv.slice(3).find((a) => a.endsWith(".json"));
-    await run_sme_report(run_log, request_path);
-    await writeLogEvents(run_log);
+    try {
+      await run_sme_report(run_log, request_path);
+    } catch (error) {
+      // Fatal run error (bad request file, failed fleet render in
+      // summary-only mode, failed send). The log record is still written,
+      // but cron must see a nonzero exit — a swallowed error here reported
+      // success with nothing delivered.
+      process.exitCode = 1;
+    } finally {
+      await writeLogEvents(run_log);
+    }
     return;
   }
 

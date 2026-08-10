@@ -23,7 +23,7 @@ const render_timeseries_chart = ({
   x_domain, // [t0, t1] epoch ms
   y_spec, // {domain: [lo, hi], step} from scales.pressure_domain/padded_domain
   y_format, // (v) => axis label string
-  event_window, // {start, end|null} epoch ms, or null
+  event_windows, // [{start, end|null}] epoch ms, or null
   thresholds, // [{value, label}] — dashed red alert line(s); [] or null for none
   markers, // [{t, v, color, label, dy?}]
   stroke_width = 2,
@@ -54,9 +54,9 @@ const render_timeseries_chart = ({
     );
   }
 
-  if (event_window) {
-    const ex0 = Math.max(PLOT.x0, r1(sx(event_window.start)));
-    const ex1 = event_window.end === null ? PLOT.x1 : r1(sx(event_window.end));
+  for (const ev of event_windows || []) {
+    const ex0 = Math.max(PLOT.x0, r1(sx(ev.start)));
+    const ex1 = ev.end === null ? PLOT.x1 : r1(sx(ev.end));
     parts.push(
       `<rect x="${ex0}" y="${PLOT.y1}" width="${r1(Math.max(ex1 - ex0, 2))}" height="${PLOT.y0 - PLOT.y1}" fill="${COLORS.event}" opacity="0.09"/>`
     );

@@ -13,6 +13,7 @@ const {
 } = require("./data");
 const { build_render_model } = require("./render/model");
 const { build_page } = require("./render/page");
+const { build_summary_facts } = require("./compute/summary_facts");
 const write_html = require("./output/write_html");
 
 const [addLogEvent] = require("../utils/logger/log");
@@ -64,7 +65,11 @@ const run_one = async (run_log, job_id, request) => {
     thresholds,
     units
   });
-  const html = build_page(vm);
+
+  // Summary-only runs skip every rendering step; the facts above are all the
+  // fleet document needs, and rendering is what makes a report cost seconds.
+  const renders = request.output.html || request.output.pdf;
+  const html = renders ? build_page(vm) : null;
 
   const outputs = { archetype: vm.facts.archetype };
   if (request.output.html) {
@@ -108,15 +113,57 @@ const run_one = async (run_log, job_id, request) => {
     system_id: identity.system_id,
     site_name: identity.site_name,
     manufacturer: identity.manufacturer,
-    modality: identity.modality
+    modality: identity.modality,
+    // The distilled per-system state. Without this every metric computed
+    // above dies here and the fleet summary has nothing but an archetype.
+    summary: build_summary_facts(vm.facts, identity)
   };
+};
+
+// Builds the multi-page fleet summary from the distilled per-system records.
+// A failure here must not sink the batch — the per-system PDFs are already
+// on disk and the summary email can still go out without an attachment.
+const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, excluded) => {
+  const { build_fleet_model } = require("./render/fleet_model");
+  const { build_fleet_page } = require("./render/fleet_page");
+  const { render_pdf_document } = require("./output/render_pdf");
+  try {
+    const records = results.map((r) => r.summary).filter(Boolean);
+    const vm = build_fleet_model(records, failures, { excluded });
+    const date = new Date().toISOString().slice(0, 10);
+    const html = build_fleet_page(vm);
+    const base = `Avante-Fleet-Magnet-Health-${date}`;
+    // The HTML lands next to the PDF under the same name — it is the only
+    // way to read the document without a PDF viewer, and page breaks are
+    // the thing most likely to need a look. write_html is not used here: it
+    // appends the per-system "-Magnet-Health" suffix.
+    fs.mkdirSync(out_dir, { recursive: true });
+    fs.writeFileSync(path.join(out_dir, `${base}.html`), html);
+    const pdf_path = await render_pdf_document(out_dir, `${base}.pdf`, html);
+    const note = {
+      job_id,
+      systems: vm.total,
+      pages: vm.page_count,
+      attention: vm.attention_count,
+      urgent: vm.urgent_count,
+      failures: vm.failure_count,
+      pdf_path
+    };
+    await addLogEvent(I, run_log, "build_fleet_summary", det, note, null);
+    return pdf_path;
+  } catch (error) {
+    await addLogEvent(E, run_log, "build_fleet_summary", cat, { job_id }, error);
+    console.error(`fleet summary failed: ${error.message}`);
+    return null;
+  }
 };
 
 const run_sme_report = async (run_log, request_path) => {
   const job_id = uuidv4();
   const { close_pdf_renderer } = require("./output/render_pdf");
   try {
-    const { requests, batch_email } = load_requests(request_path);
+    const { requests, batch_email, summary_only, excluded, out_dir } =
+      load_requests(request_path);
     const results = [];
     const failures = [];
     for (const request of requests) {
@@ -134,21 +181,59 @@ const run_sme_report = async (run_log, request_path) => {
     }
 
     if (batch_email) {
-      const sendable = results.filter((r) => r.pdf_path);
-      if (batch_email.summary && (sendable.length || failures.length)) {
-        const send_summary_email = require("./output/send_summary_email");
-        await send_summary_email(run_log, job_id, batch_email, sendable, failures);
+      // The summary covers every system that produced facts. Only the
+      // attachment email needs a PDF on disk, so that filter belongs to it
+      // alone — applying it to the summary is what made summary-only runs
+      // come back empty.
+      const attachable = results.filter((r) => r.pdf_path);
+      // Exclusions count as content: an all-excluded run still owes the
+      // reader the document that names what was excluded and why.
+      const has_content =
+        results.length ||
+        failures.length ||
+        (excluded && excluded.ids.length > 0);
+
+      let fleet_pdf_path = null;
+      if (batch_email.summary_pdf && has_content) {
+        fleet_pdf_path = await build_fleet_summary(
+          run_log,
+          job_id,
+          results,
+          failures,
+          out_dir,
+          excluded
+        );
+        // A soft failure is right for a normal batch — the per-system briefs
+        // are still valid deliverables. In summary-only mode there are none,
+        // so sending the thin email would report success having produced
+        // nothing.
+        if (!fleet_pdf_path && summary_only)
+          throw new Error(
+            "summary_only run produced no fleet summary document; nothing to send"
+          );
       }
-      if (batch_email.attachments && sendable.length) {
+
+      if (batch_email.summary && has_content) {
+        const send_summary_email = require("./output/send_summary_email");
+        await send_summary_email(
+          run_log,
+          job_id,
+          batch_email,
+          results,
+          failures,
+          fleet_pdf_path
+        );
+      }
+      if (!summary_only && batch_email.attachments && attachable.length) {
         const send_batch_email = require("./output/send_batch_email");
         await send_batch_email(
           run_log,
           job_id,
           batch_email,
-          sendable,
-          requests[0].output.out_dir
+          attachable,
+          out_dir
         );
-      } else if (!sendable.length) {
+      } else if (!summary_only && !attachable.length) {
         await addLogEvent(
           W,
           run_log,
@@ -163,7 +248,10 @@ const run_sme_report = async (run_log, request_path) => {
   } catch (error) {
     await addLogEvent(E, run_log, "run_sme_report", cat, { job_id }, error);
     console.error(`sme_report failed: ${error.message}`);
-    return [];
+    // Anything reaching this catch is FATAL — per-system failures were
+    // already isolated inside the loop. Swallowing it here returned [] and
+    // exit code 0 to cron with nothing delivered, which reads as success.
+    throw error;
   } finally {
     // Shared Chromium instance — without this the process never exits.
     await close_pdf_renderer();

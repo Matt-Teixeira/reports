@@ -1,4 +1,14 @@
 {
+  "exclude": [
+    "SME10844",
+    "SME11246",
+    "SME11247",
+    "SME13604",
+    "SME13605",
+    "SME13606",
+    "SME13607"
+  ],
+  "exclude_note": "RF/SC service stations, not fleet",
   "batch_email": {
     "recipients": [
       "matt.teixeira@avantehs.com",

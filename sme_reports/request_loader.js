@@ -93,31 +93,77 @@ const normalize_batch_email = (raw) => {
     // (no attachments). attachments: false turns the PDF emails off entirely,
     // making summary-only delivery possible for very large batches.
     summary: raw.summary === true,
+    // summary_pdf: also build the multi-page fleet summary document and
+    // attach it to that summary email.
+    summary_pdf: raw.summary_pdf === true,
     attachments: raw.attachments !== false
   };
 };
 
 // Accepts a single request, or { "reports": [ ... ], "batch_email": {...} }.
-// Returns { requests, batch_email } — batch_email is null for per-report sends.
+// Returns { requests, batch_email, summary_only } — batch_email is null for
+// per-report sends.
+//
+// Top-level "summary_only": true produces ONLY the fleet summary — no
+// per-system HTML or PDF is written and no per-system email is sent. Every
+// system's facts are still computed; the expensive part that gets skipped is
+// rendering, which is where the ~6 s/report goes. That makes the fleet
+// summary cheap enough to schedule on its own.
 const load_requests = (request_path) => {
   if (!request_path) fail("no request file path given");
   const full_path = path.resolve(request_path);
   if (!fs.existsSync(full_path)) fail(`request file not found: ${full_path}`);
   const raw = JSON.parse(fs.readFileSync(full_path, "utf8"));
-  const list = Array.isArray(raw.reports) ? raw.reports : [raw];
+  let list = Array.isArray(raw.reports) ? raw.reports : [raw];
   const batch_email = normalize_batch_email(raw.batch_email);
+  const summary_only = raw.summary_only === true;
+
+  // Top-level "exclude": system ids dropped from the run entirely (no DB
+  // pull, no report, no section row) — e.g. the RF/SC service-station
+  // magnets, which are real hardware but not fleet. Exclusions are never
+  // silent: the loader returns what it removed and the fleet summary states
+  // it, so a system leaving the report is always visible as a decision.
+  let excluded = null;
+  if (raw.exclude !== undefined) {
+    if (!Array.isArray(raw.exclude)) fail("exclude must be an array of system ids");
+    for (const id of raw.exclude)
+      if (!SME_RE.test(id)) fail(`exclude entry "${id}" is not a system id`);
+    const drop = new Set(raw.exclude);
+    const removed = list.filter((r) => drop.has(r.system_id)).map((r) => r.system_id);
+    list = list.filter((r) => !drop.has(r.system_id));
+    if (removed.length)
+      excluded = {
+        ids: removed,
+        note: typeof raw.exclude_note === "string" ? raw.exclude_note : null
+      };
+  }
+  if (summary_only && !batch_email)
+    fail("summary_only requires a batch_email block to send the summary to");
+  // In summary-only mode the fleet document is the entire deliverable — no
+  // per-system PDF is written — so a run without it produces nothing.
+  if (summary_only && !batch_email.summary_pdf)
+    fail("summary_only requires batch_email.summary_pdf (it is the only output)");
 
   const requests = list.map((r) => {
     if (batch_email) {
       r = {
         ...r,
         recipients: r.recipients || batch_email.recipients,
-        output: { ...(r.output || {}), pdf: true, email: false }
+        output: summary_only
+          ? { ...(r.output || {}), html: false, pdf: false, email: false, archive: false }
+          : { ...(r.output || {}), pdf: true, email: false }
       };
     }
     return normalize_request(r);
   });
-  return { requests, batch_email };
+  // Batch output directory, resolved INDEPENDENTLY of the surviving request
+  // list — an all-excluded request still has to produce the fleet document
+  // that names its exclusions, and `requests[0].output.out_dir` on an empty
+  // list is a crash, not a report.
+  const out_dir = requests.length
+    ? requests[0].output.out_dir
+    : path.join(__dirname, "out");
+  return { requests, batch_email, summary_only, excluded, out_dir };
 };
 
 module.exports = { load_requests, normalize_request };

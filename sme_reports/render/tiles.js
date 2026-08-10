@@ -37,12 +37,16 @@ const vs_line = (v, thr, units) => {
   return `${Math.round((v / thr.high_gt) * 100)}% of the ${thr.high_gt} ${units} line`;
 };
 
+const trend_of = (pressure) => {
+  if (!pressure) return null;
+  if (pressure.last.v < pressure.peak.v * 0.995) return "easing";
+  if (pressure.rate_per_hr !== null && pressure.rate_per_hr > 0) return "rising";
+  return null;
+};
+
 const trend_word = (pressure) => {
-  if (!pressure) return "";
-  if (pressure.last.v < pressure.peak.v * 0.995) return " · easing";
-  if (pressure.rate_per_hr !== null && pressure.rate_per_hr > 0)
-    return " · rising";
-  return "";
+  const trend = trend_of(pressure);
+  return trend ? ` · ${trend}` : "";
 };
 
 // "%" reads attached (79.3%), other units read spaced (968 LTRS).
@@ -52,8 +56,33 @@ const BUILDERS = {
   compressor: (f) => {
     const ev = f.compressor_event;
     const fl = f.compressor_flickers;
+    // Distinct clustered events beyond the primary; "other", not "earlier" —
+    // they can fall on either side of it.
+    const others = (f.compressor_events || []).length - 1;
+    const more =
+      others > 0 ? ` · +${others} other event${others === 1 ? "" : "s"}` : "";
+    // A hand-supplied window with no OFF readings in it: say so rather than
+    // implying a measured stop of ~0.0 h.
+    if (ev && ev.off_count === 0)
+      return {
+        cls: "ink",
+        k: "COMPRESSOR",
+        v: "—",
+        s: "no OFF readings in the specified event span"
+      };
     if (!ev) {
       const on = f.last_compressor_on;
+      // null means the window carried no compressor state at all — e.g. a
+      // Philips whose only malf readings are −1 cable errors, or a non-TIM
+      // on EDU1 hardware. "not false" used to render a green ON here, a
+      // health claim fabricated from zero data.
+      if (on === null)
+        return {
+          cls: "ink",
+          k: "COMPRESSOR",
+          v: "—",
+          s: "no compressor state reported this period"
+        };
       return {
         cls: on === false ? "bad" : "good",
         k: "COMPRESSOR",
@@ -63,7 +92,7 @@ const BUILDERS = {
             ? "off at last reading"
             : fl
               ? `running · ${fl.count} brief dropout${fl.count === 1 ? "" : "s"} — likely sensor flicker${fl.count === 1 ? "" : "s"}`
-              : "running continuously through the window"
+              : "running continuously through the period"
       };
     }
     if (ev.end === null)
@@ -71,20 +100,20 @@ const BUILDERS = {
         cls: "bad",
         k: "COMPRESSOR",
         v: "OFF",
-        s: `stopped ${fmt.ts(ev.start)} · off ${fmt.hours(ev.off_hours)}`
+        s: `stopped ${fmt.ts(ev.start)} · off ${fmt.hours(ev.off_hours)}${more}`
       };
     if (ev.cycles > 1)
       return {
         cls: "good",
         k: "COMPRESSOR",
         v: "ON",
-        s: `recovered ${fmt.ts(ev.end)} · ${ev.cycles} cycles from ${fmt.ts(ev.start)}`
+        s: `recovered ${fmt.ts(ev.end)} · ${ev.cycles} cycles from ${fmt.ts(ev.start)}${more}`
       };
     return {
       cls: "good",
       k: "COMPRESSOR",
       v: "RESTARTED",
-      s: `recovered ${fmt.ts(ev.end)} · off ${fmt.hours(ev.off_hours)}`
+      s: `recovered ${fmt.ts(ev.end)} · off ${fmt.hours(ev.off_hours)}${more}`
     };
   },
 
@@ -136,7 +165,7 @@ const BUILDERS = {
       cls,
       k: "CABINET",
       v: `${fmt.num(cab.last.v, 1)} °C`,
-      s: `${fmt.num(cab.min.v, 1)}–${fmt.num(cab.max.v, 1)} °C in window · ${levels}`
+      s: `${fmt.num(cab.min.v, 1)}–${fmt.num(cab.max.v, 1)} °C this period · ${levels}`
     };
   },
 
@@ -165,7 +194,7 @@ const BUILDERS = {
         cls: "good",
         k: "TEMP ALARM",
         v: "NONE",
-        s: "no temperature alarm in window"
+        s: "no temperature alarm this period"
       };
     return {
       cls: "warn",
@@ -180,7 +209,7 @@ const BUILDERS = {
     if (!he) return { cls: "ink", k: "HELIUM", v: "—", s: "no helium data" };
     const value = `${fmt.num(he.last.v, f.vendor.helium.decimals)}${he_suffix(f.units.helium)}`;
     if (f.quenched)
-      return { cls: "bad", k: "HELIUM", v: value, s: "QUENCH detected in window" };
+      return { cls: "bad", k: "HELIUM", v: value, s: "QUENCH detected this period" };
     const delta = he.delta_vs_baseline;
     // Per-system low-helium thresholds from alert.models defaults — applied
     // only when the model's units match the display units (a % threshold is
@@ -201,6 +230,10 @@ const BUILDERS = {
         v: value,
         s: `below the ${f.he_thr.low_med}${he_suffix(f.units.helium)} warning level`
       };
+    // A null delta means no clean baseline survived event exclusion — report
+    // the level without a comparison rather than implying it held steady.
+    if (delta === null)
+      return { cls: "good", k: "HELIUM", v: value, s: "no clean baseline this period" };
     const lost = delta < -0.2;
     return {
       cls: lost ? "warn" : "good",
@@ -214,4 +247,6 @@ const BUILDERS = {
 const build_tiles = (facts) =>
   facts.vendor.tiles.map((key) => BUILDERS[key](facts));
 
-module.exports = { build_tiles };
+// p_severity / he_suffix / trend_of are shared with the fleet summary so the
+// two documents grade and format the same reading identically.
+module.exports = { build_tiles, p_severity, he_suffix, trend_of };

@@ -97,4 +97,14 @@ const themed_table = (columns, rows) => {
   );
 };
 
-module.exports = { COLORS, FONT, logo_attachment, wrap_email, themed_table };
+// HTML-escape for every DATABASE- or error-derived string interpolated into
+// email bodies (site names, manufacturers, failure messages). "Smith & Sons
+// <West>" must arrive as text, not as markup the client swallows.
+const esc = (s) =>
+  String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+module.exports = { COLORS, FONT, logo_attachment, wrap_email, themed_table, esc };

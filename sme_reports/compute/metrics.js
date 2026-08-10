@@ -29,14 +29,23 @@ const stats_for = (points) => {
 // includes that tail.
 const THERMAL_LAG_MS = 24 * 3600000;
 
-const metric_facts = (points, event) => {
+const metric_facts = (points, event, { other_events = [] } = {}) => {
   const all = stats_for(points);
   if (!all) return null;
 
   let baseline = null;
   let during = null;
   if (event) {
-    baseline = stats_for(points.filter((p) => p.t < event.start));
+    // Baseline excludes points inside any *other* event window (+ lag) so
+    // earlier incidents don't pollute it. It can therefore come back null
+    // even with pre-event points; base_v then falls back to all.first.v.
+    const in_other = (t) =>
+      other_events.some(
+        (ev) => t >= ev.start && (ev.end === null || t <= ev.end + THERMAL_LAG_MS)
+      );
+    baseline = stats_for(
+      points.filter((p) => p.t < event.start && !in_other(p.t))
+    );
     during = stats_for(
       points.filter(
         (p) =>
@@ -47,11 +56,16 @@ const metric_facts = (points, event) => {
   }
 
   const scope = during || all;
-  const base_v = baseline ? baseline.last.v : all.first.v;
+  // With no event, the first reading is a fair stand-in for the baseline.
+  // With an event, it is not: exclusion may have removed every clean
+  // pre-event point, and all.first.v could sit inside an excluded window —
+  // using it would report a rise from a value the magnet never rested at.
+  // Null instead, and every derived comparison drops out with it.
+  const base_v = baseline ? baseline.last.v : event ? null : all.first.v;
   const peak = scope.max;
   const ramp_hours = (peak.t - (event ? event.start : all.first.t)) / HOUR_MS;
   const rate_per_hr =
-    ramp_hours > 0.5 ? (peak.v - base_v) / ramp_hours : null;
+    base_v !== null && ramp_hours > 0.5 ? (peak.v - base_v) / ramp_hours : null;
 
   return {
     all,
@@ -60,7 +74,7 @@ const metric_facts = (points, event) => {
     peak: { ...peak },
     last: { ...all.last },
     baseline_value: base_v,
-    delta_vs_baseline: all.last.v - base_v,
+    delta_vs_baseline: base_v === null ? null : all.last.v - base_v,
     rate_per_hr
   };
 };

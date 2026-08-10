@@ -22,9 +22,12 @@ const fmt = {
   // fixed decimals
   num: (v, decimals) =>
     v === null || v === undefined ? "—" : Number(v).toFixed(decimals),
-  // "+2.8" / "-0.4"
+  // "+2.8" / "-0.4"; "—" when there is nothing to compare against (a null
+  // delta must not silently render as "+0.0")
   signed: (v, decimals) =>
-    `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(decimals)}`,
+    v === null || v === undefined
+      ? "—"
+      : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(decimals)}`,
   // "~17.5 h"
   hours: (h) => `~${(Math.round(h * 2) / 2).toFixed(1)} h`
 };

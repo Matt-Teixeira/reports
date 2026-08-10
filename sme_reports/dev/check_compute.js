@@ -6,10 +6,14 @@ const {
   chart_mode,
   daily_rollup,
   metric_points,
+  median_interval_ms,
   clean_series
 } = require("../compute/series");
 const {
   find_off_runs,
+  build_compressor_events,
+  describe_event_window,
+  select_primary_event,
   classify_compressor_runs,
   detect_compressor_event,
   detect_temp_alarm,
@@ -43,7 +47,7 @@ const row = (h, over = {}) => ({
 
 // --- compressor event detection ---------------------------------------------
 {
-  // on on off off on off on -> 2 off runs, 3 off readings, recovered
+  // on on off off on off on -> 2 off runs 2h apart (< gap) form ONE event.
   const s = [
     row(0),
     row(1),
@@ -53,18 +57,202 @@ const row = (h, over = {}) => ({
     row(5, { compressor_on: false }),
     row(6)
   ];
-  const ev = detect_compressor_event(s);
+  const events = build_compressor_events(find_off_runs(s), { interval_ms: HOUR });
+  assert.strictEqual(events.length, 1, "runs 2h apart cluster into one event");
+  const ev = events[0];
   assert.strictEqual(ev.cycles, 2, "two off runs");
   assert.strictEqual(ev.off_count, 3, "three off readings");
   assert.strictEqual(ev.start, T0 + 2 * HOUR, "event starts at first stop");
   assert.strictEqual(ev.end, T0 + 6 * HOUR, "recovery after last off run");
+  // Off time = per-run reading span + one capture period each:
+  // (h3-h2 + 1) + (h5-h5 + 1) = 3h. Never the whole first-stop->recovery
+  // span (4h), which would charge the ON hour between the runs to the event.
+  assert.strictEqual(ev.off_hours, 3, "off_hours sums per-run off time");
+
+  // A single-reading run must never score zero off time — a real cycling
+  // incident would otherwise lose primary selection to a shorter stop.
+  const single = build_compressor_events(find_off_runs([row(0), row(1, { compressor_on: false }), row(2)]), {
+    interval_ms: HOUR
+  });
+  assert.strictEqual(single[0].off_hours, 1, "one off reading = one capture period");
+  assert.strictEqual(
+    build_compressor_events(find_off_runs(s))[0].off_hours,
+    1,
+    "interval defaults to 0 when the caller cannot supply one"
+  );
 }
 {
-  // series ends off -> open event
+  // Irregular cadence: a dense burst inside an otherwise hourly series must
+  // not report more downtime than elapsed between the stop and the restart.
+  const MIN = 60000;
+  const s = [];
+  for (let h = 0; h < 10; h++) s.push(row(h));
+  s.push({ ...row(0), t: T0 + 10 * HOUR + 1 * MIN, compressor_on: false });
+  s.push({ ...row(0), t: T0 + 10 * HOUR + 4 * MIN, compressor_on: false });
+  s.push({ ...row(0), t: T0 + 10 * HOUR + 6 * MIN }); // recovery, 5 min after stop
+  const interval = median_interval_ms(s);
+  assert.strictEqual(interval, HOUR, "median stays hourly despite the burst");
+  const ev = build_compressor_events(find_off_runs(s), { interval_ms: interval })[0];
+  const span_h = (ev.end - ev.start) / HOUR;
+  assert.ok(
+    ev.off_hours <= span_h,
+    `off_hours ${ev.off_hours} must not exceed stop->recovery span ${span_h}`
+  );
+  assert.ok(Math.abs(ev.off_hours - 5 / 60) < 1e-9, `5 min off, got ${ev.off_hours}`);
+}
+{
+  // median_interval_ms convention on an even number of unequal gaps: the
+  // upper of the two middle values (index length/2 on the sorted list).
+  const t = (mins) => ({ t: T0 + mins * 60000 });
+  assert.strictEqual(median_interval_ms([t(0), t(1)]), 60000, "single gap");
+  assert.strictEqual(median_interval_ms([t(0)]), null, "one row -> no interval");
+  assert.strictEqual(median_interval_ms([]), null, "empty -> no interval");
+  // gaps of 1, 2, 60, 600 min -> sorted [1,2,60,600], index 2 -> 60 min
+  assert.strictEqual(
+    median_interval_ms([t(0), t(1), t(3), t(63), t(663)]),
+    60 * 60000,
+    "even count takes the upper middle gap"
+  );
+}
+{
+  // Cluster boundary is strict: exactly 48h of ON time stays one event.
+  const at = build_compressor_events(
+    find_off_runs([
+      row(0, { compressor_on: false }),
+      row(1), // recovery at h1
+      row(49, { compressor_on: false }), // gap exactly 48h
+      row(50)
+    ])
+  );
+  assert.strictEqual(at.length, 1, "gap of exactly 48h does not split");
+  const past = build_compressor_events(
+    find_off_runs([
+      row(0, { compressor_on: false }),
+      row(1),
+      row(49.001, { compressor_on: false }), // gap 48h + 3.6s
+      row(51)
+    ])
+  );
+  assert.strictEqual(past.length, 2, "gap beyond 48h splits");
+}
+{
+  // Runs separated by >48h of ON time are distinct events.
+  const s = [
+    row(0, { compressor_on: false }),
+    row(10, { compressor_on: false }), // 10h run (one cluster: gap 10h < 48h... adjacent rows)
+    row(11),
+    row(100, { compressor_on: false }), // 89h ON gap -> new event
+    row(101, { compressor_on: false }),
+    row(102)
+  ];
+  const events = build_compressor_events(find_off_runs(s), { interval_ms: HOUR });
+  assert.strictEqual(events.length, 2, "89h gap splits events");
+  assert.strictEqual(events[0].off_hours, 11, "first event off h0 -> h10, +1 period");
+  assert.strictEqual(events[1].off_hours, 2, "second event off h100 -> h101, +1 period");
+  const primary = select_primary_event(events);
+  assert.strictEqual(primary, events[0], "largest off time wins when all recovered");
+
+  // Equal off time -> most recent wins.
+  const tie = build_compressor_events(
+    find_off_runs([
+      row(0, { compressor_on: false }),
+      row(2),
+      row(200, { compressor_on: false }),
+      row(202)
+    ])
+  );
+  assert.strictEqual(tie.length, 2);
+  assert.strictEqual(tie[0].off_hours, tie[1].off_hours, "tied off time");
+  assert.strictEqual(select_primary_event(tie), tie[1], "tie goes to most recent");
+
+  // An open trailing event beats a larger recovered one (alert bias), and
+  // stops accruing at the last reading — never at the requested window end.
+  const open = build_compressor_events(
+    find_off_runs([
+      row(0, { compressor_on: false }),
+      row(40, { compressor_on: false }),
+      row(41),
+      row(299, { compressor_on: false }) // still off at the last capture
+    ]),
+    { interval_ms: HOUR }
+  );
+  assert.strictEqual(open.length, 2);
+  assert.strictEqual(open[1].end, null, "trailing event is open");
+  assert.strictEqual(select_primary_event(open), open[1], "ongoing beats larger recovered");
+  assert.strictEqual(
+    open[1].off_hours,
+    1,
+    "open event accrues only what was observed, +1 period"
+  );
+}
+{
+  // A request-supplied window counts only what lies inside it, including
+  // runs that cross either boundary.
+  const s = [];
+  for (let h = 0; h <= 30; h++)
+    s.push(row(h, { compressor_on: !((h >= 5 && h <= 15) || (h >= 18 && h <= 25)) }));
+  const runs = find_off_runs(s);
+  const win = { start: T0 + 10 * HOUR, end: T0 + 20 * HOUR };
+  const ev = describe_event_window(win, runs, s, { interval_ms: HOUR });
+  assert.strictEqual(ev.start, win.start, "override start is honored verbatim");
+  assert.strictEqual(ev.end, win.end, "override end is honored verbatim");
+  assert.strictEqual(ev.cycles, 2, "both boundary-crossing runs counted");
+  // Run A (h5-h15) contributes h10-h15 = 6 readings; run B (h18-h25)
+  // contributes h18-h20 = 3 readings. Neither is dropped nor counted whole.
+  assert.strictEqual(ev.off_count, 9, `in-window off readings, got ${ev.off_count}`);
+  // A: 5h span + 1h tail (recovery at h16 is inside) = 6h.
+  // B: 2h span + 1h tail (recovery at h26 is outside -> open) = 3h.
+  assert.strictEqual(ev.off_hours, 9, `clipped off time, got ${ev.off_hours}`);
+
+  // A window with no OFF readings reports none rather than a ~0.0 h stop.
+  const quiet = describe_event_window(
+    { start: T0 + 27 * HOUR, end: T0 + 29 * HOUR },
+    runs,
+    s,
+    { interval_ms: HOUR }
+  );
+  assert.strictEqual(quiet.off_count, 0, "no off readings in a quiet window");
+  assert.strictEqual(quiet.cycles, 0);
+  assert.strictEqual(quiet.off_hours, 0);
+  assert.strictEqual(
+    classify({ compressor_event: quiet, pressure: null, thr: { high_gt: null, high_lt: null } }),
+    "stable_healthy",
+    "an unobserved stop is not narrated as a compressor stop"
+  );
+
+  // An open-ended override (no end) runs to the end of the data.
+  const open = describe_event_window({ start: T0 + 18 * HOUR, end: null }, runs, s, {
+    interval_ms: HOUR
+  });
+  assert.strictEqual(open.end, null, "open override stays open");
+  assert.strictEqual(open.off_count, 8, "h18-h25 readings");
+}
+{
+  // A flicker between two real runs must not bridge them into one event:
+  // classification removes it before clustering ever sees it.
+  const s = [
+    row(0, { compressor_on: false }),
+    row(1, { compressor_on: false }),
+    row(2),
+    row(60, { compressor_on: false }), // single dropout, uncorroborated
+    row(61),
+    row(120, { compressor_on: false }),
+    row(121, { compressor_on: false }),
+    row(122)
+  ];
+  const { real_runs, flicker_runs } = classify_compressor_runs(find_off_runs(s), [], {});
+  assert.strictEqual(flicker_runs.length, 1, "mid-gap dropout is a flicker");
+  const events = build_compressor_events(real_runs);
+  assert.strictEqual(events.length, 2, "flicker does not bridge the 118h gap");
+}
+{
+  // series ends off -> open event; empty inputs
   const s = [row(0), row(1, { compressor_on: false }), row(2, { compressor_on: false })];
   const ev = detect_compressor_event(s);
   assert.strictEqual(ev.end, null, "open event when series ends off");
   assert.strictEqual(detect_compressor_event([row(0), row(1)]), null, "no event when always on");
+  assert.deepStrictEqual(build_compressor_events([]), [], "no runs -> no events");
+  assert.strictEqual(select_primary_event([]), null, "no events -> no primary");
 }
 
 // --- flicker classification -------------------------------------------------
@@ -140,6 +328,35 @@ const row = (h, over = {}) => ({
   assert.strictEqual(m.baseline_value, 30, "baseline = last pre-event value");
   assert.ok(Math.abs(m.rate_per_hr - 24.2) < 0.01, `ramp rate ~24.2/h, got ${m.rate_per_hr}`);
   assert.strictEqual(metric_facts([], null), null);
+
+  // Points inside another event's window (+24h lag) are excluded from the
+  // baseline so an earlier incident's excursion doesn't pollute it.
+  const spiked = [];
+  for (let h = 0; h <= 40; h++)
+    spiked.push({ t: T0 + h * HOUR, v: h <= 2 ? 100 : 30 });
+  const late_ev = { start: T0 + 40 * HOUR, end: null };
+  const early = { start: T0, end: T0 + 2 * HOUR };
+  assert.strictEqual(
+    metric_facts(spiked, late_ev).baseline.max.v,
+    100,
+    "without other_events the early excursion leaks into the baseline"
+  );
+  const excl = metric_facts(spiked, late_ev, { other_events: [early] });
+  assert.strictEqual(excl.baseline.max.v, 30, "early event + 24h lag excluded from baseline");
+  assert.strictEqual(excl.baseline.first.t, T0 + 27 * HOUR, "baseline resumes after lag");
+
+  // When exclusion consumes every pre-event point there is no honest
+  // baseline. It must NOT fall back to a point inside the excluded window —
+  // that reports a rise from a value the magnet never rested at — and every
+  // derived comparison must drop out with it.
+  const short_pts = spiked.filter((p) => p.t <= T0 + 10 * HOUR);
+  const none = metric_facts(short_pts, { start: T0 + 10 * HOUR, end: null }, { other_events: [early] });
+  assert.strictEqual(none.baseline, null, "all pre-event points excluded");
+  assert.strictEqual(none.baseline_value, null, "no baseline is not the excluded excursion");
+  assert.strictEqual(none.delta_vs_baseline, null, "no delta without a baseline");
+  assert.strictEqual(none.rate_per_hr, null, "no ramp rate without a baseline");
+  // Without an event, the first reading remains a fair stand-in.
+  assert.strictEqual(metric_facts(short_pts, null).baseline_value, 100, "no event -> first point");
 }
 {
   const skew = clock_skew_minutes([
@@ -257,6 +474,48 @@ const row = (h, over = {}) => ({
     () => normalize_request({ report_type: "other", system_id: "SME1", recipients: ["a@b.com"] }),
     /report_type/
   );
+}
+
+// --- request exclusions -----------------------------------------------------
+{
+  // Excluded systems are dropped before any DB pull, and the loader reports
+  // exactly what it removed so the fleet summary can state it — a system
+  // leaving the report must always be visible as a decision.
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const tmp = path.join(os.tmpdir(), `check-exclude-${process.pid}.json`);
+  const write = (obj) => {
+    fs.writeFileSync(tmp, JSON.stringify(obj));
+    return tmp;
+  };
+  const base = {
+    batch_email: { recipients: ["a@b.com"] },
+    reports: [
+      { report_type: "magnet_health", system_id: "SME00001" },
+      { report_type: "magnet_health", system_id: "SME10844" },
+      { report_type: "magnet_health", system_id: "SME13604" }
+    ]
+  };
+  const { load_requests } = require("../request_loader");
+
+  const r = load_requests(
+    write({ ...base, exclude: ["SME10844", "SME13604"], exclude_note: "stations" })
+  );
+  assert.strictEqual(r.requests.length, 1, "excluded systems never become requests");
+  assert.strictEqual(r.requests[0].system_id, "SME00001");
+  assert.deepStrictEqual(r.excluded.ids, ["SME10844", "SME13604"], "removals reported");
+  assert.strictEqual(r.excluded.note, "stations");
+
+  // An exclusion that matches nothing is not an exclusion.
+  const none = load_requests(write({ ...base, exclude: ["SME99999"] }));
+  assert.strictEqual(none.requests.length, 3);
+  assert.strictEqual(none.excluded, null, "nothing removed -> nothing to state");
+
+  // Malformed exclusions fail loudly, not silently.
+  assert.throws(() => load_requests(write({ ...base, exclude: "SME10844" })), /array/);
+  assert.throws(() => load_requests(write({ ...base, exclude: ["bogus"] })), /system id/);
+  fs.unlinkSync(tmp);
 }
 
 console.log("check_compute: all assertions passed");
