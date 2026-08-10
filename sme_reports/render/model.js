@@ -370,10 +370,37 @@ const build_render_model = ({
           }
         : null;
 
-  // A banner page must still fit ONE page: the charts give up height to buy
-  // the banner its room. Measured in Chromium — at 152 the rx cards run
-  // past the footer.
-  const chart_height = banner ? 100 : 152;
+  // Narrative first: the page's density tier depends on how much prose the
+  // period produced, and the charts' height depends on the tier.
+  const overrides = request.narrative_overrides || {};
+  const generated = build_narrative(facts);
+  const story_html = overrides.story || generated.story_html;
+  const rx_cards =
+    Array.isArray(overrides.rx_cards) && overrides.rx_cards.length
+      ? overrides.rx_cards
+      : generated.rx_cards;
+
+  // One page, hard (.page is 11in with overflow:hidden — anything past the
+  // footer is clipped SILENTLY). Prose length is bounded but variable: a
+  // period can legitimately produce ten events, six flickers, and two alarm
+  // runs. Pages whose flowed text exceeds the measured capacity of the
+  // normal layout switch to a compact tier (smaller story/card faces,
+  // shorter charts) so the worst natural page still clears the footer.
+  // Calibration (Chromium, review F1): normal capacity ≈ 1,600 chars —
+  // 1,577 fit with 35px to spare, 1,648 clipped by 22px. The threshold
+  // sits a safe margin under the cliff; the maximal fixtures in
+  // dev/check_chart.js re-measure both tiers on every run.
+  const COMPACT_AT = 1400;
+  const text_len = (s) => String(s).replace(/<[^>]+>/g, "").length;
+  const content_len =
+    text_len(story_html) +
+    rx_cards.reduce((n, c) => n + text_len(c.body) + text_len(c.heading), 0) +
+    (banner ? text_len(banner.text) + text_len(banner.label) : 0);
+  const density = content_len > COMPACT_AT ? "compact" : null;
+
+  // Banner pages trade chart height for the banner's room; compact pages
+  // trade a further notch for their extra prose. All measured, not assumed.
+  const chart_height = banner ? (density ? 92 : 100) : density ? 128 : 152;
 
   // Pressure chart markers: peak is red when breaching, orange otherwise;
   // "now" is one notch softer (orange breaching / green not) — exemplar convention.
@@ -449,14 +476,6 @@ const build_render_model = ({
     });
   }
 
-  const overrides = request.narrative_overrides || {};
-  const generated = build_narrative(facts);
-  const story_html = overrides.story || generated.story_html;
-  const rx_cards =
-    Array.isArray(overrides.rx_cards) && overrides.rx_cards.length
-      ? overrides.rx_cards
-      : generated.rx_cards;
-
   const win_span = `${fmt.day(window_start)} – ${fmt.day(window_end)}`;
   const win_span_caps = `${fmt.day_caps(window_start)} → ${fmt.day_caps(window_end)}`;
   const analyzed = fmt.iso_date(Date.now());
@@ -493,6 +512,7 @@ const build_render_model = ({
       .join(" · "),
     tiles: build_tiles(facts),
     banner,
+    density,
     pressure_heading: `${vendor.primary.heading} — ${win_span_caps}`,
     pressure_heading_note: `(${mode_desc}, ${units.pressure}${orange})`,
     pressure_chart_svg,

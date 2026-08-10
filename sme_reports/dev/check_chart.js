@@ -1039,7 +1039,13 @@ const philips_series = [];
   assert.ok(vm.story_html.startsWith("<b>Monitoring suspect:</b>"), "story leads with the monitoring problem");
   assert.ok(vm.rx_cards[0].heading.includes("sensor's claims"), vm.rx_cards[0].heading);
   // Banner pages trade chart height for the banner's room.
-  assert.ok(vm.pressure_chart_svg.includes('viewBox="0 0 640 100"'), "suspect charts render short");
+  // Banner pages render short charts; the exact height depends on the
+  // density tier the page's prose selected.
+  const expect_h = vm.density ? 92 : 100;
+  assert.ok(
+    vm.pressure_chart_svg.includes(`viewBox="0 0 640 ${expect_h}"`),
+    `suspect charts render short (density=${vm.density || "normal"})`
+  );
   assert.ok(build_page(vm).includes('class="banner"'), "banner div rendered");
   // Parity: the fleet record reaches the same verdict from the same facts.
   const rec = build_summary_facts(vm.facts, identity);
@@ -1164,7 +1170,10 @@ const philips_series = [];
   assert.strictEqual(p_now.cls, "good", "pressure keeps its judgment — only the compressor channel is convicted");
   assert.ok(vm.story_html.includes("No compressor signalᶜ"), "story states the overlay");
   assert.ok(!vm.story_html.includes("off ~"), "no fabricated downtime");
-  assert.ok(vm.pressure_chart_svg.includes('viewBox="0 0 640 100"'), "banner pages render short charts");
+  assert.ok(
+    vm.pressure_chart_svg.includes(`viewBox="0 0 640 ${vm.density ? 92 : 100}"`),
+    `banner pages render short charts (density=${vm.density || "normal"})`
+  );
   const rec = build_summary_facts(vm.facts, identity);
   assert.strictEqual(rec.offline_kind, "no_signal");
   assert.strictEqual(effective_status(rec), "no_signal");
@@ -1323,10 +1332,116 @@ const philips_series = [];
   assert.strictEqual(helium.cls, "dim");
   assert.ok(helium.v.includes("250") && helium.v.includes("‡"), `flagged channel shows raw greyed: ${helium.v}`);
   assert.ok(helium.s.includes("not judged"), helium.s);
-  assert.ok(vm.pressure_chart_svg.includes('viewBox="0 0 640 152"'), "no banner, full-height charts");
+  assert.ok(
+    vm.pressure_chart_svg.includes(`viewBox="0 0 640 ${vm.density ? 128 : 152}"`),
+    `no banner: full-height (or compact) charts, density=${vm.density || "normal"}`
+  );
   const rec = build_summary_facts(vm.facts, identity);
   assert.strictEqual(rec.sensor_suspect, false);
   assert.strictEqual(rec.data_flags.helium, true, "fleet greys the same channel");
 }
 
-console.log("check_chart: all assertions passed");
+// --- one-page geometry, measured in Chromium (review F1) --------------------
+// The brief is 11in with overflow:hidden and an absolutely-positioned
+// footer: anything past the footer is clipped SILENTLY, so layout claims
+// are proven by laying the page out in a browser — never by assumption.
+// The two maximal fixtures push the natural story to its bound (ten
+// events, six flickers, two alarm runs, EDU data; one variant adds the
+// suspect banner) and must select the compact tier; every synthetic page
+// written by this file is then measured against the footer.
+{
+  const { normalize_philips } = require("../normalize");
+  const philips_maximal = (with_garbage) => {
+    const raw = [];
+    for (let h = 0; h < 720; h++) {
+      const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+      const stop = h >= 24 && h < 594 && (h - 24) % 60 < 5;
+      const flicker = h >= 45 && h < 405 && (h - 45) % 60 === 0;
+      const alarm = (h >= 100 && h <= 103) || (h >= 300 && h <= 302);
+      const last = with_garbage && h === 719;
+      raw.push({
+        capture_datetime: iso, host_datetime: iso,
+        monitor_magnet_pressure_value: last ? "-50" : String(29 + (h % 7) * 0.1),
+        he_psi_avg_value: last ? "-50" : String(29 + (h % 7) * 0.1),
+        helium_level_value: last ? "0.0" : String(76.5 - h * 0.001),
+        cryo_comp_malf_value: stop || flicker ? "60" : "0",
+        cryo_comp_temp_alarm_state: alarm ? "5" : "0",
+        tech_room_temp_value: "21", quenched_state: "0"
+      });
+    }
+    const edu_rows = [];
+    for (let h = 0; h < 720; h++)
+      edu_rows.push({ t: Date.UTC(2026, 6, 1, h), room_temp_f: 70 + (h % 5), humidity_pct: 45, probe_0_f: 66, probe_1_f: 68, comp_vib: true });
+    return build_render_model({
+      identity: { system_id: "SME99098", manufacturer: "Philips", modality: "MRI", site_name: "Maximal Story Medical Center", city: "Longtown", state: "TN", customer_name: "Maximal Health Network" },
+      vendor: VENDORS.PHILIPS, series: normalize_philips(raw, VENDORS.PHILIPS), source: "synthetic",
+      request: normalize_request({
+        report_type: "magnet_health", system_id: "SME99098", recipients: ["dev@example.com"],
+        window: { start: "2026-07-01", end: "2026-07-31" }, output: { html: false, pdf: false, email: false }
+      }),
+      edu: edu_rows, edu_source: "edu.v2"
+    });
+  };
+  const max_banner = philips_maximal(true);
+  const max_plain = philips_maximal(false);
+  assert.strictEqual(max_banner.facts.compressor_events.length, 10, "ten distinct events");
+  assert.strictEqual(max_banner.facts.compressor_flickers.count, 6, "six flickers");
+  assert.strictEqual(max_banner.facts.last_suspect, true);
+  assert.strictEqual(max_banner.density, "compact", "maximal banner page selects the compact tier");
+  assert.strictEqual(max_plain.density, "compact", "maximal plain page selects the compact tier");
+  assert.ok(max_banner.story_html.includes("+5 more"), "other-events day list is capped");
+  // A suspect Philips exercises the temp-alarm tile under the conviction.
+  const ta = max_banner.tiles.find((t) => t.k === "TEMP ALARM");
+  assert.strictEqual(ta.cls, "dim", "temp-alarm tile is suspended on a convicted page");
+  write_html(path.join(__dirname, "..", "out"), "dev-synthetic-max-banner", build_page(max_banner));
+  write_html(path.join(__dirname, "..", "out"), "dev-synthetic-max-plain", build_page(max_plain));
+}
+
+(async () => {
+  const puppeteer = require("puppeteer");
+  const MIN_MARGIN_PX = 12;
+  const pages = [
+    "max-banner", "max-plain", "suspect", "philips", "multi-event",
+    "ge", "siemens", "non-tim", "no-baseline"
+  ];
+  const browser = await puppeteer.launch({
+    headless: "new",
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+  });
+  try {
+    for (const name of pages) {
+      const file = path.join(__dirname, "..", "out", `Avante-dev-synthetic-${name}-Magnet-Health.html`);
+      const page = await browser.newPage();
+      await page.setViewport({ width: 816, height: 1056 });
+      await page.goto(`file://${file}`, { waitUntil: "networkidle0" });
+      const m = await page.evaluate(() => {
+        const pg = document.querySelector(".page");
+        const top = pg.getBoundingClientRect().top;
+        const usable = pg.clientHeight - 0.38 * 96; // .foot height
+        let lowest = 0;
+        for (const el of pg.querySelectorAll(".hdr,.band,h1,.sub,.banner,.tiles,h2,.card,.story,.rx"))
+          lowest = Math.max(lowest, el.getBoundingClientRect().bottom - top);
+        const sub = pg.querySelector(".sub");
+        return {
+          margin: usable - lowest,
+          sub_overflowing: sub.scrollWidth > sub.clientWidth,
+          sub_ellipsis: getComputedStyle(sub).textOverflow === "ellipsis"
+        };
+      });
+      assert.ok(
+        m.margin >= MIN_MARGIN_PX,
+        `${name}: content must clear the footer by ≥${MIN_MARGIN_PX}px, measured ${m.margin.toFixed(1)}px`
+      );
+      assert.ok(m.sub_ellipsis, `${name}: sub-line must ellipsize, not hard-clip`);
+      if (name === "max-banner")
+        assert.ok(m.sub_overflowing, "the long-name fixture actually exercises the ellipsis");
+      await page.close();
+    }
+  } finally {
+    await browser.close();
+  }
+  console.log("check_chart: all assertions passed");
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

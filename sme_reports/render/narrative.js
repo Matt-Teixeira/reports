@@ -44,7 +44,11 @@ const other_events_sentence = (facts) => {
   if (evs.length <= 1) return "";
   const others = evs.filter((e) => e !== facts.compressor_event);
   const total = others.reduce((h, e) => h + (e.off_hours || 0), 0);
-  const days = others.map((e) => fmt.day(e.start)).join(", ");
+  // The day list is bounded (the one-page budget is finite); the count and
+  // total hours above stay exact however many events the period produced.
+  const listed = others.slice(0, 4).map((e) => fmt.day(e.start)).join(", ");
+  const days =
+    others.length > 4 ? `${listed}, +${others.length - 4} more` : listed;
   return ` <b>${others.length} other compressor stop event${others.length === 1 ? "" : "s"}${comp_c(facts)}</b> occurred this period (${days}; ${fmt.hours(total)} off in total) — the timeline above covers the primary event, and the others are summarized here.`;
 };
 

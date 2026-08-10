@@ -37,6 +37,21 @@ h2 { font-size: 10pt; letter-spacing: .1em; color: #004E79; margin: .18in 0 .04i
 // would cost a line of vertical space on exactly the tightest pages.
 const DENSITY_CSS = `h2{margin:.09in 0 .02in}.tiles{margin-top:.1in}.story{margin-top:.07in;font-size:9pt;line-height:1.38}.rx{margin-top:.07in}.rx .card{font-size:8.2pt;padding:.06in .09in}.sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card svg{display:block}`;
 
+// Compact tier (vm.density === "compact"): applied when the period produced
+// more prose than the normal layout's measured capacity (model.js
+// COMPACT_AT). Every value here was tuned against the maximal fixtures in
+// dev/check_chart.js, which lay the page out in Chromium and assert nothing
+// crosses the footer — do not change one without re-running that check.
+const COMPACT_CSS = `.page.compact .band{margin:.07in 0 .12in}
+.page.compact .tiles{margin-top:.08in}
+.page.compact .tile .v{font-size:14pt}
+.page.compact .tile .s{font-size:7.6pt}
+.page.compact .banner{font-size:8pt;line-height:1.35;padding:.05in .1in;margin-top:.08in}
+.page.compact h2{margin:.07in 0 .015in}
+.page.compact .story{font-size:8.3pt;line-height:1.3;margin-top:.06in;padding:.09in .12in}
+.page.compact .rx{margin-top:.06in}
+.page.compact .rx .card{font-size:7.7pt;line-height:1.34;padding:.05in .08in}`;
+
 const tile_html = (t) =>
   ` <div class="tile ${t.cls}"><div class="k">${t.k}</div><div class="v">${t.v}</div><div class="s">${t.s}</div></div>`;
 
@@ -50,7 +65,7 @@ const banner_html = (b) =>
 const heading_note = (note) =>
   `<span style="color:#57585A;font-weight:400;letter-spacing:0">${note}</span>`;
 
-const build_page = (vm) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${vm.title}</title></head><style>${BASE_CSS}</style><style>${DENSITY_CSS}</style><body><div class="page">
+const build_page = (vm) => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${vm.title}</title></head><style>${BASE_CSS}</style><style>${DENSITY_CSS}</style><style>${COMPACT_CSS}</style><body><div class="page${vm.density ? ` ${vm.density}` : ""}">
 <div class="hdr"><img src="data:image/png;base64,${logo_base64}"><div class="r">Magnet Health Brief<br><b>${vm.analyzed_date}</b></div></div>
 <div class="band"></div>
 <h1>${vm.h1_text}</h1>
