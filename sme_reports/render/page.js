@@ -30,7 +30,12 @@ h2 { font-size: 10pt; letter-spacing: .1em; color: #004E79; margin: .18in 0 .04i
 .foot { position: absolute; left: 0; right: 0; bottom: 0; height: .38in; background: #002B43; color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 .5in; font-size: 8.5pt; }
 `;
 
-const DENSITY_CSS = `h2{margin:.09in 0 .02in}.tiles{margin-top:.1in}.story{margin-top:.07in;font-size:9pt;line-height:1.38}.rx{margin-top:.07in}.rx .card{font-size:8.2pt;padding:.06in .09in}.sub{white-space:nowrap}.card svg{display:block}`;
+// .sub ellipsizes rather than hard-clipping at the page edge: on long site
+// names the tail ("analyzed <date>") used to vanish without a trace. Every
+// fact in that tail is stated elsewhere on the page (header date, chart
+// headings, DATA NOTES), so truncation loses nothing — wrapping instead
+// would cost a line of vertical space on exactly the tightest pages.
+const DENSITY_CSS = `h2{margin:.09in 0 .02in}.tiles{margin-top:.1in}.story{margin-top:.07in;font-size:9pt;line-height:1.38}.rx{margin-top:.07in}.rx .card{font-size:8.2pt;padding:.06in .09in}.sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card svg{display:block}`;
 
 const tile_html = (t) =>
   ` <div class="tile ${t.cls}"><div class="k">${t.k}</div><div class="v">${t.v}</div><div class="s">${t.s}</div></div>`;
