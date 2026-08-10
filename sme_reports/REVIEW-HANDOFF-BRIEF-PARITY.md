@@ -289,3 +289,30 @@ temp-alarm); geometry coverage does not constrain arbitrary
 responsibility, same stance as the fleet's request overrides); a single
 compact tier (the Chromium check re-measures the bound every run and
 would catch a page that outgrows it).
+
+---
+
+## Round-3 outcome (2026-08-10) — the finding fixed
+
+Round 3 verdict was DO NOT SHIP on one blocker: the round-2 neutral
+wording was categorically false for a valid OFF→ON→OFF boundary event
+(one clustered event, cycles 2, five observed ON readings) — the
+inherited `left_censored` predicate held whenever the first ON postdated
+the event's start, and "off at every reading this period" rode on it.
+
+| # | Fix | Where | Regression test |
+|---|---|---|---|
+| R3-F1 | `left_censored` now requires **no ON reading at all** — one observed ON falsifies every "entire period"/"every reading" claim on both documents (the fleet history cell reports measured hours instead of "entire period"). The boundary case became a new shared fact, **`start_truncated`** (`offline_state`): its trailing stop was observed and anchors the wording — tile "already off at first reading · off again <ts>", story "already off when the data begins … first seen running <ts>, then stopped again <ts> — off ~N h observed across N off-runs" — while the initial run's start and earlier downtime stay unclaimed. The stop remains urgent-eligible per the documented observed-stop stance. Events now carry `last_stop_t` (the final off-run's start), the observed anchor the event's boundary `start` would misstate. RULES.md §5 rows updated in the same commit | `compute/events.js` (`last_stop_t`), `compute/summary_facts.js` (`offline_state`), `render/model.js`, `render/tiles.js`, `render/narrative.js`, `RULES.md` | `check_chart.js` "start-truncated multi-cycle boundary event": end-to-end Philips OFF→ON→OFF (cycles 2) asserting tile and story wording, no categorical or fabricated-start claims, no left-censor overlay, fleet parity (`left_censored` false, ordinary ongoing condition, urgent), plus a quench variant asserting the wording survives verdict suppression |
+
+Also closed from the round-3 gap list: the ON-recovery-then-open-stop
+fixture (the R3-F1 fixture itself), the direct "already OFF at first
+reading" vs "OFF at every reading" distinction (asserted in both
+directions), and the no-event coldhead baseline counterexamples (a 15 K
+excursion withholds "at base temperature"; a clean 4.2 K period earns
+it). Still accepted: non-TIM cabinet suspect tile; `narrative_overrides`
+geometry; live DB reruns are recorded in this doc rather than executed
+by the reviewer.
+
+Live probes after round 3: SME20122 (compact, suspect banner, 171px) and
+SME20292 (normal, `OFFᶜ`, observed stop timing intact, 61px) unchanged.
+All three dev checks pass.
