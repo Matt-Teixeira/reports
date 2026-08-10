@@ -213,7 +213,22 @@ const build_render_model = ({
   const other_events = compressor_events.filter((ev) => ev !== compressor_event);
   const pressure = metric_facts(p_points, compressor_event, { other_events });
   const helium = metric_facts(he_points, compressor_event, { other_events });
-  const coldhead = stats_for(screen(metric_points(rows, "coldhead_k"), "coldhead_k"));
+  const coldhead_points = screen(metric_points(rows, "coldhead_k"), "coldhead_k");
+  const coldhead = stats_for(coldhead_points);
+  // Warmest coldhead reading BEFORE the primary event (whole period when no
+  // event): the narrative's "coldhead at base temperature" baseline claim
+  // is judged against this, never assumed — the field previously had no
+  // producer, so `undefined !== null` called a 146 K coldhead "at base
+  // temperature" (review round-2 F2). Null when no pre-event reading
+  // exists (e.g. a left-censored stop covering the period).
+  const coldhead_baseline_cutoff = compressor_event
+    ? compressor_event.start
+    : window_end;
+  const coldhead_baseline_max = coldhead_points.reduce(
+    (m, p) =>
+      p.t < coldhead_baseline_cutoff && (m === null || p.v > m) ? p.v : m,
+    null
+  );
   // GE reports a shield sensor alongside the coldhead; Siemens non-TIM carries
   // shield temp here too (it doubles as that vendor's primary metric). Null
   // for Philips and Siemens TIM, which have no shield channel.
@@ -270,6 +285,7 @@ const build_render_model = ({
     pressure,
     helium,
     coldhead,
+    coldhead_baseline_max,
     shield,
     cabinet,
     room_temp,

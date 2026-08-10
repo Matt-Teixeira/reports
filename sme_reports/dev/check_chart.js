@@ -1096,6 +1096,10 @@ const philips_series = [];
   assert.ok(!comp.s.includes("off ~"), `no fabricated hour count: ${comp.s}`);
   assert.ok(vm.story_html.includes("off the entire periodᶜ"), "story states the overlay");
   assert.ok(!vm.story_html.includes("Warming event OPEN"), "no open-event alarm line");
+  // Round-2 F2: a 146 K coldhead must never be narrated "at base
+  // temperature" — the baseline claim is judged against real pre-event
+  // readings, and this fixture has none under the warm line.
+  assert.ok(!vm.story_html.includes("at base temperature"), "no false base-temperature claim");
   assert.ok(!vm.story_html.includes("off ~"), "no fabricated downtime in the story");
   assert.strictEqual(vm.banner, null, "warm offline is a magnet state, not a banner");
   assert.ok(vm.rx_cards[0].body.includes("off entire periodᶜ"), vm.rx_cards[0].body);
@@ -1237,6 +1241,9 @@ const philips_series = [];
   const recovered = render("SME99011", ge_rows(cyc));
   assert.strictEqual(recovered.facts.archetype, "compressor_stop_recovered");
   assert.ok(recovered.story_html.includes("stoppedᶜ"), "stop carries the mark");
+  // Positive baseline case (round-2 F2): every pre-event coldhead reading
+  // sits at 4.2 K, so the base-temperature claim is earned here.
+  assert.ok(recovered.story_html.includes("coldhead at base temperature"), "earned base-temperature claim survives");
   assert.ok(recovered.story_html.includes("cycled on/offᶜ"), "cycle deduction carries the mark");
   assert.ok(recovered.story_html.includes("recoveredᶜ"), "recovery carries the mark");
   assert.ok(/other compressor stop events?ᶜ/.test(recovered.story_html), "secondary events carry the mark");

@@ -69,7 +69,15 @@ const baseline_sentence = (facts) => {
     parts.push(
       `helium ${fmt.num(he.baseline.min.v, facts.vendor.helium.decimals)}–${fmt.num(he.baseline.max.v, facts.vendor.helium.decimals)}${he_sfx(facts)}`
     );
-  if (facts.coldhead && facts.coldhead_baseline_max !== null)
+  // A claim, so it is judged, never assumed: only when every pre-event
+  // coldhead reading sits under the vendor's warm line. `!= null` also
+  // rejects a stub that never produced the field.
+  if (
+    facts.coldhead &&
+    facts.vendor.coldhead &&
+    facts.coldhead_baseline_max != null &&
+    facts.coldhead_baseline_max < facts.vendor.coldhead.warm_k
+  )
     parts.push(`coldhead at base temperature`);
   return parts.length
     ? `<b>Baseline ${fmt.day(facts.window_start)} – ${fmt.day(ev ? ev.start : facts.window_end)}${qualified ? " (outside other event spans)" : ""}:</b> ${parts.join(", ")}.`
