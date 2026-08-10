@@ -188,6 +188,17 @@ const STORIES = {
         `the signal, not the compressor, is the likely faultᶜ. Compressor downtime is not reported. ` +
         `${baseline_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
       );
+    // Left-censored with the overlay verdict suppressed (quench or suspect
+    // precedence): the stop was never observed starting, so the story must
+    // not invent the period boundary as its start, claim a downtime total,
+    // or frame an event whose timing is unknown as OPEN (review round-2
+    // F1). The neutral coverage wording states exactly what was read.
+    if (f.left_censored)
+      return (
+        `<b>Timeline (UTC):</b> <b>The compressor read OFF at every reading this period${comp_c(f)}</b>${comp_via(f)} — ` +
+        `already off at the first compressor reading (${fmt.ts(f.compressor_first_stateful_t)}), so its true start and total downtime are unknown. ` +
+        `${peak_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
+      );
     return (
       `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
       `<b>${fmt.ts(ev.start)}: the compressor stopped${comp_c(f)} and has not recovered</b>${comp_via(f)} — off ${fmt.hours(ev.off_hours)} at the last capture (${ev.off_count} readings off).${alarm_sentence(f)} ` +

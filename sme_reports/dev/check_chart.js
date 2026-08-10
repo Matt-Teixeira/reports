@@ -1122,6 +1122,15 @@ const philips_series = [];
     assert.strictEqual(qvm.facts.offline_kind, null, "quench suppresses the overlay on the brief");
     assert.strictEqual(qvm.facts.left_censored, true, "the censoring fact is not erased");
     assert.ok(!qvm.story_html.includes("off the entire periodᶜ"), "quench story is not reframed");
+    // Round-2 F1: a suppressed verdict must not resurrect fabricated
+    // timing — the tile and story render neutral coverage wording.
+    const q_comp = qvm.tiles[0];
+    assert.ok(!q_comp.s.includes("stopped"), `no fabricated start on the tile: ${q_comp.s}`);
+    assert.ok(!q_comp.s.includes("off ~"), `no fabricated hour count on the tile: ${q_comp.s}`);
+    assert.ok(q_comp.s.includes("start and downtime unknown"), q_comp.s);
+    assert.ok(!qvm.story_html.includes("off ~"), "no fabricated downtime in the story");
+    assert.ok(!qvm.story_html.includes("Warming event OPEN"), "unknown timing is not framed as an OPEN event");
+    assert.ok(qvm.story_html.includes("at every reading this period"), "neutral coverage wording");
     const qrec = build_summary_facts(qvm.facts, identity);
     assert.strictEqual(qrec.offline_kind, null, "fleet record gates identically");
     assert.strictEqual(qrec.left_censored, true, "history cell still reads entire period");
@@ -1288,6 +1297,11 @@ const philips_series = [];
   assert.ok(vm.banner.label.startsWith(STATUS_LABELS.sensor_suspect.toUpperCase()), vm.banner.label);
   assert.ok(vm.story_html.startsWith("<b>Monitoring suspect:</b>"), "one verdict in the story");
   assert.ok(!vm.story_html.includes("No compressor signal"), "no second verdict in the story");
+  // Round-2 F1: suspect precedence must not resurrect fabricated timing
+  // from the left-censored stop underneath.
+  assert.ok(!vm.story_html.includes("off ~"), "no fabricated downtime under the suspect framing");
+  assert.ok(!vm.story_html.includes("Warming event OPEN"), "unknown timing not framed as OPEN");
+  assert.ok(vm.story_html.includes("at every reading this period"), "neutral coverage wording");
   const comp = vm.tiles[0];
   assert.strictEqual(comp.cls, "dim", "scanner-sourced compressor claim is suspended");
   assert.ok(comp.s.includes("sensor's claim"), comp.s);

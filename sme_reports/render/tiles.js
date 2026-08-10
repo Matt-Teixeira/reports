@@ -119,6 +119,17 @@ const BUILDERS = {
           v: "—",
           s: `${STATUS_LABELS.no_signal}ᶜ`
         };
+      // Left-censored but the overlay verdict was suppressed (quench or
+      // suspect precedence): the FACT that the stop predates the data
+      // still holds, so the tile must not fabricate a start time or an
+      // hour count from the period boundary (review round-2 F1).
+      if (f.left_censored)
+        return {
+          cls: "bad",
+          k: "COMPRESSOR",
+          v: `OFF${c}`,
+          s: "off at every reading this period · start and downtime unknown"
+        };
       return {
         cls: "bad",
         k: "COMPRESSOR",
