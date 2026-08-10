@@ -1171,6 +1171,76 @@ const philips_series = [];
   assert.ok(is_data_issue(rec), "fleet files it as a data issue");
 }
 
+// --- ᶜ provenance on every inferred narrative conclusion (review F4) --------
+{
+  // RULES.md §6: mark conclusions, and only conclusions. On a GE without an
+  // EDU, EVERY compressor statement is a coldhead inference — including the
+  // negative ones ("no compressor events") and the deductions (flicker,
+  // cycles, other events). Each narrative archetype must carry the mark on
+  // its inferred source and drop it on a measured one.
+  const { normalize_ge } = require("../normalize");
+  const request_for = (id) =>
+    normalize_request({
+      report_type: "magnet_health", system_id: id, recipients: ["dev@example.com"],
+      window: { start: "2026-07-01", end: "2026-07-31" }, output: { html: false, pdf: false, email: false }
+    });
+  const identity_for = (id) => ({ system_id: id, manufacturer: "GE", modality: "MRI", site_name: "X", city: "X", state: "TX", customer_name: "X" });
+  const ge_rows = (shape) => {
+    const raw = [];
+    for (let h = 0; h < 720; h++) {
+      const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+      const s = shape(h);
+      raw.push({
+        capture_datetime: iso, host_datetime: iso,
+        he_pressure_value: String(s.pressure ?? 1.2),
+        he_level_value: "70",
+        coldhead_ruo_value: String(s.coldhead ?? 4.2),
+        shield_si410_value: "45"
+      });
+    }
+    return normalize_ge(raw, VENDORS.GE);
+  };
+  const render = (id, series, edu) =>
+    build_render_model({
+      identity: identity_for(id), vendor: VENDORS.GE, series, source: "synthetic",
+      request: request_for(id), ...(edu ? { edu, edu_source: "edu.v2" } : {})
+    });
+
+  // stable + flicker: even "nothing happened" is an inferred conclusion.
+  const stable = render("SME99010", ge_rows((h) => (h === 360 ? { coldhead: 15 } : {})));
+  assert.strictEqual(stable.facts.archetype, "stable_healthy");
+  assert.ok(stable.story_html.includes("No compressor eventsᶜ"), "negative conclusion carries the mark");
+  assert.ok(stable.story_html.includes(`sensor flickerᶜ`), "flicker deduction carries the mark");
+
+  // recovered with cycles + a distinct second event.
+  const cyc = (h) =>
+    (h >= 300 && h <= 304) || (h >= 306 && h <= 310) ? { coldhead: 30 }
+      : h >= 500 && h <= 503 ? { coldhead: 30 } : {};
+  const recovered = render("SME99011", ge_rows(cyc));
+  assert.strictEqual(recovered.facts.archetype, "compressor_stop_recovered");
+  assert.ok(recovered.story_html.includes("stoppedᶜ"), "stop carries the mark");
+  assert.ok(recovered.story_html.includes("cycled on/offᶜ"), "cycle deduction carries the mark");
+  assert.ok(recovered.story_html.includes("recoveredᶜ"), "recovery carries the mark");
+  assert.ok(/other compressor stop events?ᶜ/.test(recovered.story_html), "secondary events carry the mark");
+
+  // threshold exceeded and pressure rising: the "no stop" clause is inferred.
+  const breached = render("SME99012", ge_rows((h) => ({ pressure: h >= 350 && h <= 360 ? 6.0 : h > 360 ? 3.0 : 1.2 })));
+  assert.strictEqual(breached.facts.archetype, "threshold_exceeded");
+  assert.ok(breached.story_html.includes("No compressor stopᶜ"), "threshold story marks the no-stop clause");
+  const rising = render("SME99013", ge_rows((h) => ({ pressure: (2.6 + (0.9 * h) / 719).toFixed(3) })));
+  assert.strictEqual(rising.facts.archetype, "pressure_rising");
+  assert.ok(rising.story_html.includes("No compressor stopᶜ"), "rising story marks the no-stop clause");
+
+  // Measured counterexample: same stable shape with a dense EDU — no marks.
+  const edu_rows = [];
+  for (let h = 0; h < 720; h++)
+    edu_rows.push({ t: Date.UTC(2026, 6, 1, h), room_temp_f: 70, humidity_pct: 45, probe_0_f: 66, probe_1_f: 68, comp_vib: true });
+  const measured = render("SME99014", ge_rows(() => ({})), edu_rows);
+  assert.strictEqual(measured.facts.compressor_source, "edu_comp_vib");
+  assert.ok(measured.story_html.includes("No compressor events,"), "measured story keeps the clause");
+  assert.ok(!measured.story_html.includes("ᶜ"), "a measured page carries no mark anywhere");
+}
+
 // --- suspect precedence over the left-censor overlays (review F3) -----------
 {
   // A Philips whose malf channel claims "off" since before the period AND

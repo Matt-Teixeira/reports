@@ -31,7 +31,7 @@ const flicker_sentence = (facts) => {
   if (!fl) return "";
   const listed = fl.times.slice(0, 3).map(fmt.ts).join(", ");
   const more = fl.times.length > 3 ? `, +${fl.times.length - 3} more` : "";
-  return ` The compressor signal dropped for a single reading ${fl.count === 1 ? "once" : `${fl.count} times`} (${listed}${more}) with no ${p_name(facts).toLowerCase()} response — <b>likely sensor flicker${fl.count === 1 ? "" : "s"}, not true stops</b>.`;
+  return ` The compressor signal dropped for a single reading ${fl.count === 1 ? "once" : `${fl.count} times`} (${listed}${more}) with no ${p_name(facts).toLowerCase()} response — <b>likely sensor flicker${fl.count === 1 ? "" : "s"}${comp_c(facts)}, not true stops</b>.`;
 };
 
 // When clustering yields multiple events, the timeline narrates the primary
@@ -45,7 +45,7 @@ const other_events_sentence = (facts) => {
   const others = evs.filter((e) => e !== facts.compressor_event);
   const total = others.reduce((h, e) => h + (e.off_hours || 0), 0);
   const days = others.map((e) => fmt.day(e.start)).join(", ");
-  return ` <b>${others.length} other compressor stop event${others.length === 1 ? "" : "s"}</b> occurred this period (${days}; ${fmt.hours(total)} off in total) — the timeline above covers the primary event, and the others are summarized here.`;
+  return ` <b>${others.length} other compressor stop event${others.length === 1 ? "" : "s"}${comp_c(facts)}</b> occurred this period (${days}; ${fmt.hours(total)} off in total) — the timeline above covers the primary event, and the others are summarized here.`;
 };
 
 const baseline_sentence = (facts) => {
@@ -151,7 +151,7 @@ const STORIES = {
     const ev = f.compressor_event;
     const cycles =
       ev.cycles > 1
-        ? ` and then cycled on/off ${ev.cycles} times through ${fmt.ts(ev.end)} (${ev.off_count} readings off)`
+        ? ` and then cycled on/off${comp_c(f)} ${ev.cycles} times through ${fmt.ts(ev.end)} (${ev.off_count} readings off)`
         : ` and stayed off ${fmt.hours(ev.off_hours)} (${ev.off_count} readings off)`;
     // "has held since" is only true when no other event postdates this one.
     const later = (f.compressor_events || []).some(
@@ -192,13 +192,13 @@ const STORIES = {
     );
   },
   threshold_exceeded: (f) =>
-    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop was detected this period, but ` +
+    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop${comp_c(f)} was detected this period, but ` +
     `${peak_sentence(f)}${alarm_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`,
   pressure_rising: (f) =>
-    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop and no threshold breach this period, but ${p_name(f).toLowerCase()} is trending up: ` +
+    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop${comp_c(f)} and no threshold breach this period, but ${p_name(f).toLowerCase()} is trending up: ` +
     `${peak_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`,
   stable_healthy: (f) =>
-    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor events, alarms, or threshold breaches detected across ` +
+    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor events${comp_c(f)}, alarms, or threshold breaches detected across ` +
     `${fmt.count(f.counts.captures)} captures.${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
 };
 
