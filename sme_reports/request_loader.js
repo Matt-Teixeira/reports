@@ -101,7 +101,12 @@ const normalize_batch_email = (raw) => {
     // summary_pdf: also build the multi-page fleet summary document and
     // attach it to that summary email.
     summary_pdf: raw.summary_pdf === true,
-    attachments: raw.attachments !== false
+    attachments: raw.attachments !== false,
+    // archive_records: persist the distilled per-system records JSON beside
+    // the archived PDFs whenever the summary document is built. This is
+    // deliberate history capture — "changes since last report" needs weeks
+    // of these to exist before it can be built. Probe runs set it false.
+    archive_records: raw.archive_records !== false
   };
 };
 

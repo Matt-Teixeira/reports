@@ -127,7 +127,7 @@ const run_one = async (run_log, job_id, request) => {
 // Builds the multi-page fleet summary from the distilled per-system records.
 // A failure here must not sink the batch — the per-system PDFs are already
 // on disk and the summary email can still go out without an attachment.
-const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, excluded, scope, period_tag = "") => {
+const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, excluded, scope, period_tag = "", opts = {}) => {
   const { build_fleet_model } = require("./render/fleet_model");
   const { build_fleet_page } = require("./render/fleet_page");
   const { render_pdf_document } = require("./output/render_pdf");
@@ -151,6 +151,32 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
     fs.mkdirSync(out_dir, { recursive: true });
     fs.writeFileSync(path.join(out_dir, `${base}.html`), html);
     const pdf_path = await render_pdf_document(out_dir, `${base}.pdf`, html);
+    // Distilled-records sidecar (plan A4): the flat per-system records this
+    // document rendered from, archived so future runs can diff against
+    // them ("changes since last report" is buildable only if this history
+    // exists). Capture starts now, consumer comes later.
+    if (opts.archive_records) {
+      const archive_dir = path.join(__dirname, "archive");
+      fs.mkdirSync(archive_dir, { recursive: true });
+      const sidecar = path.join(
+        archive_dir,
+        `summary-records-${slug || "fleet"}${period_tag}-${date}.json`
+      );
+      fs.writeFileSync(
+        sidecar,
+        JSON.stringify(
+          {
+            generated_at: new Date().toISOString(),
+            scope: scope || null,
+            period_tag: period_tag || null,
+            records,
+            failures
+          },
+          null,
+          1
+        )
+      );
+    }
     const note = {
       job_id,
       systems: vm.total,
@@ -237,7 +263,8 @@ const run_sme_report = async (run_log, request_path) => {
           out_dir,
           excluded,
           scope_resolution,
-          period_tag
+          period_tag,
+          { archive_records: batch_email.archive_records }
         );
         // A soft failure is right for a normal batch — the per-system briefs
         // are still valid deliverables. In summary-only mode there are none,

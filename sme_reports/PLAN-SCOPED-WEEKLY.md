@@ -45,6 +45,18 @@ scopes.
 
 ## Phase A — the report engine learns scope and period
 
+> **Status: COMPLETE 2026-08-11** — commits `95eaef1` (A1), `da7ad8a`
+> (A2), `e1deb53` (A3), plus the A4 sidecar commit. Acceptance verified:
+> all five dev checks pass (check_scope is new); the Lee Health probes
+> rendered the scoped 30-day and 7-day summaries
+> (`Avante-Lee-Health-Magnet-Health-Summary[-7d]-<date>`, no email) with
+> scoped masthead, resolution line, and "% of these systems" wording;
+> the identity audit closed clean (identity already reads
+> customers/sites/systems); the internal fleet document is unchanged
+> (fixtures assert its wording; the byte-level fleet fixtures pass
+> untouched). The A1 live probe caught and fixed a double-validation
+> bug the DB-free checks could not see.
+
 Everything in Phase A is exercised through file-based requests and the
 no-send probe pattern. No DB config, no behavior change to existing
 production runs (absent the new request fields, output is identical).
