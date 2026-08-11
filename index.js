@@ -163,35 +163,31 @@ async function on_boot() {
   // Usage: npm start sme_report -- ./requests/<name>.json
   if (report_type === "sme_report") {
     const run_log = await makeAppRunLog();
-    const args = process.argv.slice(3);
-    const request_path = args.find((a) => a.endsWith(".json"));
     try {
-      if (request_path) {
+      // Strict parse FIRST (review F2): a typo'd --config must abort, never
+      // fall through to the live slot batch.
+      const { parse_sme_args } = require("./sme_reports/cli_args");
+      const opts = parse_sme_args(process.argv.slice(3));
+      if (opts.request_path) {
         // File mode — unchanged: npm start sme_report -- ./requests/x.json
         const run_sme_report = require("./sme_reports");
-        await run_sme_report(run_log, request_path);
+        await run_sme_report(run_log, opts.request_path);
       } else {
         // Scheduled (DB-config) mode — no file argument: match the current
         // slot against alert.sme_reports and fan out. Operator overrides:
         //   --slot mon-08:00   run a specific slot without waiting for cron
-        //   --config 3         run one config row by id (even if disabled)
+        //   --config 3         run one config row by id (dry-run if disabled)
         //   --dry-run          force the no-send path regardless of the row
         const run_scheduled = require("./sme_reports/run_scheduled");
-        const flag = (name) => {
-          const i = args.indexOf(name);
-          return i >= 0 ? args[i + 1] : null;
-        };
-        await run_scheduled(run_log, {
-          slot: flag("--slot"),
-          config_id: flag("--config") ? parseInt(flag("--config"), 10) : null,
-          force_dry_run: args.includes("--dry-run")
-        });
+        await run_scheduled(run_log, opts);
       }
     } catch (error) {
-      // Fatal run error (bad request file, failed fleet render in
-      // summary-only mode, failed send, failed config rows). The log record
-      // is still written, but cron must see a nonzero exit — a swallowed
-      // error here reported success with nothing delivered.
+      // Fatal run error (bad arguments, bad request file, failed fleet
+      // render in summary-only mode, failed send, failed config rows). The
+      // log record is still written, but cron must see a nonzero exit — a
+      // swallowed error here reported success with nothing delivered.
+      // Argument errors reach only this catch, so they print here.
+      console.error(error.message);
       process.exitCode = 1;
     } finally {
       await writeLogEvents(run_log);

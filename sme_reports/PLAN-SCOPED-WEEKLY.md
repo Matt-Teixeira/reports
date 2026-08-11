@@ -165,6 +165,12 @@ document; an unchanged request file produces byte-equivalent output
 > internal test addresses), step 4 (enable the derived user_summary
 > audience), and the cron entry for the weekly slot.
 >
+> **Review B round 1 (2026-08-11)** landed seven fixes (two blockers) —
+> see REVIEW-HANDOFF-SCHEDULED-RUNS.md. **The DDL gained
+> `sme_report_sends.recipient_role`: re-run `sql/sme_reports_config.sql`
+> (repeatable) before the next scheduled/--config run** — the runner now
+> writes that column.
+>
 > Noted optimization for later: user_summary scope-groups recompute
 > facts for systems shared across groups; a per-run facts cache would
 > cut the weekly render time substantially. Not built — correctness

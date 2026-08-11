@@ -409,7 +409,7 @@ const {
   const a = scope_artifact_id(res(["SME00001", "SME00002"], "Acme Health"));
   const b = scope_artifact_id(res(["SME00001", "SME00003"], "Acme Health"));
   assert.ok(a.startsWith("Acme-Health-"), a);
-  assert.ok(/-[0-9a-f]{8}$/.test(a), `resolution carries the hash: ${a}`);
+  assert.ok(/-[0-9a-f]{16}$/.test(a), `resolution carries the hash: ${a}`);
   assert.notStrictEqual(a, b, "same label, different scope-sets: different artifact ids");
   // Same SET, permuted resolution order: identical artifact id.
   const permuted = rows_to_resolution(
@@ -420,13 +420,13 @@ const {
   // A label with no ASCII word characters must never fall back to the
   // internal fleet artifact names.
   const cjk = scope_artifact_id(res(["SME00001"], "医疗集団"));
-  assert.ok(/^Scoped-[0-9a-f]{8}$/.test(cjk), `non-ASCII label gets the Scoped fallback: ${cjk}`);
+  assert.ok(/^Scoped-[0-9a-f]{16}$/.test(cjk), `non-ASCII label gets the Scoped fallback: ${cjk}`);
   // A many-customer label is capped; the hash still carries identity.
   const long = scope_artifact_id(
     res(["SME00001"], Array.from({ length: 12 }, (_, i) => `Customer Number ${i}`).join(" / "))
   );
-  assert.ok(long.length <= 48 + 9, `slug capped: ${long.length} chars`);
-  assert.ok(/-[0-9a-f]{8}$/.test(long), "hash survives the cap");
+  assert.ok(long.length <= 48 + 17, `slug capped: ${long.length} chars`);
+  assert.ok(/-[0-9a-f]{16}$/.test(long), "hash survives the cap");
 }
 
 console.log("check_scope: all assertions passed");

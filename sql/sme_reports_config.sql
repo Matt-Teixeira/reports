@@ -118,6 +118,12 @@ CREATE TABLE IF NOT EXISTS alert.sme_report_sends (
 COMMENT ON TABLE alert.sme_report_sends IS
   'One row per SME report delivery attempt (or dry-run/skip), written by the fan-out send loop. skipped_access = recipient''s system access no longer covered the document at send time.';
 
+-- Envelope role (review B round-1 F6): CC recipients receive the
+-- attachment too and must be answerable from this table. Values: 'to',
+-- 'cc'. Repeatable addendum — safe on tables created before it existed.
+ALTER TABLE alert.sme_report_sends
+  ADD COLUMN IF NOT EXISTS recipient_role TEXT NOT NULL DEFAULT 'to';
+
 CREATE INDEX IF NOT EXISTS sme_report_sends_config_run_idx
   ON alert.sme_report_sends (config_id, run_at DESC);
 

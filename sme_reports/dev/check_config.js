@@ -14,6 +14,61 @@ const {
 } = require("../fanout");
 const { scope_set_hash } = require("../scope");
 const { materialize_scoped_requests } = require("../request_loader");
+const { parse_sme_args } = require("../cli_args");
+
+// --- CLI parsing (review B round-1 F2) --------------------------------------
+{
+  // A typo'd --config must ABORT — under the old truthy check, "abc"
+  // became NaN and fell through to the LIVE slot batch.
+  const bad = [
+    [["--config", "abc"], /positive integer/],
+    [["--config", "1junk"], /positive integer/],
+    [["--config", "0"], /positive integer/],
+    [["--config", "-3"], /positive integer/],
+    [["--config"], /positive integer/],
+    [["--slot", "monday-8am"], /day-HH:MM/],
+    [["--slot", "mon-24:00"], /day-HH:MM/],
+    [["--slot"], /day-HH:MM/],
+    [["--conifg", "1"], /unknown argument/],
+    [["./requests/x.json", "--dry-run"], /file mode takes no scheduler flags/],
+    [["a.json", "b.json"], /more than one request file/]
+  ];
+  for (const [args, re] of bad)
+    assert.throws(() => parse_sme_args(args), re, JSON.stringify(args));
+  assert.deepStrictEqual(parse_sme_args(["--config", "12", "--dry-run"]), {
+    request_path: null,
+    slot: null,
+    config_id: 12,
+    force_dry_run: true
+  });
+  assert.deepStrictEqual(parse_sme_args(["--slot", "mon-08:00"]), {
+    request_path: null,
+    slot: "mon-08:00",
+    config_id: null,
+    force_dry_run: false
+  });
+  assert.deepStrictEqual(parse_sme_args(["./requests/x.json"]), {
+    request_path: "./requests/x.json",
+    slot: null,
+    config_id: null,
+    force_dry_run: false
+  });
+  assert.deepStrictEqual(parse_sme_args([]), {
+    request_path: null,
+    slot: null,
+    config_id: null,
+    force_dry_run: false
+  });
+}
+
+// The slot the runner computes matches the grid convention the configs use.
+{
+  const { current_slot } = require("../config_loader");
+  assert.ok(
+    /^(sun|mon|tue|wed|thu|fri|sat)-([01]\d|2[0-3]):[0-5]\d$/.test(current_slot()),
+    `current_slot format: ${current_slot()}`
+  );
+}
 
 // --- validate_config ---------------------------------------------------------
 {
@@ -55,8 +110,28 @@ const { materialize_scoped_requests } = require("../request_loader");
     options: { exclude: ["SME10844"] }
   });
 
+  // Round-1 F1 (blocker): a CC on a derived row would receive every
+  // scope-group's document with no access check.
+  assert.throws(
+    () => validate_config({ ...base, cc_list: ["audit@example.com"] }),
+    /does not allow cc_list/
+  );
+  // A frontend double-entry must not double-send.
+  const deduped = validate_config({
+    ...base,
+    id: 4,
+    report_kind: "fleet_summary",
+    scope: null,
+    recipient_mode: "explicit",
+    recipients: ["ops@example.com", "ops@example.com"],
+    cc_list: ["cc@example.com", "cc@example.com"]
+  });
+  assert.deepStrictEqual(deduped.recipients, ["ops@example.com"]);
+  assert.deepStrictEqual(deduped.cc_list, ["cc@example.com"]);
+
   const bad = [
     [{ ...base, report_kind: "briefs" }, /not implemented/],
+    [{ ...base, options: ["x"] }, /options must be an object/],
     [{ ...base, report_kind: "mystery" }, /unknown report_kind/],
     [{ ...base, options: { typo: true } }, /unknown option "typo"/],
     [{ ...base, options: { include_briefs: true } }, /include_briefs is not implemented/],
@@ -123,6 +198,20 @@ const { materialize_scoped_requests } = require("../request_loader");
     groups[0].scope_hash,
     scope_set_hash(["SME00001", "SME00002"]),
     "group hash uses the shared scope-set formula"
+  );
+
+  // Round-1 F3 (major): grouping identity is the canonical id SET, never
+  // the hash. SME099875 and SME122693 collide on the first 8 hex chars of
+  // sha1 — under hash-keyed grouping they merged into one group and one
+  // user's real weekly landed in the skipped-access bin.
+  const colliding = group_by_scope([
+    { email: "p@x.co", scope_ids: ["SME099875"] },
+    { email: "q@x.co", scope_ids: ["SME122693"] }
+  ]);
+  assert.strictEqual(colliding.length, 2, "hash-colliding scopes stay distinct groups");
+  assert.deepStrictEqual(
+    colliding.map((g) => g.system_ids),
+    [["SME099875"], ["SME122693"]]
   );
 }
 

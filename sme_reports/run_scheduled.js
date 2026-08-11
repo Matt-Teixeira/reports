@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 
@@ -26,30 +27,87 @@ const {
   tag: { cal, det, cat }
 } = require("../utils/logger/enums");
 
-// Scheduled (DB-config) runner — PLAN-SCOPED-WEEKLY.md B2–B4. Fired by
-// cron with no file argument: matches the current slot against
-// alert.sme_reports, fans each row out (user_summary rows group users by
-// identical magnet scope and render once per group), delivers, and writes
-// one alert.sme_report_sends row per recipient per attempt.
+// Scheduled (DB-config) runner — PLAN-SCOPED-WEEKLY.md B2–B4, reworked
+// after review B round 1 (F4–F7). Fired by cron with no file argument:
+// matches the current slot against alert.sme_reports, fans each row out,
+// delivers, and writes one alert.sme_report_sends row per envelope
+// recipient per attempt.
 //
-// Isolation mirrors the file-mode delivery-integrity rule: a failing row
-// never sinks the other rows, a failing scope-group never sinks the other
-// groups — but the process exits nonzero if ANY row or group failed, so
-// cron can see it.
+// Send-status integrity rules (F4/F5):
+// - SMTP, persistence, and rendering are SEPARATE error boundaries. A
+//   record-write failure after a successful send is a persistence failure
+//   (logged, run marked failed) — it must never fabricate an "error" row
+//   for an email that was delivered.
+// - Every recipient gets AT MOST one row per attempt: backfills only cover
+//   recipients with no recorded outcome.
+// - A row/group that dies before delivery still owes its whole intended
+//   audience error rows, so "did X get their report" is always answerable.
 
-// Delivery for one rendered document to one explicit audience list (the
-// customer_summary / fleet_summary path — explicit recipients are the
-// config author's deliberate choice, so no per-user access re-check).
-const deliver_explicit = async (run_log, job_id, cfg, slot, ctx) => {
-  const { results, failures, fleet_pdf_path, resolution } = ctx;
-  const doc = path.basename(fleet_pdf_path);
-  const scope_hash = resolution ? resolution.scope_hash : null;
-  const base = { config_id: cfg.id, slot, scope_hash, document: doc };
-  if (cfg.dry_run) {
-    for (const r of cfg.recipients)
-      await record_send({ ...base, recipient: r, status: "dry_run" });
-    return { sent: 0, errors: 0 };
+// Delivered documents are archived under a run-unique name BEFORE sending
+// (F7): out/ is overwrite-by-design scratch, so the name a sends row
+// carries must be immutable. Dry runs deliberately archive nothing — their
+// rows carry the scratch name of what WOULD have been sent.
+const archive_delivered = (pdf_path, job_id) => {
+  const archive_dir = path.join(__dirname, "archive");
+  fs.mkdirSync(archive_dir, { recursive: true });
+  const name = `${path.basename(pdf_path, ".pdf")}-run-${job_id.slice(0, 8)}.pdf`;
+  fs.copyFileSync(pdf_path, path.join(archive_dir, name));
+  return name;
+};
+
+// Record one recipient's outcome. `outcomes` marks the recipient as
+// handled BEFORE the insert attempt: if the insert fails, the recipient
+// must not be backfilled with a second (contradictory) row.
+const record_outcome = async (outcomes, counts, row) => {
+  outcomes.add(row.recipient);
+  try {
+    await record_send(row);
+  } catch (error) {
+    counts.persist_errors += 1;
+    console.error(`send record failed for ${row.recipient}: ${error.message}`);
   }
+};
+
+// Error rows for every intended recipient who has no recorded outcome yet
+// (F5). Best-effort by design — this runs on failure paths.
+const backfill_errors = async (outcomes, base, intended, message) => {
+  for (const { email, role } of intended) {
+    if (outcomes.has(email)) continue;
+    outcomes.add(email);
+    await record_send({
+      ...base,
+      recipient: email,
+      recipient_role: role,
+      status: "error",
+      error: message
+    }).catch(() => {});
+  }
+};
+
+// Explicit-audience delivery (customer_summary / fleet_summary): one email
+// to the To list with CC, every envelope recipient recorded (F6).
+const deliver_explicit = async (run_log, job_id, cfg, slot, ctx, outcomes, counts) => {
+  const { results, failures, fleet_pdf_path, resolution } = ctx;
+  const doc = cfg.dry_run
+    ? path.basename(fleet_pdf_path)
+    : archive_delivered(fleet_pdf_path, job_id);
+  const base = {
+    config_id: cfg.id,
+    slot,
+    scope_hash: resolution ? resolution.scope_hash : null,
+    document: doc
+  };
+  const envelope = [
+    ...cfg.recipients.map((email) => ({ email, role: "to" })),
+    ...cfg.cc_list.map((email) => ({ email, role: "cc" }))
+  ];
+  if (cfg.dry_run) {
+    for (const { email, role } of envelope)
+      await record_outcome(outcomes, counts, { ...base, recipient: email, recipient_role: role, status: "dry_run" });
+    return;
+  }
+  let status = "sent";
+  let err = null;
   try {
     const send_summary_email = require("./output/send_summary_email");
     await send_summary_email(
@@ -64,63 +122,87 @@ const deliver_explicit = async (run_log, job_id, cfg, slot, ctx) => {
         lookback_days: cfg.lookback_days
       }
     );
-    for (const r of cfg.recipients)
-      await record_send({ ...base, recipient: r, status: "sent" });
-    return { sent: cfg.recipients.length, errors: 0 };
+    counts.sent += envelope.length;
   } catch (error) {
-    for (const r of cfg.recipients)
-      await record_send({ ...base, recipient: r, status: "error", error: error.message });
-    throw error;
+    status = "error";
+    err = error.message;
+    counts.send_errors += 1;
   }
+  for (const { email, role } of envelope)
+    await record_outcome(outcomes, counts, {
+      ...base,
+      recipient: email,
+      recipient_role: role,
+      status,
+      error: err
+    });
 };
 
-const run_customer_or_fleet = async (run_log, job_id, cfg, slot) => {
-  let resolution = null;
-  let system_ids;
-  if (cfg.kind === "customer_summary") {
-    resolution = await resolve_scope(cfg.scope);
-    system_ids = resolution.system_ids;
-    // Loud resolution, same contract as file mode.
-    const note = { job_id, config_id: cfg.id, label: resolution.label, ...resolution.detail };
-    await addLogEvent(I, run_log, "run_scheduled_scope", det, note, null);
-    console.log(
-      `config ${cfg.id}: scope ${resolution.label} — ${resolution.detail.systems} systems (${resolution.detail.sites} sites)`
+const run_customer_or_fleet = async (run_log, job_id, cfg, slot, counts) => {
+  const outcomes = new Set();
+  const intended = [
+    ...cfg.recipients.map((email) => ({ email, role: "to" })),
+    ...cfg.cc_list.map((email) => ({ email, role: "cc" }))
+  ];
+  try {
+    let resolution = null;
+    let system_ids;
+    if (cfg.kind === "customer_summary") {
+      resolution = await resolve_scope(cfg.scope);
+      system_ids = resolution.system_ids;
+      // Loud resolution, same contract as file mode.
+      const note = { job_id, config_id: cfg.id, label: resolution.label, ...resolution.detail };
+      await addLogEvent(I, run_log, "run_scheduled_scope", det, note, null);
+      console.log(
+        `config ${cfg.id}: scope ${resolution.label} — ${resolution.detail.systems} systems (${resolution.detail.sites} sites)`
+      );
+    } else {
+      // fleet_summary: the whole mag fleet, rendered as the INTERNAL
+      // document (no scope -> unscoped title, fleet wording, raw reasons).
+      const { mag_ids } = await load_audience_pool();
+      system_ids = mag_ids;
+    }
+    const raw = config_to_raw(cfg, { recipients: cfg.recipients });
+    const loaded = materialize_scoped_requests(raw, system_ids);
+    const batch = await run_batch(run_log, job_id, loaded, resolution);
+    if (!batch.fleet_pdf_path)
+      throw new Error("run produced no summary document; nothing to deliver");
+    await deliver_explicit(run_log, job_id, cfg, slot, { ...batch, resolution }, outcomes, counts);
+  } catch (error) {
+    // Pre-delivery failures (resolution, render) still owe the intended
+    // audience their error rows (F5).
+    await backfill_errors(
+      outcomes,
+      { config_id: cfg.id, slot, scope_hash: null, document: null },
+      intended,
+      error.message
     );
-  } else {
-    // fleet_summary: the whole mag fleet, rendered as the INTERNAL
-    // document (no scope -> unscoped title, fleet wording, raw reasons).
-    const { mag_ids } = await load_audience_pool();
-    system_ids = mag_ids;
+    throw error;
   }
-  const raw = config_to_raw(cfg, { recipients: cfg.recipients });
-  const loaded = materialize_scoped_requests(raw, system_ids);
-  const batch = await run_batch(run_log, job_id, loaded, resolution);
-  if (!batch.fleet_pdf_path)
-    throw new Error("run produced no summary document; nothing to deliver");
-  return deliver_explicit(run_log, job_id, cfg, slot, { ...batch, resolution });
+  if (counts.send_errors || counts.persist_errors)
+    throw new Error(
+      `${counts.send_errors} send failure(s), ${counts.persist_errors} record failure(s)`
+    );
 };
 
 // The weekly flagship: every active, notifiable user with magnets, grouped
 // by identical magnet scope; one render per group, one email per user,
-// send-time access re-check per recipient.
+// send-time access re-check per recipient. user_summary rows carry no CC
+// (validate_config rejects it — a CC would bypass the access check).
 const run_user_summary = async (run_log, job_id, cfg, slot) => {
   const { users, mag_ids } = await load_audience_pool();
   const audience = resolve_audience(users, mag_ids);
   const groups = group_by_scope(audience);
-  const note = {
-    job_id,
-    config_id: cfg.id,
-    audience: audience.length,
-    groups: groups.length
-  };
+  const note = { job_id, config_id: cfg.id, audience: audience.length, groups: groups.length };
   await addLogEvent(I, run_log, "run_user_summary", det, note, null);
   console.log(
     `config ${cfg.id}: audience ${audience.length} users → ${groups.length} scope-group document${groups.length === 1 ? "" : "s"}${cfg.dry_run ? " (dry run)" : ""}`
   );
 
   const group_failures = [];
-  let sent = 0;
   for (const group of groups) {
+    const outcomes = new Set();
+    const counts = { sent: 0, send_errors: 0, persist_errors: 0 };
     const base = { config_id: cfg.id, slot, scope_hash: group.scope_hash };
     try {
       const resolution = await resolve_scope({ system_ids: group.system_ids });
@@ -129,13 +211,14 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
       const batch = await run_batch(run_log, job_id, loaded, resolution);
       if (!batch.fleet_pdf_path)
         throw new Error("group produced no summary document");
-      const doc = path.basename(batch.fleet_pdf_path);
+      const doc = cfg.dry_run
+        ? path.basename(batch.fleet_pdf_path)
+        : archive_delivered(batch.fleet_pdf_path, job_id);
 
       // Send-time access re-check against CURRENT caches: access revoked
       // (or a user deactivated) between render and send must not receive
       // this document.
       const caches = await load_user_caches(group.users);
-      let send_errors = 0;
       for (const email of group.users) {
         const u = caches.get(email);
         const still_allowed =
@@ -143,48 +226,62 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
           u.status === "active" &&
           u.notify_email === true &&
           access_covers(u.system_list_cache, resolution.system_ids);
-        if (!still_allowed) {
-          await record_send({ ...base, recipient: email, document: doc, status: "skipped_access" });
-          continue;
+
+        let status;
+        let err = null;
+        if (!still_allowed) status = "skipped_access";
+        else if (cfg.dry_run) status = "dry_run";
+        else {
+          // SMTP boundary: a send failure is an error OUTCOME; a record
+          // failure below is a persistence failure, never an error row.
+          try {
+            const send_summary_email = require("./output/send_summary_email");
+            await send_summary_email(
+              run_log,
+              job_id,
+              { recipients: [email], cc_list: [] },
+              batch.results,
+              batch.failures,
+              batch.fleet_pdf_path,
+              { scope_label: resolution.label, lookback_days: cfg.lookback_days }
+            );
+            status = "sent";
+            counts.sent += 1;
+          } catch (error) {
+            status = "error";
+            err = error.message;
+            counts.send_errors += 1;
+          }
         }
-        if (cfg.dry_run) {
-          await record_send({ ...base, recipient: email, document: doc, status: "dry_run" });
-          continue;
-        }
-        try {
-          const send_summary_email = require("./output/send_summary_email");
-          await send_summary_email(
-            run_log,
-            job_id,
-            { recipients: [email], cc_list: cfg.cc_list },
-            batch.results,
-            batch.failures,
-            batch.fleet_pdf_path,
-            { scope_label: resolution.label, lookback_days: cfg.lookback_days }
-          );
-          await record_send({ ...base, recipient: email, document: doc, status: "sent" });
-          sent += 1;
-        } catch (error) {
-          send_errors += 1;
-          await record_send({ ...base, recipient: email, document: doc, status: "error", error: error.message });
-        }
+        await record_outcome(outcomes, counts, {
+          ...base,
+          recipient: email,
+          recipient_role: "to",
+          document: doc,
+          status,
+          error: err
+        });
       }
-      if (send_errors)
-        throw new Error(`${send_errors} of ${group.users.length} sends failed`);
+      if (counts.send_errors || counts.persist_errors)
+        throw new Error(
+          `${counts.send_errors} of ${group.users.length} sends failed, ${counts.persist_errors} record failure(s)`
+        );
     } catch (error) {
       group_failures.push({ scope_hash: group.scope_hash, message: error.message });
       await addLogEvent(E, run_log, "run_user_summary", cat, { job_id, config_id: cfg.id, scope_hash: group.scope_hash }, error);
       console.error(`scope-group ${group.scope_hash} failed: ${error.message}`);
-      // A group that failed before delivery still owes the sends table its
-      // audience: every intended recipient gets an error row, so "did
-      // customer X get their report" is answerable even for this path.
-      for (const email of group.users)
-        await record_send({ ...base, recipient: email, status: "error", error: error.message }).catch(() => {});
+      // Only recipients WITHOUT a recorded outcome get backfilled — a user
+      // whose email already sent keeps its single "sent" row (F4).
+      await backfill_errors(
+        outcomes,
+        base,
+        group.users.map((email) => ({ email, role: "to" })),
+        error.message
+      );
     }
   }
   if (group_failures.length)
     throw new Error(`${group_failures.length} of ${groups.length} scope-groups failed`);
-  return { sent, groups: groups.length };
 };
 
 const run_scheduled = async (run_log, opts = {}) => {
@@ -193,7 +290,7 @@ const run_scheduled = async (run_log, opts = {}) => {
   const slot = opts.slot || current_slot();
   try {
     let rows;
-    if (opts.config_id) {
+    if (opts.config_id !== null && opts.config_id !== undefined) {
       const row = await load_config(opts.config_id);
       if (!row) throw new Error(`no config row with id ${opts.config_id}`);
       if (!row.enabled && !opts.force_dry_run)
@@ -219,7 +316,10 @@ const run_scheduled = async (run_log, opts = {}) => {
         if (opts.force_dry_run) cfg.dry_run = true;
         if (cfg.kind === "user_summary")
           await run_user_summary(run_log, job_id, cfg, slot);
-        else await run_customer_or_fleet(run_log, job_id, cfg, slot);
+        else {
+          const counts = { sent: 0, send_errors: 0, persist_errors: 0 };
+          await run_customer_or_fleet(run_log, job_id, cfg, slot, counts);
+        }
       } catch (error) {
         row_failures.push({ id: row.id, message: error.message });
         await addLogEvent(E, run_log, "run_scheduled", cat, { job_id, config_id: row.id }, error);

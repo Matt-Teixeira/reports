@@ -99,16 +99,20 @@ const rows_to_resolution = ({ kind, value }, rows) => {
   };
 };
 
-// One hash formula for a system-id SET, order-independent — shared by
-// scope resolution and the scheduled fan-out's scope-grouping so the
-// sends table's scope_hash and the artifact filenames can never disagree
-// about which document a hash names.
+// One hash formula for a system-id SET, order-independent — the identity
+// carried by artifact filenames and the sends table's scope_hash. 16 hex
+// chars (64 bits): review B round-1 F3 demonstrated a REAL first-8-hex
+// collision between two plausible system ids, and a filename collision
+// overwrites another scope's document. The hash is metadata — grouping
+// identity uses the full canonical id set (scope_set_key), never the hash.
 const scope_set_hash = (ids) =>
   require("crypto")
     .createHash("sha1")
     .update([...ids].sort().join(","))
     .digest("hex")
-    .slice(0, 8);
+    .slice(0, 16);
+
+const scope_set_key = (ids) => [...ids].sort().join(",");
 
 // The filename identity of a scoped run: human-readable slug + the
 // scope-set hash. The hash keeps same-label-different-scope runs (and
@@ -148,5 +152,6 @@ module.exports = {
   rows_to_resolution,
   resolve_scope,
   scope_set_hash,
+  scope_set_key,
   scope_artifact_id
 };

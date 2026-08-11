@@ -1,4 +1,4 @@
-const { validate_scope, scope_set_hash } = require("./scope");
+const { validate_scope, scope_set_hash, scope_set_key } = require("./scope");
 
 // Pure fan-out logic for DB-config (scheduled) runs — PLAN-SCOPED-WEEKLY.md
 // B3. Everything here operates on plain rows handed in by the caller, so
@@ -27,6 +27,8 @@ const validate_config = (row) => {
     fail(`${at}: report_kind "briefs" is not implemented yet`);
 
   const options = row.options || {};
+  if (typeof options !== "object" || Array.isArray(options))
+    fail(`${at}: options must be an object`);
   for (const k of Object.keys(options))
     if (!KNOWN_OPTIONS.includes(k)) fail(`${at}: unknown option "${k}"`);
   if (options.include_briefs === true)
@@ -39,8 +41,9 @@ const validate_config = (row) => {
   if (!Number.isInteger(row.lookback_days) || row.lookback_days <= 0)
     fail(`${at}: lookback_days must be a positive integer`);
 
-  const recipients = row.recipients || [];
-  const cc_list = row.cc_list || [];
+  // Deduplicated — a frontend double-entry must not double-send.
+  const recipients = [...new Set(row.recipients || [])];
+  const cc_list = [...new Set(row.cc_list || [])];
   for (const r of [...recipients, ...cc_list])
     if (!EMAIL_RE.test(r)) fail(`${at}: "${r}" is not an email address`);
 
@@ -54,6 +57,13 @@ const validate_config = (row) => {
       fail(`${at}: user_summary requires scope {"all_users": true}`);
     if (row.recipient_mode !== "derived")
       fail(`${at}: user_summary requires recipient_mode "derived"`);
+    // Review B round-1 F1 (blocker): a CC on a derived row would ride
+    // EVERY per-user message across every scope-group, receiving documents
+    // the CC address was never authorized for. Rejected outright in v1;
+    // derived CC, if ever wanted, must be resolved, authorized, and
+    // recorded per-recipient like everyone else.
+    if (cc_list.length)
+      fail(`${at}: user_summary does not allow cc_list — a CC would bypass the per-user access check`);
   } else {
     if (row.recipient_mode !== "explicit")
       fail(`${at}: ${row.report_kind} requires recipient_mode "explicit" (derived is not implemented yet)`);
@@ -95,15 +105,22 @@ const resolve_audience = (users, mag_ids) => {
 };
 
 // Users with IDENTICAL magnet scopes share one rendered document: 100
-// users collapse to ~46 renders today. Groups are keyed by the same
-// scope_set_hash the artifact filenames carry.
+// users collapse to ~46 renders today. Grouping identity is the FULL
+// canonical id set — never the hash (review B round-1 F3: a real
+// first-8-hex collision merged two distinct scopes, sending one user's
+// document universe to the skipped-access bin). scope_hash rides along as
+// artifact/sends metadata only.
 const group_by_scope = (audience) => {
   const groups = new Map();
   for (const a of audience) {
-    const hash = scope_set_hash(a.scope_ids);
-    if (!groups.has(hash))
-      groups.set(hash, { scope_hash: hash, system_ids: a.scope_ids, users: [] });
-    groups.get(hash).users.push(a.email);
+    const key = scope_set_key(a.scope_ids);
+    if (!groups.has(key))
+      groups.set(key, {
+        scope_hash: scope_set_hash(a.scope_ids),
+        system_ids: a.scope_ids,
+        users: []
+      });
+    groups.get(key).users.push(a.email);
   }
   return [...groups.values()].sort((a, b) => b.users.length - a.users.length);
 };

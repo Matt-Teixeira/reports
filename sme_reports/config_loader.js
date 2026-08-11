@@ -32,11 +32,12 @@ const load_user_caches = async (emails) => {
   return new Map(rows.map((r) => [r.email_address, r]));
 };
 
-const record_send = ({ config_id, slot, recipient, scope_hash, document, status, error }) =>
+const record_send = ({ config_id, slot, recipient, recipient_role, scope_hash, document, status, error }) =>
   db().none(q.insert_send, [
     config_id,
     slot || null,
     recipient,
+    recipient_role || "to",
     scope_hash || null,
     document || null,
     status,
