@@ -113,23 +113,15 @@ const send_one = async (run_log, job_id, batch_email, chunk, out_dir, part, tota
   };
   if (batch_email.cc_list.length) message.cc = batch_email.cc_list.join(",");
 
-  const transporter = await build_transporter();
+  // SMTP truth isolated from telemetry (round-3 F1); transporter
+  // construction inside the try so its failure cannot leak the private
+  // zip (round-3 F4).
+  let info;
   try {
-    const info = await send_with_retry(transporter, message);
-    const note = {
-      job_id,
-      to: message.to,
-      part: `${part}/${total_parts}`,
-      systems: chunk.map((r) => r.system_id),
-      zipped: use_zip,
-      status: "SENT",
-      response: info && info.response
-    };
-    await addLogEvent(I, run_log, "send_batch_email", det, note, null);
-    return info;
+    const transporter = await build_transporter();
+    info = await send_with_retry(transporter, message);
   } catch (error) {
-    const note = { job_id, to: message.to, part: `${part}/${total_parts}`, status: "ERROR" };
-    await addLogEvent(E, run_log, "send_batch_email", cat, note, error);
+    await addLogEvent(E, run_log, "send_batch_email", cat, { job_id, to: message.to, part: `${part}/${total_parts}`, status: "ERROR" }, error).catch(() => {});
     throw error;
   } finally {
     // Best-effort cleanup of the private zip — a cleanup failure must
@@ -142,6 +134,22 @@ const send_one = async (run_log, job_id, batch_email, chunk, out_dir, part, tota
       }
     }
   }
+  // Best-effort success telemetry — cannot change the SMTP result.
+  try {
+    const note = {
+      job_id,
+      to: message.to,
+      part: `${part}/${total_parts}`,
+      systems: chunk.map((r) => r.system_id),
+      zipped: use_zip,
+      status: "SENT",
+      response: info && info.response
+    };
+    await addLogEvent(I, run_log, "send_batch_email", det, note, null);
+  } catch (log_error) {
+    console.error(`batch send log failed (send outcome unaffected): ${log_error.message}`);
+  }
+  return info;
 };
 
 const send_batch_email = async (run_log, job_id, batch_email, results, out_dir) => {

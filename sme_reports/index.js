@@ -124,6 +124,39 @@ const run_one = async (run_log, job_id, request) => {
   };
 };
 
+// Persist the distilled per-system records beside the archived PDFs —
+// deliberate history capture ("changes since last report" needs weeks of
+// these). Callers isolate failures: capture must never block delivery.
+// Exported so the scheduled runner can defer a unit's sidecar until the
+// eligibility and ownership checks approve archival (subscriptions review
+// round-3 F2).
+const write_records_sidecar = ({ scope, period_tag, records, failures }) => {
+  const { scope_artifact_id } = require("./scope");
+  const archive_dir = path.join(__dirname, "archive");
+  fs.mkdirSync(archive_dir, { recursive: true });
+  const slug = scope ? scope_artifact_id(scope) : null;
+  const date = new Date().toISOString().slice(0, 10);
+  const sidecar = path.join(
+    archive_dir,
+    `summary-records-${slug || "fleet"}${period_tag || ""}-${date}.json`
+  );
+  fs.writeFileSync(
+    sidecar,
+    JSON.stringify(
+      {
+        generated_at: new Date().toISOString(),
+        scope: scope || null,
+        period_tag: period_tag || null,
+        records,
+        failures
+      },
+      null,
+      1
+    )
+  );
+  return sidecar;
+};
+
 // Builds the multi-page fleet summary from the distilled per-system records.
 // A failure here must not sink the batch — the per-system PDFs are already
 // on disk and the summary email can still go out without an attachment.
@@ -161,26 +194,7 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
       // Isolated: history capture is auxiliary — a failed sidecar write
       // must never sink the summary document's delivery.
       try {
-        const archive_dir = path.join(__dirname, "archive");
-        fs.mkdirSync(archive_dir, { recursive: true });
-        const sidecar = path.join(
-          archive_dir,
-          `summary-records-${slug || "fleet"}${period_tag}-${date}.json`
-        );
-        fs.writeFileSync(
-          sidecar,
-          JSON.stringify(
-            {
-              generated_at: new Date().toISOString(),
-              scope: scope || null,
-              period_tag: period_tag || null,
-              records,
-              failures
-            },
-            null,
-            1
-          )
-        );
+        write_records_sidecar({ scope, period_tag, records, failures });
       } catch (sidecar_error) {
         await addLogEvent(E, run_log, "build_fleet_summary", cat, { job_id, sidecar: true }, sidecar_error);
         console.error(`records sidecar failed (delivery unaffected): ${sidecar_error.message}`);
@@ -379,3 +393,4 @@ const run_sme_report = async (run_log, request_path) => {
 
 module.exports = run_sme_report;
 module.exports.run_batch = run_batch;
+module.exports.write_records_sidecar = write_records_sidecar;

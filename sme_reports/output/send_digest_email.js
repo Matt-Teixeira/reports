@@ -124,9 +124,30 @@ const send_part = async (run_log, job_id, recipient, cc_list, chunk, part, total
   };
   if (cc_list && cc_list.length) message.cc = cc_list.join(",");
 
+  // SMTP truth is isolated from telemetry (round-3 F1): only the send
+  // itself can produce a delivery failure — a logging error after an
+  // accepted send must never convert delivered documents into error rows.
+  let info;
   try {
     const transporter = await build_transporter();
-    const info = await send_with_retry(transporter, message);
+    info = await send_with_retry(transporter, message);
+  } catch (error) {
+    await addLogEvent(E, run_log, "send_digest_email", cat, { job_id, to: recipient, part: `${part}/${total_parts}`, status: "ERROR" }, error).catch(() => {});
+    throw error;
+  } finally {
+    // Best-effort cleanup (round-2 F3): the unique zip is consumed by the
+    // awaited send above, but a cleanup failure must NEVER convert an
+    // SMTP-accepted delivery into an error outcome — log and move on.
+    if (zip_path) {
+      try {
+        fs.rmSync(zip_path, { force: true });
+      } catch (cleanup_error) {
+        console.error(`digest zip cleanup failed (send outcome unaffected): ${cleanup_error.message}`);
+      }
+    }
+  }
+  // Best-effort success/partial telemetry — cannot change the SMTP result.
+  try {
     const accepted = (info && info.accepted) || [];
     const rejected = (info && info.rejected) || [];
     const status = rejected.length ? (accepted.length ? "PARTIAL" : "ERROR") : "SENT";
@@ -142,23 +163,10 @@ const send_part = async (run_log, job_id, recipient, cc_list, chunk, part, total
       response: info && info.response
     };
     await addLogEvent(status === "SENT" ? I : E, run_log, "send_digest_email", det, note, null);
-    return info;
-  } catch (error) {
-    const note = { job_id, to: recipient, part: `${part}/${total_parts}`, status: "ERROR" };
-    await addLogEvent(E, run_log, "send_digest_email", cat, note, error);
-    throw error;
-  } finally {
-    // Best-effort cleanup (round-2 F3): the unique zip is consumed by the
-    // awaited send above, but a cleanup failure must NEVER convert an
-    // SMTP-accepted delivery into an error outcome — log and move on.
-    if (zip_path) {
-      try {
-        fs.rmSync(zip_path, { force: true });
-      } catch (cleanup_error) {
-        console.error(`digest zip cleanup failed (send outcome unaffected): ${cleanup_error.message}`);
-      }
-    }
+  } catch (log_error) {
+    console.error(`digest send log failed (send outcome unaffected): ${log_error.message}`);
   }
+  return info;
 };
 
 // units: [{ key, customer_name, pdf_path, counts: {systems, attention, urgent} }]

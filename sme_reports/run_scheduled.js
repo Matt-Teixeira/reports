@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 
-const { run_batch } = require("./index");
+const { run_batch, write_records_sidecar } = require("./index");
 const { materialize_scoped_requests } = require("./request_loader");
 const { resolve_scope } = require("./scope");
 const {
@@ -287,7 +287,6 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
   // coalition. Live units archive HERE, pre-SMTP (review F3).
   const rendered = new Map();
   for (const unit of units) {
-    const unit_live = unit.users.some((e) => coalition.dry_run_of(e) === false);
     try {
       const resolution = await resolve_scope({ system_ids: unit.system_ids });
       // Ownership may move between planning and rendering (review F2): the
@@ -297,7 +296,10 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
         throw new Error(
           `customer ownership changed between planning and rendering (planned ${unit.customer_id}, resolved ${resolution.customer_ids.join(", ")})`
         );
-      const raw = config_to_raw({ ...base_cfg, dry_run: !unit_live }, { recipients: unit.users });
+      // History sidecars are DEFERRED (round-3 F2): auto-persistence is
+      // suppressed at render; the eligibility step below writes the
+      // sidecar only for units approved for archival.
+      const raw = config_to_raw({ ...base_cfg, dry_run: true }, { recipients: unit.users });
       const loaded = materialize_scoped_requests(raw, resolution.system_ids);
       const batch = await run_batch(run_log, job_id, loaded, resolution, {
         concurrency: RENDER_CONCURRENCY,
@@ -315,6 +317,9 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
         archived_doc: null,
         scratch_doc: path.basename(batch.fleet_pdf_path),
         pdf_path: batch.fleet_pdf_path,
+        resolution,
+        records: batch.results.map((x) => x.summary).filter(Boolean),
+        failures: batch.failures,
         counts: {
           // Honest counts (review F6): attempted = produced + failed;
           // failures surface as "status unavailable", never as a
@@ -352,17 +357,32 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
   };
   for (const r of rendered.values()) {
     if (!r.ok) continue;
-    const has_live_eligible = r.unit.users.some(
-      (e) => coalition.dry_run_of(e) === false && eligible(e, r)
-    );
-    if (!has_live_eligible) continue;
     try {
+      // Post-render ownership recheck for EVERY unit (round-3 F3): a
+      // dry-run row must not name a document rendered under stale
+      // customer ownership any more than a live one may ship it.
       const recheck = await resolve_scope({ system_ids: r.unit.system_ids });
       if (recheck.customer_ids.length !== 1 || recheck.customer_ids[0] !== r.unit.customer_id)
         throw new Error(
           `customer ownership changed during rendering (planned ${r.unit.customer_id}, now ${recheck.customer_ids.join(", ")})`
         );
+      const has_live_eligible = r.unit.users.some(
+        (e) => coalition.dry_run_of(e) === false && eligible(e, r)
+      );
+      if (!has_live_eligible) continue;
       r.archived_doc = archive_delivered(r.pdf_path, base_cfg.id);
+      // Deferred history sidecar (round-3 F2), best-effort: capture never
+      // blocks delivery.
+      try {
+        write_records_sidecar({
+          scope: r.resolution,
+          period_tag: base_cfg.lookback_days !== 30 ? `-${base_cfg.lookback_days}d` : "",
+          records: r.records,
+          failures: r.failures
+        });
+      } catch (sidecar_error) {
+        console.error(`records sidecar failed for ${r.unit.customer_name} (delivery unaffected): ${sidecar_error.message}`);
+      }
     } catch (error) {
       rendered.set(r.unit.key, { ok: false, unit: r.unit, error: error.message });
       failed_units += 1;
