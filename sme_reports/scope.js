@@ -78,6 +78,7 @@ const rows_to_resolution = ({ kind, value }, rows) => {
       fail(`scope.system_ids not found (or not mag-processed): ${missing.join(", ")}`);
   }
   const customers = [...new Set(rows.map((r) => r.customer_name))];
+  const customer_ids = [...new Set(rows.map((r) => r.customer_id))];
   const sites = [...new Set(rows.map((r) => r.site_id))];
   // Display label: the customer's name where the scope is one customer
   // (the overwhelmingly common case); otherwise the customers joined.
@@ -86,6 +87,10 @@ const rows_to_resolution = ({ kind, value }, rows) => {
   return {
     system_ids,
     label,
+    // Current owning customers of the resolved rows — callers that
+    // planned a single-customer document verify ownership DID NOT MOVE
+    // between plan and render (subscriptions review F2).
+    customer_ids,
     // Stable identity of the resolved SET, independent of the label: two
     // different scopes under one customer share a label but must never
     // share artifact names (review round-1 F2).

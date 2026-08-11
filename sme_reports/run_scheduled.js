@@ -207,6 +207,11 @@ const run_customer_or_fleet = async (run_log, job_id, cfg, slot, counts) => {
 // own row's dry_run gate. The per-run cache means a system computes once
 // per window across every document that contains it, and run_batch runs
 // systems concurrently.
+//
+// Ordering rules (subscriptions review F3): a live unit's document is
+// archived at RENDER time, before any SMTP — an archive failure fails the
+// unit pre-delivery, and a delivered email always has its immutable
+// artifact on disk first. Skipped/error rows never archive anything.
 const RENDER_CONCURRENCY = 4;
 
 const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
@@ -217,30 +222,50 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
 
   // A named subscriber/pilot who did NOT resolve gets an error row — a
   // subscription that silently produces nothing is unanswerable support
-  // load. (all_users rows keep silent-filter semantics: that is the
-  // standing filters working, not a subscription failing.)
+  // load. DELIBERATE (review F4 disposition): unresolved subscribers WARN
+  // and are recorded, but do not fail the run — a deactivated subscriber
+  // is user state, not a run failure, and failing cron weekly until a row
+  // is edited would be alert fatigue. A failed error-row INSERT is a
+  // persistence failure and does fail the coalition.
   const resolved = new Set(audience.map((a) => String(a.email).toLowerCase()));
+  let unresolved = 0;
+  let unresolved_persist_errors = 0;
   if (coalition.allowed) {
     for (const email of coalition.allowed) {
       if (resolved.has(email)) continue;
-      await record_send({
-        config_id: coalition.owner_of(email),
-        slot,
-        recipient: email,
-        recipient_role: "to",
-        scope_hash: null,
-        document: null,
-        status: "error",
-        error: "subscriber is not an active, notifiable user with magnet access"
-      }).catch(() => {});
+      unresolved += 1;
+      try {
+        await record_send({
+          config_id: coalition.owner_of(email),
+          slot,
+          recipient: email,
+          recipient_role: "to",
+          scope_hash: null,
+          document: null,
+          status: "error",
+          error: "subscriber is not an active, notifiable user with magnet access"
+        });
+      } catch (error) {
+        unresolved_persist_errors += 1;
+        console.error(`send record failed for unresolved subscriber ${email}: ${error.message}`);
+      }
+    }
+    if (unresolved) {
+      await addLogEvent(W, run_log, "run_user_summary", det, { job_id, config_ids: ids, unresolved }, null);
+      console.warn(
+        `config ${ids}: ${unresolved} subscriber${unresolved === 1 ? "" : "s"} did not resolve (inactive, opted out, or no magnet access) — error rows recorded`
+      );
     }
   }
-  if (!audience.length)
+  if (!audience.length) {
+    if (unresolved_persist_errors)
+      throw new Error(`${unresolved_persist_errors} unresolved-subscriber record failure(s)`);
     throw new Error(
       coalition.allowed
         ? `no subscriber in [${coalition.allowed.join(", ")}] is an active, notifiable magnet user`
         : "audience resolved to no active, notifiable magnet users"
     );
+  }
 
   const { units, user_units } = plan_documents(audience, system_customer);
   const deliveries = [...user_units.values()].reduce((n, k) => n + k.length, 0);
@@ -251,14 +276,23 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
     `config ${ids}: audience ${audience.length} user${audience.length === 1 ? "" : "s"} → ${units.length} customer document${units.length === 1 ? "" : "s"} (${deliveries} deliveries)${any_live ? "" : " (dry run)"}`
   );
 
-  // Phase 1 — render each (customer, subset) document once, isolated,
-  // with concurrent per-system computation and the shared per-run cache.
-  const raw_cfg = { ...base_cfg, dry_run: !any_live }; // gates history sidecars
+  // Phase 1 — render each (customer, subset) document once, isolated.
+  // Liveness is PER UNIT (review F5): a unit whose recipients are all dry
+  // writes no history sidecar and archives nothing, even inside a mixed
+  // coalition. Live units archive HERE, pre-SMTP (review F3).
   const rendered = new Map();
   for (const unit of units) {
+    const unit_live = unit.users.some((e) => coalition.dry_run_of(e) === false);
     try {
       const resolution = await resolve_scope({ system_ids: unit.system_ids });
-      const raw = config_to_raw(raw_cfg, { recipients: unit.users });
+      // Ownership may move between planning and rendering (review F2): the
+      // resolved rows' CURRENT customers must be exactly the unit's — a
+      // document must never ship under a stale customer identity.
+      if (resolution.customer_ids.length !== 1 || resolution.customer_ids[0] !== unit.customer_id)
+        throw new Error(
+          `customer ownership changed between planning and rendering (planned ${unit.customer_id}, resolved ${resolution.customer_ids.join(", ")})`
+        );
+      const raw = config_to_raw({ ...base_cfg, dry_run: !unit_live }, { recipients: unit.users });
       const loaded = materialize_scoped_requests(raw, resolution.system_ids);
       const batch = await run_batch(run_log, job_id, loaded, resolution, {
         concurrency: RENDER_CONCURRENCY,
@@ -270,12 +304,19 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
       rendered.set(unit.key, {
         ok: true,
         unit,
-        archived_doc: null, // archived lazily, at first LIVE delivery
+        // Live units archive now — before any SMTP. A failure here throws
+        // into the unit catch: error rows, no delivery of THIS unit.
+        archived_doc: unit_live ? archive_delivered(batch.fleet_pdf_path, base_cfg.id) : null,
+        scratch_doc: path.basename(batch.fleet_pdf_path),
         pdf_path: batch.fleet_pdf_path,
         counts: {
-          systems: batch.results.length,
+          // Honest counts (review F6): attempted = produced + failed;
+          // failures surface as "status unavailable", never as a
+          // reassuring zero.
+          systems: batch.results.length + batch.failures.length,
           attention: graded.filter(is_attention).length,
-          urgent: graded.filter(is_urgent).length
+          urgent: graded.filter(is_urgent).length,
+          unavailable: batch.failures.length
         }
       });
     } catch (error) {
@@ -289,7 +330,8 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
   // Phase 2 — one digest per user, isolated; sends attribute to the
   // user's OWN config row and honor their own dry_run gate. Partial
   // delivery is deliberate: one failed customer document yields an error
-  // row while the user's other documents still go out.
+  // row while the user's other documents still go out. record_unit is
+  // persistence-ONLY (review F3): document names were resolved at render.
   const caches = await load_user_caches([...user_units.keys()]);
   const user_failures = [];
   let sent_docs = 0;
@@ -299,12 +341,7 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
     const counts = { sent: 0, send_errors: 0, persist_errors: 0 };
     const outcomes = new Set();
     const base = { config_id: cfg_id, slot };
-    const doc_of = (r) => {
-      if (user_dry) return path.basename(r.pdf_path);
-      if (!r.archived_doc) r.archived_doc = archive_delivered(r.pdf_path, cfg_id);
-      return r.archived_doc;
-    };
-    const record_unit = async (key, extra) => {
+    const record_unit = async (key, document, extra) => {
       outcomes.add(key);
       const r = rendered.get(key);
       try {
@@ -313,7 +350,7 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
           recipient: email,
           recipient_role: "to",
           scope_hash: r.unit.scope_hash,
-          document: r.ok ? doc_of(r) : null,
+          document,
           ...extra
         });
       } catch (error) {
@@ -328,18 +365,20 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
       for (const key of keys) {
         const r = rendered.get(key);
         if (!r.ok) {
-          await record_unit(key, { status: "error", error: r.error });
+          await record_unit(key, null, { status: "error", error: r.error });
           continue;
         }
-        // Send-time re-check per unit against the CURRENT cache.
+        // Send-time re-check per unit against the CURRENT cache. Skipped
+        // deliveries archive nothing and name nothing.
         if (!user_ok || !access_covers(u.system_list_cache, r.unit.system_ids)) {
-          await record_unit(key, { status: "skipped_access" });
+          await record_unit(key, null, { status: "skipped_access" });
           continue;
         }
         deliverable.push(r);
       }
       if (user_dry) {
-        for (const r of deliverable) await record_unit(r.unit.key, { status: "dry_run" });
+        for (const r of deliverable)
+          await record_unit(r.unit.key, r.scratch_doc, { status: "dry_run" });
       } else if (deliverable.length) {
         const send_digest_email = require("./output/send_digest_email");
         const parts = await send_digest_email(
@@ -361,13 +400,14 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
             ? "error"
             : smtp_outcomes(part.info, [email]).get(email);
           for (const key of part.unit_keys) {
+            const r = rendered.get(key);
             if (outcome === "sent") {
               counts.sent += 1;
               sent_docs += 1;
-              await record_unit(key, { status: "sent" });
+              await record_unit(key, r.archived_doc, { status: "sent" });
             } else {
               counts.send_errors += 1;
-              await record_unit(key, { status: "error", error: part.error || "rejected by mail server" });
+              await record_unit(key, r.archived_doc, { status: "error", error: part.error || "rejected by mail server" });
             }
           }
         }
@@ -396,11 +436,11 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
       }
     }
   }
-  if (failed_units || user_failures.length)
+  if (failed_units || user_failures.length || unresolved_persist_errors)
     throw new Error(
-      `${failed_units} customer document(s) failed to render, ${user_failures.length} digest(s) failed to deliver`
+      `${failed_units} customer document(s) failed to render, ${user_failures.length} digest(s) failed to deliver, ${unresolved_persist_errors} unresolved-subscriber record failure(s)`
     );
-  return { users: user_units.size, units: units.length, sent_docs };
+  return { users: user_units.size, units: units.length, sent_docs, unresolved };
 };
 
 const run_scheduled = async (run_log, opts = {}) => {

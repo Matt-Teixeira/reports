@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
+const { v4: uuidv4 } = require("uuid");
 const { promisify } = require("util");
 const exec_file = promisify(execFile);
 
@@ -35,6 +36,8 @@ const {
 const CHUNK_PDF_BYTES = 12 * 1024 * 1024;
 const SEND_THROTTLE_MS = 1500;
 
+const { build_fresh_zip } = require("./fresh_zip");
+
 const chunk_units = (units) => {
   const chunks = [];
   let current = [];
@@ -59,13 +62,27 @@ const send_part = async (run_log, job_id, recipient, cc_list, chunk, part, total
   const part_tag = total_parts > 1 ? ` — part ${part}/${total_parts}` : "";
   const subject = `Magnet Health Summaries — ${opts.total_customers} customer${opts.total_customers === 1 ? "" : "s"}${period}${part_tag} — ${date}`;
 
-  const rows = chunk.map((u) => [
-    `<b>${esc(u.customer_name)}</b>`,
-    `${u.counts.systems} system${u.counts.systems === 1 ? "" : "s"}`,
-    u.counts.attention
-      ? `<b style="color:${COLORS.amber};">${u.counts.attention} need${u.counts.attention === 1 ? "s" : ""} attention</b>${u.counts.urgent ? `, <b style="color:${COLORS.red};">${u.counts.urgent} urgent</b>` : ""}`
-      : `<span style="color:${COLORS.teal};">no systems need attention</span>`
-  ]);
+  // Honest status (review F6): a system whose report could not be
+  // produced is "status unavailable", never silently folded into a
+  // reassuring "no systems need attention".
+  const rows = chunk.map((u) => {
+    const bits = [];
+    if (u.counts.attention)
+      bits.push(
+        `<b style="color:${COLORS.amber};">${u.counts.attention} need${u.counts.attention === 1 ? "s" : ""} attention</b>${u.counts.urgent ? `, <b style="color:${COLORS.red};">${u.counts.urgent} urgent</b>` : ""}`
+      );
+    if (u.counts.unavailable)
+      bits.push(
+        `<b style="color:${COLORS.grey};">${u.counts.unavailable} status unavailable</b>`
+      );
+    if (!bits.length)
+      bits.push(`<span style="color:${COLORS.teal};">no systems need attention</span>`);
+    return [
+      `<b>${esc(u.customer_name)}</b>`,
+      `${u.counts.systems} system${u.counts.systems === 1 ? "" : "s"}`,
+      bits.join(", ")
+    ];
+  });
   const use_zip = chunk.length > 1;
   const body_html =
     `<p style="${FONT}font-size:14px;color:${COLORS.navy};margin:0 0 14px 0;">Attached ${use_zip ? "(bundled as a zip) " : ""}are your Magnet Health Summaries for <b>${chunk.length}</b> of ${opts.total_customers} customer${opts.total_customers === 1 ? "" : "s"}${part_tag}.</p>` +
@@ -79,13 +96,17 @@ const send_part = async (run_log, job_id, recipient, cc_list, chunk, part, total
     );
 
   let attachments;
+  let zip_path = null;
   if (use_zip) {
     const zip_name =
       total_parts > 1
         ? `Magnet-Health-Summaries-${date}-part${part}.zip`
         : `Magnet-Health-Summaries-${date}.zip`;
-    const zip_path = path.join(opts.out_dir, zip_name);
-    await exec_file("zip", ["-j", "-o", zip_path, ...chunk.map((u) => u.pdf_path)]);
+    zip_path = await build_fresh_zip(
+      path.join(opts.out_dir, `digest-${uuidv4().slice(0, 8)}-${zip_name}`),
+      chunk.map((u) => u.pdf_path)
+    );
+    // filename is what the RECIPIENT sees; path is the private unique file.
     attachments = [{ filename: zip_name, path: zip_path }];
   } else {
     attachments = chunk.map((u) => ({
@@ -126,6 +147,10 @@ const send_part = async (run_log, job_id, recipient, cc_list, chunk, part, total
     const note = { job_id, to: recipient, part: `${part}/${total_parts}`, status: "ERROR" };
     await addLogEvent(E, run_log, "send_digest_email", cat, note, error);
     throw error;
+  } finally {
+    // The unique zip is consumed by the awaited send above; remove it so
+    // out/ never accumulates per-send archives.
+    if (zip_path) fs.rmSync(zip_path, { force: true });
   }
 };
 

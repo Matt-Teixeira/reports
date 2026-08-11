@@ -443,4 +443,38 @@ const { parse_sme_args } = require("../cli_args");
   assert.strictEqual(missing.get("a@x.co"), "error");
 }
 
-console.log("check_config: all assertions passed");
+// --- fresh zip per send (subscriptions review F1 — CRITICAL) -----------------
+// `zip` UPDATES an existing archive: a reused path retained the previous
+// recipient's PDFs inside the next recipient's zip. build_fresh_zip must
+// always produce an archive containing EXACTLY the requested files, even
+// at a path where an older archive exists.
+(async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { execFileSync } = require("child_process");
+  const { build_fresh_zip } = require("../output/fresh_zip");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sme-zip-"));
+  const mk = (name) => {
+    const p = path.join(tmp, name);
+    fs.writeFileSync(p, name);
+    return p;
+  };
+  const a1 = mk("customer-a-doc1.pdf");
+  const a2 = mk("customer-a-doc2.pdf");
+  const b1 = mk("customer-b-doc1.pdf");
+  const zip_path = path.join(tmp, "digest.zip");
+  await build_fresh_zip(zip_path, [a1, a2]);
+  await build_fresh_zip(zip_path, [b1]); // same path, new recipient
+  const listing = execFileSync("zip", ["-sf", zip_path]).toString();
+  assert.ok(listing.includes("customer-b-doc1.pdf"), "new recipient's file present");
+  assert.ok(
+    !listing.includes("customer-a-doc1.pdf") && !listing.includes("customer-a-doc2.pdf"),
+    `previous recipient's files must NOT survive: ${listing}`
+  );
+  fs.rmSync(tmp, { recursive: true, force: true });
+  console.log("check_config: all assertions passed");
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -82,7 +82,11 @@ const send_one = async (run_log, job_id, batch_email, chunk, out_dir, part, tota
         ? `Magnet-Health-Briefs-${date}-part${part}.zip`
         : `Magnet-Health-Briefs-${date}.zip`;
     const zip_path = path.join(out_dir, zip_name);
-    await exec_file("zip", ["-j", "-o", zip_path, ...chunk.map((r) => r.pdf_path)]);
+    // Fresh archive, never an update: `zip` ADDS to an existing file, so a
+    // reused path retained files from earlier runs inside later emails
+    // (same defect class as the digest sender's review F1).
+    fs.rmSync(zip_path, { force: true });
+    await exec_file("zip", ["-j", zip_path, ...chunk.map((r) => r.pdf_path)]);
     attachments = [{ filename: zip_name, path: zip_path }];
   } else {
     attachments = chunk.map((r) => ({

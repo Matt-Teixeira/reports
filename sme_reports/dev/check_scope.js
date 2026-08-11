@@ -67,6 +67,10 @@ const {
   const res = rows_to_resolution({ kind: "customer_id", value: "C1" }, rows);
   assert.deepStrictEqual(res.system_ids, ["SME01096", "SME01097"]);
   assert.strictEqual(res.label, "Acme Health");
+  // Subscriptions review F2: current owning customer ids ride the
+  // resolution so single-customer callers can verify ownership did not
+  // move between planning and rendering.
+  assert.deepStrictEqual(res.customer_ids, ["C1"]);
   assert.deepStrictEqual(res.detail, { kind: "customer_id", customers: 1, sites: 2, systems: 2 });
 
   // Zero systems is fatal — never an empty report.
