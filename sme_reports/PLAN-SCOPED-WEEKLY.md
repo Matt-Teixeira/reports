@@ -268,9 +268,12 @@ against the real audience produces 46 scope-group documents and ~100
 
 ## Open items
 
-1. **How DDL reaches the database** — migration file applied by the
-   user/frontend team, or created directly from this environment.
-   (Asked, unanswered; Phase B blocks on it, Phase A does not.)
+1. **How DDL reaches the database** — RESOLVED 2026-08-11: repeatable
+   migration file in the repo, applied by the user. `sql/
+   sme_reports_config.sql` carries the DDL (IF NOT EXISTS throughout,
+   single transaction), run/verify/rollback/grant instructions in its
+   header, and was validated against the live database via a rolled-back
+   transaction. Phase B's live rollout ladder starts once it is applied.
 2. **Left-censor urgency at 7 days** — domain review by service
    engineers; current stance kept until then.
 3. **Briefs ride-along** — `options.include_briefs` is designed in but
