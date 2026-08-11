@@ -41,15 +41,25 @@ const validate_config = (row) => {
   if (!Number.isInteger(row.lookback_days) || row.lookback_days <= 0)
     fail(`${at}: lookback_days must be a positive integer`);
 
-  // Deduplicated — a frontend double-entry must not double-send — and
-  // deduplicated ACROSS the To/CC boundary (round-2 F3): an address on
-  // both lists stays a single To entry, so it can never collect two rows
-  // or two copies.
-  const recipients = [...new Set((row.recipients || []).map((e) => String(e).trim()))];
+  // Deduplicated by NORMALIZED identity, within each list and across the
+  // To/CC boundary (round-2 F3, round-3 F1): "Same@x.co" and "same@x.co"
+  // are one recipient — first spelling kept — so no address can ever
+  // collect two copies or two sends rows.
+  const dedup_ci = (list) => {
+    const seen = new Set();
+    const out = [];
+    for (const raw of list || []) {
+      const e = String(raw).trim();
+      const key = e.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(e);
+    }
+    return out;
+  };
+  const recipients = dedup_ci(row.recipients);
   const to_lower = new Set(recipients.map((e) => e.toLowerCase()));
-  const cc_list = [...new Set((row.cc_list || []).map((e) => String(e).trim()))].filter(
-    (e) => !to_lower.has(e.toLowerCase())
-  );
+  const cc_list = dedup_ci(row.cc_list).filter((e) => !to_lower.has(e.toLowerCase()));
   for (const r of [...recipients, ...cc_list])
     if (!EMAIL_RE.test(r)) fail(`${at}: "${r}" is not an email address`);
 

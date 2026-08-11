@@ -124,6 +124,12 @@ const send_summary_email = async (
   const transporter = await build_transporter();
   try {
     const info = await send_with_retry(transporter, message);
+    // Log status graded from what SMTP actually reported (round-3 F2):
+    // partial rejection resolves successfully, and a flat "SENT" here
+    // contradicted the per-recipient sends records.
+    const accepted = (info && info.accepted) || [];
+    const rejected = (info && info.rejected) || [];
+    const status = rejected.length ? (accepted.length ? "PARTIAL" : "ERROR") : "SENT";
     const note = {
       job_id,
       to: message.to,
@@ -133,10 +139,12 @@ const send_summary_email = async (
       data_issues: data_issues.map((r) => r.system_id),
       fleet_pdf: fleet_pdf_path || null,
       failures: (failures || []).length,
-      status: "SENT",
+      status,
+      accepted,
+      rejected,
       response: info && info.response
     };
-    await addLogEvent(I, run_log, "send_summary_email", det, note, null);
+    await addLogEvent(status === "SENT" ? I : E, run_log, "send_summary_email", det, note, null);
     return info;
   } catch (error) {
     const note = { job_id, to: message.to, status: "ERROR" };

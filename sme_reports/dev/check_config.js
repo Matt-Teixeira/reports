@@ -147,6 +147,19 @@ const { parse_sme_args } = require("../cli_args");
   });
   assert.deepStrictEqual(cross.recipients, ["same@example.com"]);
   assert.deepStrictEqual(cross.cc_list, ["other@example.com"], "cross-list duplicate removed from CC");
+  // Round-3 F1: case variants WITHIN one list are one recipient (first
+  // spelling kept) — in both lists.
+  const within = validate_config({
+    ...base,
+    id: 6,
+    report_kind: "fleet_summary",
+    scope: null,
+    recipient_mode: "explicit",
+    recipients: ["Same@example.com", "same@example.com"],
+    cc_list: ["CC@example.com", "cc@example.com"]
+  });
+  assert.deepStrictEqual(within.recipients, ["Same@example.com"], "within-To case variants collapse");
+  assert.deepStrictEqual(within.cc_list, ["CC@example.com"], "within-CC case variants collapse");
 
   const bad = [
     [{ ...base, report_kind: "briefs" }, /not implemented/],
