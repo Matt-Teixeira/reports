@@ -247,3 +247,25 @@ are code-path-verified but not fixture-simulated — they sit at DB/
 filesystem/SMTP seams the DB-free checks deliberately do not cross.
 RULES.md documents the three-check boundary, eligibility-gated
 archival, and the unresolved policy.
+
+---
+
+## Round-3 outcome (2026-08-11) — all four findings fixed (`63da943`); series closed
+
+Verdict was SHIP WITH FIXES; all four fixed, none contested.
+
+| # | Fix |
+|---|---|
+| R3-F1 | SMTP truth isolated from telemetry in BOTH senders: only the send itself (and transporter construction) can produce a delivery failure; success/partial logging runs afterward in its own best-effort boundary, error-path logging is best-effort too — a logging failure after an accepted send can never fabricate error rows |
+| R3-F2 | History sidecars DEFERRED like the PDFs: `write_records_sidecar` extracted/exported, auto-persistence suppressed at unit render, and the eligibility step writes the sidecar (best-effort) only for units approved for archival — an all-ineligible unit archives neither PDF nor sidecar |
+| R3-F3 | The post-render ownership recheck runs for EVERY successful unit, dry-only included; only `archive_delivered` is gated on live eligibility — a dry-run row can no longer name a document rendered under stale ownership |
+| R3-F4 | `send_batch_email` transporter construction inside the try/finally, matching the digest sender — its failure cannot leak the private zip |
+
+Verified live: the subscription dry run re-renders 1 user → 11 customer
+documents with ZERO new sidecars (the 11 on disk carry the real pilot
+send's 16:44 UTC timestamps, untouched by every dry run since — the
+deferred-archival semantics demonstrated on real data). All six dev
+checks pass. **The per-customer + subscription series is
+review-complete**; remaining accepted gaps are the orchestration-seam
+fixtures listed above and the residual final-check-to-SMTP ownership
+window (documented design tradeoff).
