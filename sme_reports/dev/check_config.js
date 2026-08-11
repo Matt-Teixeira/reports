@@ -9,6 +9,7 @@ const {
   validate_config,
   resolve_audience,
   group_by_scope,
+  plan_documents,
   access_covers,
   config_to_raw,
   smtp_outcomes
@@ -292,6 +293,74 @@ const { parse_sme_args } = require("../cli_args");
   const fleet_loaded = materialize_scoped_requests(fleet_raw, ["SME00001", "SME00002"]);
   assert.deepStrictEqual(fleet_loaded.requests.map((r) => r.system_id), ["SME00001"]);
   assert.deepStrictEqual(fleet_loaded.excluded, { ids: ["SME00002"], note: "excluded by report config" });
+}
+
+// --- users-scope pilot variant + per-customer document plan ------------------
+{
+  // The pilot scope: named users only.
+  const base = {
+    id: 7,
+    report_kind: "user_summary",
+    scope: { users: ["Matt.Teixeira@avantehs.com"] },
+    lookback_days: 7,
+    options: {},
+    recipient_mode: "derived",
+    recipients: null,
+    cc_list: null,
+    dry_run: true
+  };
+  validate_config(base);
+  for (const [scope, re] of [
+    [{ users: [] }, /requires scope/],
+    [{ users: ["not-an-email"] }, /requires scope/],
+    [{ users: ["a@b.co"], all_users: true }, /requires scope/]
+  ])
+    assert.throws(() => validate_config({ ...base, scope }), re, JSON.stringify(scope));
+  // The audience narrows case-insensitively, but every standing filter
+  // still applies — a pilot user who opted out resolves to nothing.
+  const users = [
+    { email_address: "matt.teixeira@avantehs.com", status: "active", notify_email: true, system_list_cache: ["SME00001"] },
+    { email_address: "other@x.co", status: "active", notify_email: true, system_list_cache: ["SME00001"] }
+  ];
+  const narrowed = resolve_audience(users, ["SME00001"], ["Matt.Teixeira@avantehs.com"]);
+  assert.strictEqual(narrowed.length, 1);
+  assert.strictEqual(narrowed[0].email, "matt.teixeira@avantehs.com");
+  const opted_out = resolve_audience(
+    [{ ...users[0], notify_email: false }],
+    ["SME00001"],
+    ["matt.teixeira@avantehs.com"]
+  );
+  assert.strictEqual(opted_out.length, 0, "pilot users are never force-mailed past their filters");
+
+  // The per-customer plan: documents are (customer × subset) units, never
+  // cross-customer merges; identical (customer, subset) pairs dedup.
+  const sc = new Map([
+    ["SME00001", { customer_id: "C1", customer_name: "Acme Health" }],
+    ["SME00002", { customer_id: "C1", customer_name: "Acme Health" }],
+    ["SME00003", { customer_id: "C2", customer_name: "Bravo Med" }]
+  ]);
+  const audience = [
+    { email: "multi@x.co", scope_ids: ["SME00001", "SME00002", "SME00003"] },
+    { email: "acme@x.co", scope_ids: ["SME00001", "SME00002"] },
+    { email: "partial@x.co", scope_ids: ["SME00001"] }
+  ];
+  const { units, user_units } = plan_documents(audience, sc);
+  // multi splits into C1+C2; acme SHARES multi's C1 unit; partial's C1
+  // subset differs, so it is its own unit.
+  assert.strictEqual(units.length, 3, "two C1 subsets + one C2 unit");
+  assert.deepStrictEqual(user_units.get("multi@x.co").length, 2, "multi-customer user gets one doc per customer");
+  const shared = units.find((u) => u.users.includes("acme@x.co"));
+  assert.deepStrictEqual(shared.users.sort(), ["acme@x.co", "multi@x.co"], "identical (customer, subset) shares one render");
+  for (const u of units) {
+    const customers = new Set(u.system_ids.map((id) => sc.get(id).customer_id));
+    assert.strictEqual(customers.size, 1, "no unit ever crosses a customer boundary");
+    assert.strictEqual(u.customer_id, [...customers][0]);
+  }
+  // A system without a customer mapping is a loud data-integrity failure.
+  assert.throws(
+    () => plan_documents([{ email: "x@x.co", scope_ids: ["SME99999"] }], sc),
+    /no customer mapping/
+  );
 }
 
 // --- smtp_outcomes (round-2 F1) ----------------------------------------------

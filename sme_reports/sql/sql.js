@@ -16,6 +16,7 @@ module.exports = {
   config_by_id: sql("config-by-id.sql"),
   audience_users: sql("audience-users.sql"),
   mag_system_ids: sql("mag-system-ids.sql"),
+  mag_system_customers: sql("mag-system-customers.sql"),
   user_caches: sql("user-caches.sql"),
   insert_send: sql("insert-send.sql"),
   philips_series: sql("philips-series.sql"),

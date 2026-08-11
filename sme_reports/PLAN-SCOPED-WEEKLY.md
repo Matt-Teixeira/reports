@@ -24,10 +24,17 @@ with send-status recording. Decisions below were made with the user on
 - **Recipients derived from `public.users`**: status `active`,
   `notify_email = true`, ≥1 mag-processed system in scope (100 users
   today). Explicit `recipients`/`cc_list` per row stay available.
-- **Render granularity: per distinct scope-set.** Users with identical
-  magnet scopes share one rendered document (46 distinct scopes across
-  160 active mag users today). Multi-customer users get one document
-  covering their whole visible fleet — same as the app.
+- **Render granularity — REVISED 2026-08-11 (user decision): the
+  document unit is (customer × system-subset), never a cross-customer
+  merge.** Each user's magnet scope is partitioned by owning customer; a
+  multi-customer user gets one document per customer (forward-safe,
+  customer-titled), and users sharing a (customer, subset) share one
+  render. Packaging: **one digest email per user** with their customer
+  PDFs — zipped when more than one, size-chunked into parts only when
+  forced; minimizing email count is the priority. The `{"users": […]}`
+  scope variant pilots the full paradigm for named addresses only.
+  (The original one-merged-document-per-user design shipped first and
+  was replaced before launch.)
 - **Send-status recording (`alert.sme_report_sends`) lands in the same
   phase**, written from the fan-out send loop.
 - **Safety defaults**: `enabled = false` and `dry_run = true` on new

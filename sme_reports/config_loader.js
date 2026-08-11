@@ -20,9 +20,16 @@ const load_config = (id) => db().oneOrNone(q.config_by_id, [id]);
 const load_audience_pool = async () => {
   const [users, mag] = await Promise.all([
     db().any(q.audience_users),
-    db().any(q.mag_system_ids)
+    db().any(q.mag_system_customers)
   ]);
-  return { users, mag_ids: mag.map((r) => r.id) };
+  return {
+    users,
+    mag_ids: mag.map((r) => r.system_id),
+    // system id -> owning customer, for the per-customer document plan.
+    system_customer: new Map(
+      mag.map((r) => [r.system_id, { customer_id: r.customer_id, customer_name: r.customer_name }])
+    )
+  };
 };
 
 // Refetched immediately before sending — the re-check must see CURRENT

@@ -69,8 +69,18 @@ const validate_config = (row) => {
   // rejected loudly, never silently narrowed).
   if (row.report_kind === "user_summary") {
     const s = row.scope || {};
-    if (!(s.all_users === true && Object.keys(s).length === 1))
-      fail(`${at}: user_summary requires scope {"all_users": true}`);
+    const keys = Object.keys(s);
+    // Two audience shapes: the full derived audience, or a NAMED subset —
+    // the pilot mechanism ("send only to me" runs the whole per-customer
+    // paradigm for the listed users alone).
+    const is_all = s.all_users === true && keys.length === 1;
+    const is_named =
+      keys.length === 1 &&
+      Array.isArray(s.users) &&
+      s.users.length > 0 &&
+      s.users.every((u) => EMAIL_RE.test(String(u)));
+    if (!is_all && !is_named)
+      fail(`${at}: user_summary requires scope {"all_users": true} or {"users": ["a@b.co", …]}`);
     if (row.recipient_mode !== "derived")
       fail(`${at}: user_summary requires recipient_mode "derived"`);
     // Review B round-1 F1 (blocker): a CC on a derived row would ride
@@ -107,17 +117,65 @@ const validate_config = (row) => {
 
 // public.users rows -> the weekly audience: active, notifiable, and able
 // to see at least one magnet. scope_ids is each user's cache ∩ mag,
-// sorted — the identity their document group is keyed by.
-const resolve_audience = (users, mag_ids) => {
+// sorted. `allowed` (the {"users": […]} pilot scope) narrows the audience
+// to the named addresses, case-insensitively — every other filter still
+// applies, so a pilot user who is inactive or opted out resolves to
+// nothing rather than being force-mailed.
+const resolve_audience = (users, mag_ids, allowed = null) => {
   const mag = new Set(mag_ids);
+  const allow = allowed
+    ? new Set(allowed.map((e) => String(e).toLowerCase()))
+    : null;
   const audience = [];
   for (const u of users || []) {
+    if (allow && !allow.has(String(u.email_address).toLowerCase())) continue;
     if (u.status !== "active" || u.notify_email !== true) continue;
     const scope_ids = [...new Set((u.system_list_cache || []).filter((id) => mag.has(id)))].sort();
     if (!scope_ids.length) continue;
     audience.push({ email: u.email_address, scope_ids });
   }
   return audience;
+};
+
+// The per-customer document plan (the decided paradigm): the document unit
+// is (customer × system-subset), never a cross-customer merge — a document
+// scoped to one customer is forward-safe and carries that customer's name.
+// Each user's magnet scope is partitioned by owning customer; users
+// sharing a (customer, subset) share one rendered document. Returns
+//   units: [{ key, customer_id, customer_name, system_ids, scope_hash, users }]
+//   user_units: Map email -> [unit key, …]
+// A system with no customer mapping is a data-integrity failure, loudly.
+const plan_documents = (audience, system_customer) => {
+  const units = new Map();
+  const user_units = new Map();
+  for (const a of audience) {
+    const by_customer = new Map();
+    for (const id of a.scope_ids) {
+      const owner = system_customer.get(id);
+      if (!owner) fail(`system ${id} has no customer mapping`);
+      if (!by_customer.has(owner.customer_id))
+        by_customer.set(owner.customer_id, { name: owner.customer_name, ids: [] });
+      by_customer.get(owner.customer_id).ids.push(id);
+    }
+    const keys = [];
+    for (const [customer_id, { name, ids }] of by_customer) {
+      const sorted = [...ids].sort();
+      const key = `${customer_id}|${scope_set_key(sorted)}`;
+      if (!units.has(key))
+        units.set(key, {
+          key,
+          customer_id,
+          customer_name: name,
+          system_ids: sorted,
+          scope_hash: scope_set_hash(sorted),
+          users: []
+        });
+      units.get(key).users.push(a.email);
+      keys.push(key);
+    }
+    user_units.set(a.email, keys);
+  }
+  return { units: [...units.values()], user_units };
 };
 
 // Users with IDENTICAL magnet scopes share one rendered document: 100
@@ -187,6 +245,7 @@ module.exports = {
   validate_config,
   resolve_audience,
   group_by_scope,
+  plan_documents,
   access_covers,
   config_to_raw,
   smtp_outcomes,

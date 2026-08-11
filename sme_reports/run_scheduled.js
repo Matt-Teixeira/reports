@@ -8,10 +8,12 @@ const { resolve_scope } = require("./scope");
 const {
   validate_config,
   resolve_audience,
-  group_by_scope,
+  plan_documents,
   access_covers,
-  config_to_raw
+  config_to_raw,
+  smtp_outcomes
 } = require("./fanout");
+const { is_attention, is_urgent } = require("./conditions");
 const {
   current_slot,
   load_slot_configs,
@@ -195,111 +197,186 @@ const run_customer_or_fleet = async (run_log, job_id, cfg, slot, counts) => {
     );
 };
 
-// The weekly flagship: every active, notifiable user with magnets, grouped
-// by identical magnet scope; one render per group, one email per user,
-// send-time access re-check per recipient. user_summary rows carry no CC
-// (validate_config rejects it — a CC would bypass the access check).
+// The weekly flagship, per the decided per-customer paradigm: the document
+// unit is (customer × system-subset) — never a cross-customer merge. Each
+// active, notifiable user's magnet scope is partitioned by owning
+// customer; users sharing a (customer, subset) share one rendered
+// document; each user receives ONE digest email carrying all their
+// customer documents (zipped when more than one, size-chunked into parts
+// only when the attachments outgrow the message budget). The {"users":
+// [...]} scope variant narrows the audience to named addresses — the
+// pilot mechanism.
 const run_user_summary = async (run_log, job_id, cfg, slot) => {
-  const { users, mag_ids } = await load_audience_pool();
-  const audience = resolve_audience(users, mag_ids);
-  const groups = group_by_scope(audience);
-  const note = { job_id, config_id: cfg.id, audience: audience.length, groups: groups.length };
+  const { users, mag_ids, system_customer } = await load_audience_pool();
+  const allowed =
+    cfg.scope && Array.isArray(cfg.scope.users) ? cfg.scope.users : null;
+  const audience = resolve_audience(users, mag_ids, allowed);
+  if (!audience.length) {
+    // A pilot scope naming an inactive/opted-out user must say so loudly
+    // rather than silently doing nothing.
+    throw new Error(
+      allowed
+        ? `scope users [${allowed.join(", ")}] resolved to no active, notifiable magnet users`
+        : "audience resolved to no active, notifiable magnet users"
+    );
+  }
+  const { units, user_units } = plan_documents(audience, system_customer);
+  const deliveries = [...user_units.values()].reduce((n, k) => n + k.length, 0);
+  const note = {
+    job_id,
+    config_id: cfg.id,
+    audience: audience.length,
+    units: units.length,
+    deliveries
+  };
   await addLogEvent(I, run_log, "run_user_summary", det, note, null);
   console.log(
-    `config ${cfg.id}: audience ${audience.length} users → ${groups.length} scope-group document${groups.length === 1 ? "" : "s"}${cfg.dry_run ? " (dry run)" : ""}`
+    `config ${cfg.id}: audience ${audience.length} user${audience.length === 1 ? "" : "s"} → ${units.length} customer document${units.length === 1 ? "" : "s"} (${deliveries} deliveries)${cfg.dry_run ? " (dry run)" : ""}`
   );
 
-  const group_failures = [];
-  for (const group of groups) {
-    const outcomes = new Set();
-    const counts = { sent: 0, send_errors: 0, persist_errors: 0 };
-    const base = { config_id: cfg.id, slot, scope_hash: group.scope_hash };
+  // Phase 1 — render each (customer, subset) document once, isolated: one
+  // customer's bad data must not sink the other ninety-nine documents.
+  const rendered = new Map();
+  for (const unit of units) {
     try {
-      const resolution = await resolve_scope({ system_ids: group.system_ids });
-      const raw = config_to_raw(cfg, { recipients: group.users });
+      const resolution = await resolve_scope({ system_ids: unit.system_ids });
+      const raw = config_to_raw(cfg, { recipients: unit.users });
       const loaded = materialize_scoped_requests(raw, resolution.system_ids);
       const batch = await run_batch(run_log, job_id, loaded, resolution);
       if (!batch.fleet_pdf_path)
-        throw new Error("group produced no summary document");
+        throw new Error("unit produced no summary document");
       const doc = cfg.dry_run
         ? path.basename(batch.fleet_pdf_path)
         : archive_delivered(batch.fleet_pdf_path, cfg.id);
-
-      // Send-time access re-check against CURRENT caches: access revoked
-      // (or a user deactivated) between render and send must not receive
-      // this document.
-      const caches = await load_user_caches(group.users);
-      for (const email of group.users) {
-        const u = caches.get(email);
-        const still_allowed =
-          u &&
-          u.status === "active" &&
-          u.notify_email === true &&
-          access_covers(u.system_list_cache, resolution.system_ids);
-
-        let status;
-        let err = null;
-        if (!still_allowed) status = "skipped_access";
-        else if (cfg.dry_run) status = "dry_run";
-        else {
-          // SMTP boundary: a send failure is an error OUTCOME; a record
-          // failure below is a persistence failure, never a fabricated
-          // error row. Even the single-recipient send is graded from the
-          // returned accepted list (round-2 F1) — delivery claims need
-          // evidence, not a resolved promise.
-          try {
-            const send_summary_email = require("./output/send_summary_email");
-            const info = await send_summary_email(
-              run_log,
-              job_id,
-              { recipients: [email], cc_list: [] },
-              batch.results,
-              batch.failures,
-              batch.fleet_pdf_path,
-              { scope_label: resolution.label, lookback_days: cfg.lookback_days }
-            );
-            const { smtp_outcomes } = require("./fanout");
-            status = smtp_outcomes(info, [email]).get(email);
-            if (status === "sent") counts.sent += 1;
-            else {
-              err = "rejected by mail server";
-              counts.send_errors += 1;
-            }
-          } catch (error) {
-            status = "error";
-            err = error.message;
-            counts.send_errors += 1;
-          }
+      const graded = batch.results.map((r) => ({ ...(r.summary || {}), archetype: r.archetype }));
+      rendered.set(unit.key, {
+        ok: true,
+        unit,
+        doc,
+        pdf_path: batch.fleet_pdf_path,
+        counts: {
+          systems: batch.results.length,
+          attention: graded.filter(is_attention).length,
+          urgent: graded.filter(is_urgent).length
         }
-        await record_outcome(outcomes, counts, {
+      });
+    } catch (error) {
+      rendered.set(unit.key, { ok: false, unit, error: error.message });
+      await addLogEvent(E, run_log, "run_user_summary", cat, { job_id, config_id: cfg.id, customer: unit.customer_id, scope_hash: unit.scope_hash }, error);
+      console.error(`customer document ${unit.customer_name} (${unit.scope_hash}) failed: ${error.message}`);
+    }
+  }
+  const failed_units = [...rendered.values()].filter((r) => !r.ok).length;
+
+  // Phase 2 — one digest per user, isolated. Partial delivery is right:
+  // one failed customer document yields an error row for that unit while
+  // the user's other documents still go out.
+  const caches = await load_user_caches([...user_units.keys()]);
+  const user_failures = [];
+  let sent_docs = 0;
+  for (const [email, keys] of user_units) {
+    const counts = { sent: 0, send_errors: 0, persist_errors: 0 };
+    const outcomes = new Set();
+    const base = { config_id: cfg.id, slot };
+    const record_unit = async (key, extra) => {
+      outcomes.add(key);
+      const r = rendered.get(key);
+      try {
+        await record_send({
           ...base,
           recipient: email,
           recipient_role: "to",
-          document: doc,
-          status,
-          error: err
+          scope_hash: r.unit.scope_hash,
+          document: r.ok ? r.doc : null,
+          ...extra
         });
+      } catch (error) {
+        counts.persist_errors += 1;
+        console.error(`send record failed for ${email}/${key}: ${error.message}`);
+      }
+    };
+    try {
+      const u = caches.get(email);
+      const user_ok = u && u.status === "active" && u.notify_email === true;
+      const deliverable = [];
+      for (const key of keys) {
+        const r = rendered.get(key);
+        if (!r.ok) {
+          await record_unit(key, { status: "error", error: r.error });
+          continue;
+        }
+        // Send-time re-check per unit against the CURRENT cache.
+        if (!user_ok || !access_covers(u.system_list_cache, r.unit.system_ids)) {
+          await record_unit(key, { status: "skipped_access" });
+          continue;
+        }
+        deliverable.push(r);
+      }
+      if (cfg.dry_run) {
+        for (const r of deliverable) await record_unit(r.unit.key, { status: "dry_run" });
+      } else if (deliverable.length) {
+        const send_digest_email = require("./output/send_digest_email");
+        const parts = await send_digest_email(
+          run_log,
+          job_id,
+          email,
+          cfg.cc_list,
+          deliverable.map((r) => ({
+            key: r.unit.key,
+            customer_name: r.unit.customer_name,
+            pdf_path: r.pdf_path,
+            counts: r.counts
+          })),
+          { lookback_days: cfg.lookback_days, out_dir: path.join(__dirname, "out") }
+        );
+        // Grade each unit from ITS part's SMTP result.
+        for (const part of parts) {
+          const outcome = part.error
+            ? "error"
+            : smtp_outcomes(part.info, [email]).get(email);
+          for (const key of part.unit_keys) {
+            if (outcome === "sent") {
+              counts.sent += 1;
+              sent_docs += 1;
+              await record_unit(key, { status: "sent" });
+            } else {
+              counts.send_errors += 1;
+              await record_unit(key, { status: "error", error: part.error || "rejected by mail server" });
+            }
+          }
+        }
       }
       if (counts.send_errors || counts.persist_errors)
         throw new Error(
-          `${counts.send_errors} of ${group.users.length} sends failed, ${counts.persist_errors} record failure(s)`
+          `${counts.send_errors} document send failure(s), ${counts.persist_errors} record failure(s)`
         );
     } catch (error) {
-      group_failures.push({ scope_hash: group.scope_hash, message: error.message });
-      await addLogEvent(E, run_log, "run_user_summary", cat, { job_id, config_id: cfg.id, scope_hash: group.scope_hash }, error);
-      console.error(`scope-group ${group.scope_hash} failed: ${error.message}`);
-      // Only recipients WITHOUT a recorded outcome get backfilled — a user
-      // whose email already sent keeps its single "sent" row (F4).
-      await backfill_errors(
-        outcomes,
-        base,
-        group.users.map((email) => ({ email, role: "to" })),
-        error.message
-      );
+      user_failures.push({ email, message: error.message });
+      await addLogEvent(E, run_log, "run_user_summary", cat, { job_id, config_id: cfg.id, recipient: email }, error);
+      console.error(`digest for ${email} failed: ${error.message}`);
+      // Units without a recorded outcome get error rows — never a second
+      // row for one already recorded.
+      for (const key of keys) {
+        if (outcomes.has(key)) continue;
+        outcomes.add(key);
+        const r = rendered.get(key);
+        await record_send({
+          ...base,
+          recipient: email,
+          recipient_role: "to",
+          scope_hash: r ? r.unit.scope_hash : null,
+          document: r && r.ok ? r.doc : null,
+          status: "error",
+          error: error.message
+        }).catch(() => {});
+      }
     }
   }
-  if (group_failures.length)
-    throw new Error(`${group_failures.length} of ${groups.length} scope-groups failed`);
+  if (failed_units || user_failures.length)
+    throw new Error(
+      `${failed_units} customer document(s) failed to render, ${user_failures.length} digest(s) failed to deliver`
+    );
+  return { users: user_units.size, units: units.length, sent_docs };
 };
 
 const run_scheduled = async (run_log, opts = {}) => {
