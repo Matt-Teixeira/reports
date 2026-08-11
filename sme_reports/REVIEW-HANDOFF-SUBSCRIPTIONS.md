@@ -224,3 +224,26 @@ and judge the F4 disposition on its merits.
 Live after fixes: the subscription dry run re-renders "1 user → 11
 customer documents", 11 rows recorded; all six dev checks pass including
 the fresh-zip and customer_ids regressions.
+
+---
+
+## Round-2 outcome (2026-08-11) — all five findings fixed (`3e7f411`)
+
+Verdict was DO NOT SHIP; all five fixed (each a refinement of a round-1
+fix, none contested).
+
+| # | Fix |
+|---|---|
+| R2-F1 | The customer boundary is checked a THIRD time, post-render immediately before archiving: the unit's systems re-resolve and their current customer must equal the planned one. Planning → resolution → pre-archive; the residual window is the seconds between the final check and SMTP, accepted in lieu of DB-level locking |
+| R2-F2 | `send_batch_email` adopts `fresh_zip` at a private per-send unique path (clean recipient-facing name, best-effort cleanup) — the concurrent rebuild-under-an-in-flight-send race is closed for both senders |
+| R2-F3 | Cleanup is best-effort in its own try/catch and can never convert an SMTP-accepted delivery into error rows; transporter construction moved inside the try so its failure cannot leak the private zip |
+| R2-F4 | Archival is gated on eligibility: with the send-time cache snapshot loaded first, only units with ≥1 live access-eligible recipient archive (still pre-SMTP); all-ineligible units archive nothing |
+| R2-F5 | Unresolved policy is coalition-independent: all-unresolved named coalitions warn + record + return success, identical to a mixed coalition; `all_users` resolving to nobody stays fatal |
+
+Accepted gaps (unchanged in kind): no orchestration-level
+`run_user_summary` test; ownership mutation mid-render, archive-timing
+vs recheck, cleanup-failure-after-accept, and concurrent zip builders
+are code-path-verified but not fixture-simulated — they sit at DB/
+filesystem/SMTP seams the DB-free checks deliberately do not cross.
+RULES.md documents the three-check boundary, eligibility-gated
+archival, and the unresolved policy.
