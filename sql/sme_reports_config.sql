@@ -56,11 +56,16 @@ CREATE TABLE IF NOT EXISTS alert.sme_reports (
                    ('user_summary', 'customer_summary', 'fleet_summary', 'briefs')),
   -- Which systems / users the row covers. Shapes (see sme_reports/scope.js
   -- and PLAN-SCOPED-WEEKLY.md):
-  --   {"all_users": true}        every active notifiable user (user_summary)
+  --   NULL on user_summary       a SUBSCRIPTION: the audience is the row's
+  --                              AUTHOR — the frontend "subscribe" contract
+  --                              is (author, report_kind, lookback_days,
+  --                              email_schedule, enabled), nothing else
+  --   {"users": ["a@b.co", …]}   named users (pilots, admin sends)
+  --   {"all_users": true}        every active notifiable user (admin tool)
   --   {"customer_id": "C0151"}   one customer's mag systems
   --   {"site_ids": ["..."]}      specific sites
   --   {"system_ids": ["SME..."]} explicit systems
-  --   NULL                       whole fleet (fleet_summary only)
+  --   NULL on fleet_summary      the whole fleet
   scope          JSONB,
   -- Analysis period in days; the weekly product uses 7.
   lookback_days  INTEGER NOT NULL DEFAULT 7

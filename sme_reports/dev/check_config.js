@@ -7,6 +7,7 @@ const assert = require("assert");
 
 const {
   validate_config,
+  coalesce_user_rows,
   resolve_audience,
   group_by_scope,
   plan_documents,
@@ -171,8 +172,8 @@ const { parse_sme_args } = require("../cli_args");
     [{ ...base, options: { exception_only: true } }, /exception_only is not implemented/],
     [{ ...base, options: { exclude: "SME1" } }, /exclude must be an array/],
     [{ ...base, lookback_days: 0 }, /positive integer/],
-    [{ ...base, scope: { all_users: true, extra: 1 } }, /requires scope/],
-    [{ ...base, scope: { customer_id: "C1" } }, /requires scope \{"all_users": true\}/],
+    [{ ...base, scope: { all_users: true, extra: 1 } }, /scope must be absent/],
+    [{ ...base, scope: { customer_id: "C1" } }, /scope must be absent/],
     [{ ...base, recipient_mode: "explicit", recipients: ["a@b.co"] }, /requires recipient_mode "derived"/],
     [
       { ...base, report_kind: "customer_summary", scope: { customer_id: "C1" }, recipient_mode: "derived" },
@@ -311,9 +312,9 @@ const { parse_sme_args } = require("../cli_args");
   };
   validate_config(base);
   for (const [scope, re] of [
-    [{ users: [] }, /requires scope/],
-    [{ users: ["not-an-email"] }, /requires scope/],
-    [{ users: ["a@b.co"], all_users: true }, /requires scope/]
+    [{ users: [] }, /scope must be absent/],
+    [{ users: ["not-an-email"] }, /scope must be absent/],
+    [{ users: ["a@b.co"], all_users: true }, /scope must be absent/]
   ])
     assert.throws(() => validate_config({ ...base, scope }), re, JSON.stringify(scope));
   // The audience narrows case-insensitively, but every standing filter
@@ -361,6 +362,63 @@ const { parse_sme_args } = require("../cli_args");
     () => plan_documents([{ email: "x@x.co", scope_ids: ["SME99999"] }], sc),
     /no customer mapping/
   );
+}
+
+// --- subscription rows + slot coalescing -------------------------------------
+{
+  const sub = (id, author, over = {}) => ({
+    id,
+    author,
+    report_kind: "user_summary",
+    scope: null,
+    lookback_days: 7,
+    options: {},
+    recipient_mode: "derived",
+    recipients: null,
+    cc_list: null,
+    dry_run: false,
+    ...over
+  });
+  // A subscription row (scope absent) canonicalizes to its AUTHOR as the
+  // audience — the frontend contract: one row per subscribed user.
+  const cfg = validate_config(sub(10, "a@x.co"));
+  assert.deepStrictEqual(cfg.scope, { users: ["a@x.co"] });
+  assert.throws(
+    () => validate_config(sub(11, "not-an-email")),
+    /author must be an email address/
+  );
+
+  // Coalescing: same render inputs merge into one coalition; each user
+  // attributes to THEIR OWN row and honors THEIR OWN dry_run gate.
+  const a = validate_config(sub(10, "a@x.co"));
+  const b = validate_config(sub(11, "b@x.co", { dry_run: true }));
+  const [co] = coalesce_user_rows([b, a]); // order-independent (sorted by id)
+  assert.strictEqual(co.cfgs.length, 2);
+  assert.deepStrictEqual(co.allowed.sort(), ["a@x.co", "b@x.co"]);
+  assert.strictEqual(co.owner_of("A@X.CO"), 10, "attribution is case-insensitive to the owning row");
+  assert.strictEqual(co.owner_of("b@x.co"), 11);
+  assert.strictEqual(co.dry_run_of("a@x.co"), false, "live subscriber stays live");
+  assert.strictEqual(co.dry_run_of("b@x.co"), true, "dry subscriber stays dry in the same coalition");
+
+  // Differing render inputs (lookback) form separate coalitions.
+  const c = validate_config(sub(12, "c@x.co", { lookback_days: 30 }));
+  assert.strictEqual(coalesce_user_rows([a, c]).length, 2, "different lookbacks never share a render");
+
+  // An all_users row widens the audience to everyone (allowed null); named
+  // subscribers still attribute to their own rows, everyone else to the
+  // all_users row.
+  const all = validate_config(sub(13, "ops@x.co", { scope: { all_users: true } }));
+  const [wide] = coalesce_user_rows([a, all]);
+  assert.strictEqual(wide.allowed, null);
+  assert.strictEqual(wide.owner_of("a@x.co"), 10);
+  assert.strictEqual(wide.owner_of("stranger@x.co"), 13);
+
+  // A duplicate subscription (two rows naming one email) attributes to the
+  // FIRST row by id — one delivery, one owner, never two emails.
+  const dup = validate_config(sub(14, "a@x.co"));
+  const [merged] = coalesce_user_rows([dup, a]);
+  assert.strictEqual(merged.owner_of("a@x.co"), 10);
+  assert.deepStrictEqual(merged.allowed, ["a@x.co"], "one audience entry despite two rows");
 }
 
 // --- smtp_outcomes (round-2 F1) ----------------------------------------------

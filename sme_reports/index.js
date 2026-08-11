@@ -209,25 +209,56 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
 // the scheduled DB-config runner (run_scheduled.js), which calls it once
 // per scope-group. Does NOT close the shared Chromium instance — that is
 // the entry point's job, since a scheduled run executes many batches.
-const run_batch = async (run_log, job_id, loaded, scope_resolution) => {
+const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) => {
     const { requests, batch_email, summary_only, excluded, out_dir, lookback_days } = loaded;
+    // opts.concurrency: parallel per-system computation (worker pool over
+    // the request list; results stay in request order). Default 1 keeps
+    // file-mode behavior byte-identical. opts.cache: a per-RUN map shared
+    // across scheduled scope-units — the same system in the same window
+    // computes once however many customer documents contain it; failures
+    // cache too (the same dead system must not re-fetch per document).
+    const { concurrency = 1, cache = null } = opts;
     // Null = explicit-date windows: no chosen period, no tag (F3).
     const period_tag =
       lookback_days && lookback_days !== 30 ? `-${lookback_days}d` : "";
+    const slots = new Array(requests.length);
+    let cursor = 0;
+    const worker = async () => {
+      for (;;) {
+        const i = cursor++;
+        if (i >= requests.length) return;
+        const request = requests[i];
+        const key = cache
+          ? `${request.system_id}|${request.window.start.toMillis()}|${request.window.end.toMillis()}`
+          : null;
+        if (key && cache.has(key)) {
+          slots[i] = cache.get(key);
+          continue;
+        }
+        let out;
+        // Per-report try/catch so one failure doesn't kill a bulk batch.
+        try {
+          out = { ok: true, result: await run_one(run_log, job_id, request) };
+        } catch (error) {
+          out = { ok: false, message: error.message };
+          const note = { job_id, system_id: request.system_id };
+          await addLogEvent(E, run_log, "run_sme_report", cat, note, error);
+          console.error(
+            `sme_report failed for ${request.system_id}: ${error.message}`
+          );
+        }
+        if (key) cache.set(key, out);
+        slots[i] = out;
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.max(1, Math.min(concurrency, requests.length || 1)) }, worker)
+    );
     const results = [];
     const failures = [];
-    for (const request of requests) {
-      // Per-report try/catch so one failure doesn't kill a bulk batch.
-      try {
-        results.push(await run_one(run_log, job_id, request));
-      } catch (error) {
-        failures.push({ system_id: request.system_id, message: error.message });
-        const note = { job_id, system_id: request.system_id };
-        await addLogEvent(E, run_log, "run_sme_report", cat, note, error);
-        console.error(
-          `sme_report failed for ${request.system_id}: ${error.message}`
-        );
-      }
+    for (let i = 0; i < slots.length; i++) {
+      if (slots[i].ok) results.push(slots[i].result);
+      else failures.push({ system_id: requests[i].system_id, message: slots[i].message });
     }
 
     let fleet_pdf_path = null;

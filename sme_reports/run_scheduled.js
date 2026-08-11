@@ -7,6 +7,7 @@ const { materialize_scoped_requests } = require("./request_loader");
 const { resolve_scope } = require("./scope");
 const {
   validate_config,
+  coalesce_user_rows,
   resolve_audience,
   plan_documents,
   access_covers,
@@ -197,62 +198,79 @@ const run_customer_or_fleet = async (run_log, job_id, cfg, slot, counts) => {
     );
 };
 
-// The weekly flagship, per the decided per-customer paradigm: the document
-// unit is (customer × system-subset) — never a cross-customer merge. Each
-// active, notifiable user's magnet scope is partitioned by owning
-// customer; users sharing a (customer, subset) share one rendered
-// document; each user receives ONE digest email carrying all their
-// customer documents (zipped when more than one, size-chunked into parts
-// only when the attachments outgrow the message budget). The {"users":
-// [...]} scope variant narrows the audience to named addresses — the
-// pilot mechanism.
-const run_user_summary = async (run_log, job_id, cfg, slot) => {
+// The weekly flagship, per the decided per-customer + SUBSCRIPTION
+// paradigm: every user_summary row firing on a slot joins a COALITION
+// (rows sharing lookback/options), whose combined audience is planned and
+// rendered ONCE — shared (customer, subset) documents render a single
+// time however many subscribers they serve — while each user's sends rows
+// attribute to THEIR OWN config row (coalition.owner_of) and honor their
+// own row's dry_run gate. The per-run cache means a system computes once
+// per window across every document that contains it, and run_batch runs
+// systems concurrently.
+const RENDER_CONCURRENCY = 4;
+
+const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
+  const base_cfg = coalition.cfgs[0]; // render inputs identical by construction
+  const ids = coalition.cfgs.map((c) => c.id).join(",");
   const { users, mag_ids, system_customer } = await load_audience_pool();
-  const allowed =
-    cfg.scope && Array.isArray(cfg.scope.users) ? cfg.scope.users : null;
-  const audience = resolve_audience(users, mag_ids, allowed);
-  if (!audience.length) {
-    // A pilot scope naming an inactive/opted-out user must say so loudly
-    // rather than silently doing nothing.
+  const audience = resolve_audience(users, mag_ids, coalition.allowed);
+
+  // A named subscriber/pilot who did NOT resolve gets an error row — a
+  // subscription that silently produces nothing is unanswerable support
+  // load. (all_users rows keep silent-filter semantics: that is the
+  // standing filters working, not a subscription failing.)
+  const resolved = new Set(audience.map((a) => String(a.email).toLowerCase()));
+  if (coalition.allowed) {
+    for (const email of coalition.allowed) {
+      if (resolved.has(email)) continue;
+      await record_send({
+        config_id: coalition.owner_of(email),
+        slot,
+        recipient: email,
+        recipient_role: "to",
+        scope_hash: null,
+        document: null,
+        status: "error",
+        error: "subscriber is not an active, notifiable user with magnet access"
+      }).catch(() => {});
+    }
+  }
+  if (!audience.length)
     throw new Error(
-      allowed
-        ? `scope users [${allowed.join(", ")}] resolved to no active, notifiable magnet users`
+      coalition.allowed
+        ? `no subscriber in [${coalition.allowed.join(", ")}] is an active, notifiable magnet user`
         : "audience resolved to no active, notifiable magnet users"
     );
-  }
+
   const { units, user_units } = plan_documents(audience, system_customer);
   const deliveries = [...user_units.values()].reduce((n, k) => n + k.length, 0);
-  const note = {
-    job_id,
-    config_id: cfg.id,
-    audience: audience.length,
-    units: units.length,
-    deliveries
-  };
+  const any_live = audience.some((a) => coalition.dry_run_of(a.email) === false);
+  const note = { job_id, config_ids: ids, audience: audience.length, units: units.length, deliveries };
   await addLogEvent(I, run_log, "run_user_summary", det, note, null);
   console.log(
-    `config ${cfg.id}: audience ${audience.length} user${audience.length === 1 ? "" : "s"} → ${units.length} customer document${units.length === 1 ? "" : "s"} (${deliveries} deliveries)${cfg.dry_run ? " (dry run)" : ""}`
+    `config ${ids}: audience ${audience.length} user${audience.length === 1 ? "" : "s"} → ${units.length} customer document${units.length === 1 ? "" : "s"} (${deliveries} deliveries)${any_live ? "" : " (dry run)"}`
   );
 
-  // Phase 1 — render each (customer, subset) document once, isolated: one
-  // customer's bad data must not sink the other ninety-nine documents.
+  // Phase 1 — render each (customer, subset) document once, isolated,
+  // with concurrent per-system computation and the shared per-run cache.
+  const raw_cfg = { ...base_cfg, dry_run: !any_live }; // gates history sidecars
   const rendered = new Map();
   for (const unit of units) {
     try {
       const resolution = await resolve_scope({ system_ids: unit.system_ids });
-      const raw = config_to_raw(cfg, { recipients: unit.users });
+      const raw = config_to_raw(raw_cfg, { recipients: unit.users });
       const loaded = materialize_scoped_requests(raw, resolution.system_ids);
-      const batch = await run_batch(run_log, job_id, loaded, resolution);
+      const batch = await run_batch(run_log, job_id, loaded, resolution, {
+        concurrency: RENDER_CONCURRENCY,
+        cache
+      });
       if (!batch.fleet_pdf_path)
         throw new Error("unit produced no summary document");
-      const doc = cfg.dry_run
-        ? path.basename(batch.fleet_pdf_path)
-        : archive_delivered(batch.fleet_pdf_path, cfg.id);
       const graded = batch.results.map((r) => ({ ...(r.summary || {}), archetype: r.archetype }));
       rendered.set(unit.key, {
         ok: true,
         unit,
-        doc,
+        archived_doc: null, // archived lazily, at first LIVE delivery
         pdf_path: batch.fleet_pdf_path,
         counts: {
           systems: batch.results.length,
@@ -262,22 +280,30 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
       });
     } catch (error) {
       rendered.set(unit.key, { ok: false, unit, error: error.message });
-      await addLogEvent(E, run_log, "run_user_summary", cat, { job_id, config_id: cfg.id, customer: unit.customer_id, scope_hash: unit.scope_hash }, error);
+      await addLogEvent(E, run_log, "run_user_summary", cat, { job_id, config_ids: ids, customer: unit.customer_id, scope_hash: unit.scope_hash }, error);
       console.error(`customer document ${unit.customer_name} (${unit.scope_hash}) failed: ${error.message}`);
     }
   }
   const failed_units = [...rendered.values()].filter((r) => !r.ok).length;
 
-  // Phase 2 — one digest per user, isolated. Partial delivery is right:
-  // one failed customer document yields an error row for that unit while
-  // the user's other documents still go out.
+  // Phase 2 — one digest per user, isolated; sends attribute to the
+  // user's OWN config row and honor their own dry_run gate. Partial
+  // delivery is deliberate: one failed customer document yields an error
+  // row while the user's other documents still go out.
   const caches = await load_user_caches([...user_units.keys()]);
   const user_failures = [];
   let sent_docs = 0;
   for (const [email, keys] of user_units) {
+    const cfg_id = coalition.owner_of(email);
+    const user_dry = coalition.dry_run_of(email);
     const counts = { sent: 0, send_errors: 0, persist_errors: 0 };
     const outcomes = new Set();
-    const base = { config_id: cfg.id, slot };
+    const base = { config_id: cfg_id, slot };
+    const doc_of = (r) => {
+      if (user_dry) return path.basename(r.pdf_path);
+      if (!r.archived_doc) r.archived_doc = archive_delivered(r.pdf_path, cfg_id);
+      return r.archived_doc;
+    };
     const record_unit = async (key, extra) => {
       outcomes.add(key);
       const r = rendered.get(key);
@@ -287,7 +313,7 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
           recipient: email,
           recipient_role: "to",
           scope_hash: r.unit.scope_hash,
-          document: r.ok ? r.doc : null,
+          document: r.ok ? doc_of(r) : null,
           ...extra
         });
       } catch (error) {
@@ -312,7 +338,7 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
         }
         deliverable.push(r);
       }
-      if (cfg.dry_run) {
+      if (user_dry) {
         for (const r of deliverable) await record_unit(r.unit.key, { status: "dry_run" });
       } else if (deliverable.length) {
         const send_digest_email = require("./output/send_digest_email");
@@ -320,14 +346,14 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
           run_log,
           job_id,
           email,
-          cfg.cc_list,
+          [],
           deliverable.map((r) => ({
             key: r.unit.key,
             customer_name: r.unit.customer_name,
             pdf_path: r.pdf_path,
             counts: r.counts
           })),
-          { lookback_days: cfg.lookback_days, out_dir: path.join(__dirname, "out") }
+          { lookback_days: base_cfg.lookback_days, out_dir: path.join(__dirname, "out") }
         );
         // Grade each unit from ITS part's SMTP result.
         for (const part of parts) {
@@ -352,10 +378,8 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
         );
     } catch (error) {
       user_failures.push({ email, message: error.message });
-      await addLogEvent(E, run_log, "run_user_summary", cat, { job_id, config_id: cfg.id, recipient: email }, error);
+      await addLogEvent(E, run_log, "run_user_summary", cat, { job_id, config_id: cfg_id, recipient: email }, error);
       console.error(`digest for ${email} failed: ${error.message}`);
-      // Units without a recorded outcome get error rows — never a second
-      // row for one already recorded.
       for (const key of keys) {
         if (outcomes.has(key)) continue;
         outcomes.add(key);
@@ -365,7 +389,7 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
           recipient: email,
           recipient_role: "to",
           scope_hash: r ? r.unit.scope_hash : null,
-          document: r && r.ok ? r.doc : null,
+          document: null,
           status: "error",
           error: error.message
         }).catch(() => {});
@@ -403,22 +427,39 @@ const run_scheduled = async (run_log, opts = {}) => {
     console.log(`slot ${slot}: ${rows.length} config row${rows.length === 1 ? "" : "s"}`);
 
     const row_failures = [];
+    const user_cfgs = [];
     for (const row of rows) {
       // Per-row isolation: one bad config never sinks the others.
       try {
         const cfg = validate_config(row);
         // Operator --dry-run forces the safe path regardless of the row.
         if (opts.force_dry_run) cfg.dry_run = true;
-        if (cfg.kind === "user_summary")
-          await run_user_summary(run_log, job_id, cfg, slot);
-        else {
-          const counts = { sent: 0, send_errors: 0, persist_errors: 0 };
-          await run_customer_or_fleet(run_log, job_id, cfg, slot, counts);
+        if (cfg.kind === "user_summary") {
+          user_cfgs.push(cfg); // coalesced below
+          continue;
         }
+        const counts = { sent: 0, send_errors: 0, persist_errors: 0 };
+        await run_customer_or_fleet(run_log, job_id, cfg, slot, counts);
       } catch (error) {
         row_failures.push({ id: row.id, message: error.message });
         await addLogEvent(E, run_log, "run_scheduled", cat, { job_id, config_id: row.id }, error);
         console.error(`config ${row.id} failed: ${error.message}`);
+      }
+    }
+    // All user_summary rows on this slot coalesce: one audience, one plan,
+    // shared renders, per-subscription attribution. The per-run cache also
+    // spans coalitions (differing lookbacks never share keys anyway).
+    if (user_cfgs.length) {
+      const cache = new Map();
+      for (const coalition of coalesce_user_rows(user_cfgs)) {
+        try {
+          await run_user_summary(run_log, job_id, coalition, slot, cache);
+        } catch (error) {
+          for (const cfg of coalition.cfgs)
+            row_failures.push({ id: cfg.id, message: error.message });
+          await addLogEvent(E, run_log, "run_scheduled", cat, { job_id, config_ids: coalition.cfgs.map((c) => c.id) }, error);
+          console.error(`user_summary coalition [${coalition.cfgs.map((c) => c.id).join(",")}] failed: ${error.message}`);
+        }
       }
     }
     if (row_failures.length)

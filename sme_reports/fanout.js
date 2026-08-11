@@ -68,19 +68,28 @@ const validate_config = (row) => {
   // (derived recipients for customer/fleet summaries are a later feature —
   // rejected loudly, never silently narrowed).
   if (row.report_kind === "user_summary") {
-    const s = row.scope || {};
-    const keys = Object.keys(s);
-    // Two audience shapes: the full derived audience, or a NAMED subset —
-    // the pilot mechanism ("send only to me" runs the whole per-customer
-    // paradigm for the listed users alone).
-    const is_all = s.all_users === true && keys.length === 1;
-    const is_named =
-      keys.length === 1 &&
-      Array.isArray(s.users) &&
-      s.users.length > 0 &&
-      s.users.every((u) => EMAIL_RE.test(String(u)));
-    if (!is_all && !is_named)
-      fail(`${at}: user_summary requires scope {"all_users": true} or {"users": ["a@b.co", …]}`);
+    // Three audience shapes, most specific first:
+    //   scope absent/null      -> a SUBSCRIPTION: the audience is the row's
+    //                             AUTHOR. This is the frontend contract —
+    //                             one row per subscribed user, owned by
+    //                             them, no scope JSON to construct.
+    //   {"users": [...]}       -> named subset (pilots, admin sends).
+    //   {"all_users": true}    -> the full derived audience (admin tool).
+    const s = row.scope;
+    if (s === null || s === undefined) {
+      if (!EMAIL_RE.test(String(row.author)))
+        fail(`${at}: a subscription row's author must be an email address, got "${row.author}"`);
+    } else {
+      const keys = Object.keys(s);
+      const is_all = s.all_users === true && keys.length === 1;
+      const is_named =
+        keys.length === 1 &&
+        Array.isArray(s.users) &&
+        s.users.length > 0 &&
+        s.users.every((u) => EMAIL_RE.test(String(u)));
+      if (!is_all && !is_named)
+        fail(`${at}: user_summary scope must be absent (subscription = author), {"users": […]}, or {"all_users": true}`);
+    }
     if (row.recipient_mode !== "derived")
       fail(`${at}: user_summary requires recipient_mode "derived"`);
     // Review B round-1 F1 (blocker): a CC on a derived row would ride
@@ -105,7 +114,13 @@ const validate_config = (row) => {
   return {
     id: row.id,
     kind: row.report_kind,
-    scope: row.scope || null,
+    // A subscription row canonicalizes to a named-users scope of its
+    // author, so everything downstream has ONE audience representation.
+    scope:
+      row.report_kind === "user_summary" && (row.scope === null || row.scope === undefined)
+        ? { users: [String(row.author)] }
+        : row.scope || null,
+    author: row.author,
     lookback_days: row.lookback_days,
     options,
     recipient_mode: row.recipient_mode,
@@ -113,6 +128,55 @@ const validate_config = (row) => {
     cc_list,
     dry_run: row.dry_run !== false
   };
+};
+
+// Slot-level coalescing of user_summary rows (efficiency decision,
+// 2026-08-11): N subscription rows firing on one slot become ONE combined
+// audience and ONE document plan — shared (customer, subset) documents
+// render once across all subscribers — while every user's sends rows
+// still attribute to THEIR OWN config row. Rows only coalesce when their
+// render inputs agree (lookback + options); differing rows form separate
+// coalitions. Returns [{ cfgs, allowed, owner_of, dry_run_of }] where
+//   allowed    null = full audience (an all_users row is present),
+//              else the union of named/subscribed addresses (lowercased)
+//   owner_of   (email) -> config id to attribute deliveries to: the row
+//              that NAMED the user (first by id), else the all_users row
+//   dry_run_of (email) -> that owning row's dry_run gate
+const coalesce_user_rows = (cfgs) => {
+  const groups = new Map();
+  for (const cfg of [...cfgs].sort((a, b) => a.id - b.id)) {
+    const key = `${cfg.lookback_days}|${JSON.stringify(cfg.options)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(cfg);
+  }
+  return [...groups.values()].map((group) => {
+    const named = new Map(); // email(lower) -> owning cfg
+    let all_row = null;
+    for (const cfg of group) {
+      if (cfg.scope.all_users === true) {
+        if (!all_row) all_row = cfg;
+        continue;
+      }
+      for (const u of cfg.scope.users) {
+        const key = String(u).toLowerCase();
+        if (!named.has(key)) named.set(key, cfg);
+      }
+    }
+    const owner_of = (email) => {
+      const cfg = named.get(String(email).toLowerCase()) || all_row;
+      return cfg ? cfg.id : null;
+    };
+    const dry_run_of = (email) => {
+      const cfg = named.get(String(email).toLowerCase()) || all_row;
+      return cfg ? cfg.dry_run : true;
+    };
+    return {
+      cfgs: group,
+      allowed: all_row ? null : [...named.keys()],
+      owner_of,
+      dry_run_of
+    };
+  });
 };
 
 // public.users rows -> the weekly audience: active, notifiable, and able
@@ -243,6 +307,7 @@ const smtp_outcomes = (info, emails) => {
 
 module.exports = {
   validate_config,
+  coalesce_user_rows,
   resolve_audience,
   group_by_scope,
   plan_documents,

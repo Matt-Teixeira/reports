@@ -35,6 +35,18 @@ with send-status recording. Decisions below were made with the user on
   scope variant pilots the full paradigm for named addresses only.
   (The original one-merged-document-per-user design shipped first and
   was replaced before launch.)
+- **SUBSCRIPTIONS — decided 2026-08-11: `alert.sme_reports` is the
+  subscription table.** A `user_summary` row with no scope subscribes its
+  AUTHOR: the frontend "subscribe" insert is just (author, report_kind,
+  lookback_days, email_schedule, enabled) — unsubscribe disables/deletes
+  the row; per-user cadence comes free from per-row schedules; duplicate
+  authors across rows are expected (a row = report type × owner, the
+  alert.reports convention). Launch posture: **nobody receives the
+  weekly without a subscription row.** Efficiency (same decision):
+  same-slot user_summary rows coalesce into one plan (shared renders,
+  per-subscription sends attribution and per-row dry_run gates), systems
+  compute once per window via a per-run cache, and run_batch runs
+  systems concurrently (worker pool, scheduled runs only).
 - **Send-status recording (`alert.sme_report_sends`) lands in the same
   phase**, written from the fan-out send loop.
 - **Safety defaults**: `enabled = false` and `dry_run = true` on new
