@@ -1506,6 +1506,43 @@ const rec = (over = {}) => ({
   assert.ok(!html.includes("+0.0"), "a null delta must not read as zero");
 }
 
+// --- scoped (customer-facing) summary variant (plan A2) ---------------------
+{
+  const scope = {
+    label: "Acme Health Network",
+    detail: { kind: "customer_id", customers: 1, sites: 3, systems: 5 }
+  };
+  const records = [
+    rec({ system_id: "SME90001", archetype: "compressor_stop_ongoing" }),
+    rec({ system_id: "SME90002", vendor_key: "GE", manufacturer: "GE" }),
+    rec({ system_id: "SME90003" }),
+    rec({ system_id: "SME90004" })
+  ];
+  const failures = [
+    { system_id: "SME90005", message: "no GE monitor data for SME90005 in the requested period" }
+  ];
+  const vm = build_fleet_model(records, failures, { scope });
+  assert.strictEqual(vm.title, "Magnet Health Summary — Acme Health Network");
+  const html = build_fleet_page(vm);
+  assert.ok(html.includes("<h1>Magnet Health Summary — Acme Health Network</h1>"), "scoped h1");
+  assert.ok(!html.includes("Fleet Magnet Health Summary"), "scoped document never says fleet");
+  assert.ok(html.includes("% of these systems"), "scoped rollup wording");
+  assert.ok(!html.includes("% of fleet"), "no fleet wording on a scoped page");
+  assert.ok(html.includes("· 3 sites ·"), "cover states the scope resolution");
+  // Customer-facing failure reason: the fact, not the pipeline.
+  assert.ok(
+    html.includes("no monitor data received in the requested period"),
+    "vendor-variant tokens stripped from customer-facing reasons"
+  );
+  assert.ok(!html.includes("no GE monitor data"), "internal reason wording absent");
+  // The internal document is untouched: fleet title, fleet wording,
+  // vendor-token reasons.
+  const internal = build_fleet_page(build_fleet_model(records, failures, {}));
+  assert.ok(internal.includes("<h1>Fleet Magnet Health Summary</h1>"));
+  assert.ok(internal.includes("% of fleet"));
+  assert.ok(internal.includes("no GE monitor data in the requested period"));
+}
+
 // --- full-scale pagination + artifacts --------------------------------------
 {
   const VENDORS = [
@@ -1654,6 +1691,25 @@ const rec = (over = {}) => ({
   const html_path = write_html(out_dir, "dev-fleet-summary", html);
   assert.ok(fs.existsSync(html_path));
 
+  // A measured SCOPED document too (plan A2): a realistic customer-sized
+  // slice — including the overlay and data-issue rows at indices 16–31 —
+  // through the same geometry pass, since the scoped cover carries
+  // different masthead content and its tables must obey the same
+  // truncation rules.
+  const scoped_html = build_fleet_page(
+    build_fleet_model(
+      records.slice(16, 32),
+      [{ system_id: "SME99991", message: "no PHILIPS monitor data for SME99991 in the requested period" }],
+      {
+        scope: {
+          label: "Scoped Fixture Health Network",
+          detail: { kind: "customer_id", customers: 1, sites: 4, systems: 16 }
+        }
+      }
+    )
+  );
+  const scoped_path = write_html(out_dir, "dev-scoped-summary", scoped_html);
+
   // Render a real PDF and MEASURE the result. Page-break placement is
   // invisible in the HTML string, and `.page` is a fixed 11in with
   // overflow:hidden — content past the bottom is clipped without any error.
@@ -1673,7 +1729,14 @@ const rec = (over = {}) => ({
       try {
         const page = await browser.newPage();
         await page.setViewport({ width: 816, height: 1056 });
-        await page.goto(`file://${html_path}`, { waitUntil: "networkidle0" });
+        // Both artifacts go through the same geometry pass. The fullness
+        // guard applies to the internal fleet document only: a small
+        // customer's scoped summary legitimately produces sparse pages.
+        for (const doc of [
+          { name: "fleet", file: html_path, dense: true },
+          { name: "scoped", file: scoped_path, dense: false }
+        ]) {
+        await page.goto(`file://${doc.file}`, { waitUntil: "networkidle0" });
         const measured = await page.evaluate(() => {
           const FOOTER_PX = 0.38 * 96; // .foot height, reserved at the bottom
           return [...document.querySelectorAll(".page")].map((pg, i) => {
@@ -1754,18 +1817,20 @@ const rec = (over = {}) => ({
         assert.strictEqual(
           clipped.reduce((n, m) => n + m.overflowing, 0),
           0,
-          `rows clipped off the page bottom: ${JSON.stringify(clipped)}`
+          `${doc.name}: rows clipped off the page bottom: ${JSON.stringify(clipped)}`
         );
         const spilled = measured.filter((m) => m.lowest > m.usable);
         assert.strictEqual(
           spilled.length,
           0,
-          `content overruns the footer on ${spilled.length} page(s): ${JSON.stringify(spilled)}`
+          `${doc.name}: content overruns the footer on ${spilled.length} page(s): ${JSON.stringify(spilled)}`
         );
         // Every page should also be reasonably full — a document that never
         // overflows because it wastes half of each sheet is its own bug.
-        const worst = Math.max(...measured.map((m) => m.lowest / m.usable));
-        assert.ok(worst > 0.55, `no page uses more than ${Math.round(worst * 100)}% of its height`);
+        if (doc.dense) {
+          const worst = Math.max(...measured.map((m) => m.lowest / m.usable));
+          assert.ok(worst > 0.55, `no page uses more than ${Math.round(worst * 100)}% of its height`);
+        }
 
         // Columns that must stay legible in full. SYSTEMS is here too: the
         // failure rows are chunked precisely so every failed id stays named,
@@ -1785,8 +1850,9 @@ const rec = (over = {}) => ({
         assert.deepStrictEqual(
           squeezed,
           {},
-          `columns truncated that must not be: ${JSON.stringify(squeezed)}`
+          `${doc.name}: columns truncated that must not be: ${JSON.stringify(squeezed)}`
         );
+        }
       } finally {
         await browser.close();
       }

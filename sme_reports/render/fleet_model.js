@@ -184,7 +184,7 @@ const attention_reason = (r) => {
 
 // Failures collapse to a reason -> systems map: 17 systems with no data in
 // the window is one fact, not 17.
-const group_failures = (failures) => {
+const group_failures = (failures, { customer_facing = false } = {}) => {
   const by_reason = new Map();
   for (const f of failures || []) {
     // Reasons embed the system id ("no PHILIPS monitor data for SME01234 in
@@ -192,9 +192,16 @@ const group_failures = (failures) => {
     // and drop the "for <system>" clause entirely rather than rewriting it to
     // "for that system", since the row already names them in its own column
     // and the reason has to fit on one line.
-    const reason = String(f.message)
+    let reason = String(f.message)
       .replace(/\s*\bfor\s+SME\d+\b/g, "")
       .replace(/\bSME\d+\b/g, "that system");
+    // A scoped (customer-facing) document states the fact, not the
+    // pipeline: vendor-variant tokens in the raw error are internal detail.
+    if (customer_facing)
+      reason = reason.replace(
+        /^no [A-Z_]+ monitor data\b/,
+        "no monitor data received"
+      );
     if (!by_reason.has(reason)) by_reason.set(reason, []);
     by_reason.get(reason).push(f.system_id);
   }
@@ -253,6 +260,12 @@ const data_issue_readings = (r) => {
 const build_fleet_model = (records, failures, meta = {}) => {
   const rows = [...(records || [])];
   const failed = failures || [];
+  // A scoped document (meta.scope = {label, detail} from scope.js) is the
+  // customer-facing variant: it titles itself by the scope, states the
+  // resolution on the cover, and speaks of "these systems" rather than
+  // "the fleet". Everything else — rules, tiers, honesty about failures
+  // and exclusions — is identical by construction.
+  const scope = meta.scope || null;
 
   const attention = rows.filter(is_attention).sort(attention_sort);
   const urgent = attention.filter(is_urgent);
@@ -310,7 +323,7 @@ const build_fleet_model = (records, failures, meta = {}) => {
   const attention_pages = chunk_rows(attention, ATTENTION_FIRST_PAGE, ATTENTION_PER_PAGE);
   const data_issue_pages = chunk_rows(data_issues, FAILURES_PER_PAGE, FAILURES_PER_PAGE);
   const failure_pages = chunk_rows(
-    expand_failures(group_failures(failed)),
+    expand_failures(group_failures(failed, { customer_facing: !!scope })),
     FAILURES_PER_PAGE,
     FAILURES_PER_PAGE
   );
@@ -336,7 +349,10 @@ const build_fleet_model = (records, failures, meta = {}) => {
   const window_end = rows.length ? Math.max(...rows.map((r) => r.window_end)) : null;
 
   return {
-    title: "Fleet Magnet Health Summary",
+    title: scope
+      ? `Magnet Health Summary — ${scope.label}`
+      : "Fleet Magnet Health Summary",
+    scope,
     analyzed_date: meta.analyzed_date || fmt.iso_date(Date.now()),
     window_span:
       window_start === null
@@ -359,7 +375,7 @@ const build_fleet_model = (records, failures, meta = {}) => {
     data_issue_reason,
     data_issue_readings,
     failure_pages,
-    failures: group_failures(failed),
+    failures: group_failures(failed, { customer_facing: !!scope }),
     failure_count: failed.length,
     // Deliberate removals, stated rather than silent: {ids, note} or null.
     excluded: excluded_meta,

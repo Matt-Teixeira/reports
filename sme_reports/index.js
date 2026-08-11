@@ -123,16 +123,23 @@ const run_one = async (run_log, job_id, request) => {
 // Builds the multi-page fleet summary from the distilled per-system records.
 // A failure here must not sink the batch — the per-system PDFs are already
 // on disk and the summary email can still go out without an attachment.
-const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, excluded) => {
+const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, excluded, scope) => {
   const { build_fleet_model } = require("./render/fleet_model");
   const { build_fleet_page } = require("./render/fleet_page");
   const { render_pdf_document } = require("./output/render_pdf");
   try {
     const records = results.map((r) => r.summary).filter(Boolean);
-    const vm = build_fleet_model(records, failures, { excluded });
+    const vm = build_fleet_model(records, failures, { excluded, scope });
     const date = new Date().toISOString().slice(0, 10);
     const html = build_fleet_page(vm);
-    const base = `Avante-Fleet-Magnet-Health-${date}`;
+    // Scoped documents are named by their scope so a customer summary can
+    // never collide with (or be mistaken for) the internal fleet document.
+    const slug = scope
+      ? scope.label.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+      : null;
+    const base = slug
+      ? `Avante-${slug}-Magnet-Health-Summary-${date}`
+      : `Avante-Fleet-Magnet-Health-${date}`;
     // The HTML lands next to the PDF under the same name — it is the only
     // way to read the document without a PDF viewer, and page breaks are
     // the thing most likely to need a look. write_html is not used here: it
@@ -223,7 +230,8 @@ const run_sme_report = async (run_log, request_path) => {
           results,
           failures,
           out_dir,
-          excluded
+          excluded,
+          scope_resolution
         );
         // A soft failure is right for a normal batch — the per-system briefs
         // are still valid deliverables. In summary-only mode there are none,

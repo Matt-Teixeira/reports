@@ -119,7 +119,7 @@ table.vendor thead th:nth-child(6) { border-left: .6pt solid rgba(255,255,255,.3
 `;
 
 const page_wrap = (vm, n, body) => `<div class="page">
-<div class="hdr">${n === 1 ? `<div class="brand"></div>` : `<div class="wordmark">Avante</div>`}<div class="r">Fleet Magnet Health Summary<br><b>${esc(vm.analyzed_date)}</b></div></div>
+<div class="hdr">${n === 1 ? `<div class="brand"></div>` : `<div class="wordmark">Avante</div>`}<div class="r">${esc(vm.title)}<br><b>${esc(vm.analyzed_date)}</b></div></div>
 <div class="band"></div>
 ${body}
 <div class="foot"><span>Avante · Moving Healthcare Forward</span><span>${esc(vm.window_span)} · page ${n} of ${vm.page_count}</span></div>
@@ -406,7 +406,7 @@ const overview_body = (vm, rows, first) => {
   const rollup = vm.condition_rollup
     .map(
       (c) =>
-        `<div class="c"><div class="k">${esc(c.label)}</div><div class="v" style="color:${c.color || COLORS.grey};">${c.count}</div><div class="s">${c.pct}% of fleet</div></div>`
+        `<div class="c"><div class="k">${esc(c.label)}</div><div class="v" style="color:${c.color || COLORS.grey};">${c.count}</div><div class="s">${c.pct}% of ${vm.scope ? "these systems" : "fleet"}</div></div>`
     )
     .join("");
 
@@ -416,9 +416,16 @@ const overview_body = (vm, rows, first) => {
 
   // The masthead and rollup ride the first overview page only; continuation
   // pages carry the attention table alone.
+  // A scoped cover states the resolution — who this document is about and
+  // how many sites/systems that became — so a reader can spot a system
+  // missing from THEIR summary as loudly as the fleet spots one missing
+  // from the fleet.
+  const scope_line = vm.scope
+    ? ` · ${vm.scope.detail.sites} site${vm.scope.detail.sites === 1 ? "" : "s"}`
+    : "";
   let body = first
-    ? `<h1>Fleet Magnet Health Summary</h1>` +
-      `<div class="sub">${esc(vm.window_span)} · ${vm.total} systems · ${esc(vendors || "no vendor sections")}${vm.excluded ? ` · ${vm.excluded.ids.length} excluded` : ""}</div>` +
+    ? `<h1>${esc(vm.title)}</h1>` +
+      `<div class="sub">${esc(vm.window_span)} · ${vm.total} systems${scope_line} · ${esc(vendors || "no vendor sections")}${vm.excluded ? ` · ${vm.excluded.ids.length} excluded` : ""}</div>` +
       `<div class="lead">${lead}</div>` +
       (rollup ? `<div class="roll">${rollup}</div>` : "")
     : "";
