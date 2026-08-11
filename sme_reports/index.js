@@ -204,33 +204,12 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
   }
 };
 
-const run_sme_report = async (run_log, request_path) => {
-  const job_id = uuidv4();
-  const { close_pdf_renderer } = require("./output/render_pdf");
-  try {
-    let loaded = load_requests(request_path);
-    let scope_resolution = null;
-    if (loaded.scoped) {
-      // Resolution is LOUD, never silent (PLAN-SCOPED-WEEKLY.md A1): the
-      // log and the console both state what the scope became, and a scope
-      // resolving to zero systems threw inside resolve_scope — a fatal
-      // request error, not an empty report.
-      const { resolve_scope } = require("./scope");
-      scope_resolution = await resolve_scope(loaded.scope);
-      const note = {
-        job_id,
-        scope: loaded.scope,
-        label: scope_resolution.label,
-        ...scope_resolution.detail,
-        system_ids: scope_resolution.system_ids
-      };
-      await addLogEvent(I, run_log, "resolve_scope", det, note, null);
-      console.log(
-        `scope: ${scope_resolution.label} — ${scope_resolution.detail.systems} systems ` +
-          `(${scope_resolution.detail.sites} sites, ${scope_resolution.detail.customers} customer${scope_resolution.detail.customers === 1 ? "" : "s"})`
-      );
-      loaded = materialize_scoped_requests(loaded.raw, scope_resolution.system_ids);
-    }
+// One assembled batch, end to end: per-system reports, then the batch
+// email / fleet-summary block. Shared by file-mode (run_sme_report) and
+// the scheduled DB-config runner (run_scheduled.js), which calls it once
+// per scope-group. Does NOT close the shared Chromium instance — that is
+// the entry point's job, since a scheduled run executes many batches.
+const run_batch = async (run_log, job_id, loaded, scope_resolution) => {
     const { requests, batch_email, summary_only, excluded, out_dir, lookback_days } = loaded;
     // Null = explicit-date windows: no chosen period, no tag (F3).
     const period_tag =
@@ -251,6 +230,7 @@ const run_sme_report = async (run_log, request_path) => {
       }
     }
 
+    let fleet_pdf_path = null;
     if (batch_email) {
       // The summary covers every system that produced facts. Only the
       // attachment email needs a PDF on disk, so that filter belongs to it
@@ -264,7 +244,6 @@ const run_sme_report = async (run_log, request_path) => {
         failures.length ||
         (excluded && excluded.ids.length > 0);
 
-      let fleet_pdf_path = null;
       if (batch_email.summary_pdf && has_content) {
         fleet_pdf_path = await build_fleet_summary(
           run_log,
@@ -322,6 +301,37 @@ const run_sme_report = async (run_log, request_path) => {
         );
       }
     }
+    return { results, failures, fleet_pdf_path, lookback_days };
+};
+
+const run_sme_report = async (run_log, request_path) => {
+  const job_id = uuidv4();
+  const { close_pdf_renderer } = require("./output/render_pdf");
+  try {
+    let loaded = load_requests(request_path);
+    let scope_resolution = null;
+    if (loaded.scoped) {
+      // Resolution is LOUD, never silent (PLAN-SCOPED-WEEKLY.md A1): the
+      // log and the console both state what the scope became, and a scope
+      // resolving to zero systems threw inside resolve_scope — a fatal
+      // request error, not an empty report.
+      const { resolve_scope } = require("./scope");
+      scope_resolution = await resolve_scope(loaded.scope);
+      const note = {
+        job_id,
+        scope: loaded.scope,
+        label: scope_resolution.label,
+        ...scope_resolution.detail,
+        system_ids: scope_resolution.system_ids
+      };
+      await addLogEvent(I, run_log, "resolve_scope", det, note, null);
+      console.log(
+        `scope: ${scope_resolution.label} — ${scope_resolution.detail.systems} systems ` +
+          `(${scope_resolution.detail.sites} sites, ${scope_resolution.detail.customers} customer${scope_resolution.detail.customers === 1 ? "" : "s"})`
+      );
+      loaded = materialize_scoped_requests(loaded.raw, scope_resolution.system_ids);
+    }
+    const { results } = await run_batch(run_log, job_id, loaded, scope_resolution);
     return results;
   } catch (error) {
     await addLogEvent(E, run_log, "run_sme_report", cat, { job_id }, error);
@@ -337,3 +347,4 @@ const run_sme_report = async (run_log, request_path) => {
 };
 
 module.exports = run_sme_report;
+module.exports.run_batch = run_batch;

@@ -153,6 +153,28 @@ document; an unchanged request file produces byte-equivalent output
 
 ## Phase B — DB config, fan-out, send status
 
+> **Status: BUILT 2026-08-11**, rollout in progress. B1 DDL applied by
+> the user and verified. B2–B4 implemented (`fanout.js` pure logic,
+> `config_loader.js` thin SQL, `run_batch` extracted and shared,
+> `run_scheduled.js`, CLI slot mode + `--slot/--config/--dry-run`).
+> B5: `dev/check_config.js` passes (six dev checks now); rollout ladder
+> steps 1–2 done live — empty slot no-ops with exit 0, and config row 1
+> (customer_summary, Lee Health, disabled + dry_run) rendered
+> `Avante-Lee-Health-bfd3299e-…-7d-…` and wrote a `dry_run` sends row
+> with zero emails. Remaining: step 3 (flip a row to real send at
+> internal test addresses), step 4 (enable the derived user_summary
+> audience), and the cron entry for the weekly slot.
+>
+> Noted optimization for later: user_summary scope-groups recompute
+> facts for systems shared across groups; a per-run facts cache would
+> cut the weekly render time substantially. Not built — correctness
+> first, measured cost later.
+>
+> v1 runner limits (validated loudly, documented in the DDL comments):
+> `briefs` kind, `include_briefs`, `exception_only`, and DERIVED
+> recipients for customer/fleet summaries are rejected as
+> not-yet-implemented rather than silently narrowed.
+
 ### B1. Schema (migration file `sql/sme_reports_config.sql`)
 
 ```sql

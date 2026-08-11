@@ -89,11 +89,7 @@ const rows_to_resolution = ({ kind, value }, rows) => {
     // Stable identity of the resolved SET, independent of the label: two
     // different scopes under one customer share a label but must never
     // share artifact names (review round-1 F2).
-    scope_hash: require("crypto")
-      .createHash("sha1")
-      .update([...system_ids].sort().join(","))
-      .digest("hex")
-      .slice(0, 8),
+    scope_hash: scope_set_hash(system_ids),
     detail: {
       kind,
       customers: customers.length,
@@ -102,6 +98,17 @@ const rows_to_resolution = ({ kind, value }, rows) => {
     }
   };
 };
+
+// One hash formula for a system-id SET, order-independent — shared by
+// scope resolution and the scheduled fan-out's scope-grouping so the
+// sends table's scope_hash and the artifact filenames can never disagree
+// about which document a hash names.
+const scope_set_hash = (ids) =>
+  require("crypto")
+    .createHash("sha1")
+    .update([...ids].sort().join(","))
+    .digest("hex")
+    .slice(0, 8);
 
 // The filename identity of a scoped run: human-readable slug + the
 // scope-set hash. The hash keeps same-label-different-scope runs (and
@@ -140,5 +147,6 @@ module.exports = {
   validate_scope,
   rows_to_resolution,
   resolve_scope,
+  scope_set_hash,
   scope_artifact_id
 };
