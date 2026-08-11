@@ -268,6 +268,19 @@ const {
   const monthly = materialize_scoped_requests(base, ["SME01096"]);
   assert.strictEqual(monthly.lookback_days, 30);
   assert.strictEqual(monthly.requests[0].window.lookback_days, 30);
+  // Round-3 F1: "window": null is a pre-existing request shape and must
+  // keep its historical 30-day default, not throw.
+  const null_window = load_and_mix({
+    reports: [
+      {
+        report_type: "magnet_health", system_id: "SME01096",
+        recipients: ["dev@example.com"], window: null,
+        output: { email: false, pdf: false }
+      }
+    ]
+  });
+  assert.strictEqual(null_window.requests[0].window.lookback_days, 30, "null window defaults like an absent one");
+  assert.strictEqual(null_window.lookback_days, 30);
   // Nonsense values fail loudly.
   for (const bad of [0, -7, 1.5, "7"])
     assert.throws(

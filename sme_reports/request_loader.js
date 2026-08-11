@@ -22,7 +22,11 @@ const parse_date = (value, field) => {
 // Window normalization on its own: the batch-period derivation needs the
 // EFFECTIVE window of entries that may later be excluded (round-2 F2), so
 // this cannot live only inside normalize_request.
-const window_of = (win = {}) => {
+const window_of = (win) => {
+  // || not a default parameter: "window": null appears in pre-existing
+  // request files and a default parameter only covers undefined — null
+  // must keep its historical 30-day-default behavior (round-3 F1).
+  win = win || {};
   const end = win.end
     ? parse_date(win.end, "window.end").endOf("day")
     : DateTime.utc().endOf("day");
