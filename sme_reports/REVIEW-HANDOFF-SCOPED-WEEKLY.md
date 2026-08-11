@@ -255,3 +255,29 @@ Live after fixes: the Lee Health probe renders
 `Avante-Lee-Health-bfd3299e-Magnet-Health-Summary-7d-2026-08-11` with
 "5 systems in scope · 5 analyzed · 4 sites" on the cover. All five dev
 checks pass.
+
+---
+
+## Round-2 outcome (2026-08-11) — all three findings fixed (`52165b0`)
+
+Verdict was SHIP WITH FIXES; all three fixed with regressions.
+
+| # | Fix | Regression test |
+|---|---|---|
+| R2-F1 | A summary batch requires one IDENTICAL normalized window (`{start, end}`), not merely one lookback — shifted same-lookback windows and disjoint explicit ranges are fatal; `window_of()` extracted so windows derive independently of full request normalization | `check_scope.js`: shifted 7-day rejection, disjoint-explicit rejection, identical-explicit acceptance (untagged) |
+| R2-F2 | The batch period falls back to the pre-exclusion CANDIDATES' windows when no request survives — all-excluded weekly runs keep `-7d` on the exclusion document, sidecar, and subject | `check_scope.js`: all-excluded 7-day batch retains `lookback_days: 7` with zero surviving requests |
+| R2-F3 | `customer_failure_reason` strips system ids itself; the scoped email (raw message in) and scoped PDF (grouped first) produce identical wording | `check_fleet.js`: raw-message classification equals the grouped PDF string |
+
+Fixture-audit closures: scoped fixture counts reconcile and are asserted
+(6 in scope = 4 analyzed + 2 failed); the artifact-id fixtures run
+end-to-end through the real `rows_to_resolution`; `scope_artifact_id`
+caps its slug at 48 chars (the hash carries identity) with a
+multi-customer-label test. Refactor-equivalence statement accepted as
+written. Still accepted: live SQL verification, scoped email message
+construction (classifier parity is asserted at the function seam),
+pre-refactor loader snapshots, end-to-end filename/sidecar assertions
+(covered by live probes recorded here).
+
+Live after round 2: the Lee Health 7-day probe re-renders identically
+(`…bfd3299e…-7d-…`, "5 systems in scope · 5 analyzed"). All five dev
+checks pass.
