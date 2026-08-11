@@ -11,6 +11,7 @@ const sql = (file) => {
 
 module.exports = {
   get_system_identity: sql("get-system-identity.sql"),
+  scope_systems: sql("scope-systems.sql"),
   philips_series: sql("philips-series.sql"),
   ge_mm3_series: sql("ge-mm3-series.sql"),
   ge_mm4_series: sql("ge-mm4-series.sql"),

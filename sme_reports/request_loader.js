@@ -100,21 +100,10 @@ const normalize_batch_email = (raw) => {
   };
 };
 
-// Accepts a single request, or { "reports": [ ... ], "batch_email": {...} }.
-// Returns { requests, batch_email, summary_only } — batch_email is null for
-// per-report sends.
-//
-// Top-level "summary_only": true produces ONLY the fleet summary — no
-// per-system HTML or PDF is written and no per-system email is sent. Every
-// system's facts are still computed; the expensive part that gets skipped is
-// rendering, which is where the ~6 s/report goes. That makes the fleet
-// summary cheap enough to schedule on its own.
-const load_requests = (request_path) => {
-  if (!request_path) fail("no request file path given");
-  const full_path = path.resolve(request_path);
-  if (!fs.existsSync(full_path)) fail(`request file not found: ${full_path}`);
-  const raw = JSON.parse(fs.readFileSync(full_path, "utf8"));
-  let list = Array.isArray(raw.reports) ? raw.reports : [raw];
+// The batch-assembly half, shared by explicit reports[] requests and
+// scope-synthesized ones: exclusions, batch-email defaults, summary-only
+// guards, per-report normalization, out_dir.
+const assemble = (raw, list) => {
   const batch_email = normalize_batch_email(raw.batch_email);
   const summary_only = raw.summary_only === true;
 
@@ -166,4 +155,54 @@ const load_requests = (request_path) => {
   return { requests, batch_email, summary_only, excluded, out_dir };
 };
 
-module.exports = { load_requests, normalize_request };
+// Accepts a single request, or { "reports": [ ... ], "batch_email": {...} },
+// or a SCOPED request: { "scope": {...}, "report_defaults": {...}, ... }
+// with no reports[] — the system list comes from the scope (customer_id /
+// site_ids / system_ids, resolved against customers→sites→systems by
+// scope.js). Returns { requests, batch_email, summary_only } for explicit
+// requests; for scoped ones returns { scoped: true, scope, raw } — the
+// caller resolves the scope (a DB round-trip this loader deliberately does
+// not make) and finishes via materialize_scoped_requests.
+//
+// Top-level "summary_only": true produces ONLY the fleet summary — no
+// per-system HTML or PDF is written and no per-system email is sent. Every
+// system's facts are still computed; the expensive part that gets skipped is
+// rendering, which is where the ~6 s/report goes. That makes the fleet
+// summary cheap enough to schedule on its own.
+const load_requests = (request_path) => {
+  if (!request_path) fail("no request file path given");
+  const full_path = path.resolve(request_path);
+  if (!fs.existsSync(full_path)) fail(`request file not found: ${full_path}`);
+  const raw = JSON.parse(fs.readFileSync(full_path, "utf8"));
+  if (raw.scope !== undefined) {
+    // One source of truth per request: a scope RESOLVES the system list, an
+    // explicit reports[] STATES it — carrying both invites silent drift
+    // between what was asked for and what runs.
+    if (raw.reports !== undefined)
+      fail("a request carries either scope or reports[], never both");
+    const { validate_scope } = require("./scope");
+    // Shape errors surface here, before any DB work.
+    return { scoped: true, scope: validate_scope(raw.scope), raw };
+  }
+  if (raw.report_defaults !== undefined)
+    fail("report_defaults only applies to scoped requests");
+  const list = Array.isArray(raw.reports) ? raw.reports : [raw];
+  return assemble(raw, list);
+};
+
+// Second half of a scoped load: the resolved system ids become synthesized
+// per-system report entries (report_defaults supplying recipients / output
+// flags / anything normalize_request accepts), then flow through the SAME
+// assembly path as an explicit batch — exclusions, batch defaults, and
+// validation behave identically for both.
+const materialize_scoped_requests = (raw, system_ids) =>
+  assemble(
+    raw,
+    system_ids.map((id) => ({
+      report_type: "magnet_health",
+      system_id: id,
+      ...(raw.report_defaults || {})
+    }))
+  );
+
+module.exports = { load_requests, materialize_scoped_requests, normalize_request };

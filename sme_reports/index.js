@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 
-const { load_requests } = require("./request_loader");
+const { load_requests, materialize_scoped_requests } = require("./request_loader");
 const {
   fetch_identity,
   resolve_system_vendor,
@@ -162,8 +162,30 @@ const run_sme_report = async (run_log, request_path) => {
   const job_id = uuidv4();
   const { close_pdf_renderer } = require("./output/render_pdf");
   try {
-    const { requests, batch_email, summary_only, excluded, out_dir } =
-      load_requests(request_path);
+    let loaded = load_requests(request_path);
+    let scope_resolution = null;
+    if (loaded.scoped) {
+      // Resolution is LOUD, never silent (PLAN-SCOPED-WEEKLY.md A1): the
+      // log and the console both state what the scope became, and a scope
+      // resolving to zero systems threw inside resolve_scope — a fatal
+      // request error, not an empty report.
+      const { resolve_scope } = require("./scope");
+      scope_resolution = await resolve_scope(loaded.scope);
+      const note = {
+        job_id,
+        scope: loaded.scope,
+        label: scope_resolution.label,
+        ...scope_resolution.detail,
+        system_ids: scope_resolution.system_ids
+      };
+      await addLogEvent(I, run_log, "resolve_scope", det, note, null);
+      console.log(
+        `scope: ${scope_resolution.label} — ${scope_resolution.detail.systems} systems ` +
+          `(${scope_resolution.detail.sites} sites, ${scope_resolution.detail.customers} customer${scope_resolution.detail.customers === 1 ? "" : "s"})`
+      );
+      loaded = materialize_scoped_requests(loaded.raw, scope_resolution.system_ids);
+    }
+    const { requests, batch_email, summary_only, excluded, out_dir } = loaded;
     const results = [];
     const failures = [];
     for (const request of requests) {
