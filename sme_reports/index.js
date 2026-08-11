@@ -93,7 +93,11 @@ const run_one = async (run_log, job_id, request) => {
     if (request.output.archive) {
       const archive_dir = path.join(__dirname, "archive");
       fs.mkdirSync(archive_dir, { recursive: true });
-      const dated = `Avante-${request.system_id}-Magnet-Health-${new Date().toISOString().slice(0, 10)}.pdf`;
+      // Non-default periods tag the archived name: a 7-day and a 30-day
+      // brief archived the same day must not overwrite each other.
+      const lb = request.window.lookback_days;
+      const period_tag = lb && lb !== 30 ? `-${lb}d` : "";
+      const dated = `Avante-${request.system_id}-Magnet-Health${period_tag}-${new Date().toISOString().slice(0, 10)}.pdf`;
       outputs.archive_path = path.join(archive_dir, dated);
       fs.copyFileSync(outputs.pdf_path, outputs.archive_path);
     }
@@ -123,7 +127,7 @@ const run_one = async (run_log, job_id, request) => {
 // Builds the multi-page fleet summary from the distilled per-system records.
 // A failure here must not sink the batch — the per-system PDFs are already
 // on disk and the summary email can still go out without an attachment.
-const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, excluded, scope) => {
+const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, excluded, scope, period_tag = "") => {
   const { build_fleet_model } = require("./render/fleet_model");
   const { build_fleet_page } = require("./render/fleet_page");
   const { render_pdf_document } = require("./output/render_pdf");
@@ -138,8 +142,8 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
       ? scope.label.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
       : null;
     const base = slug
-      ? `Avante-${slug}-Magnet-Health-Summary-${date}`
-      : `Avante-Fleet-Magnet-Health-${date}`;
+      ? `Avante-${slug}-Magnet-Health-Summary${period_tag}-${date}`
+      : `Avante-Fleet-Magnet-Health${period_tag}-${date}`;
     // The HTML lands next to the PDF under the same name — it is the only
     // way to read the document without a PDF viewer, and page breaks are
     // the thing most likely to need a look. write_html is not used here: it
@@ -192,7 +196,8 @@ const run_sme_report = async (run_log, request_path) => {
       );
       loaded = materialize_scoped_requests(loaded.raw, scope_resolution.system_ids);
     }
-    const { requests, batch_email, summary_only, excluded, out_dir } = loaded;
+    const { requests, batch_email, summary_only, excluded, out_dir, lookback_days } = loaded;
+    const period_tag = lookback_days !== 30 ? `-${lookback_days}d` : "";
     const results = [];
     const failures = [];
     for (const request of requests) {
@@ -231,7 +236,8 @@ const run_sme_report = async (run_log, request_path) => {
           failures,
           out_dir,
           excluded,
-          scope_resolution
+          scope_resolution,
+          period_tag
         );
         // A soft failure is right for a normal batch — the per-system briefs
         // are still valid deliverables. In summary-only mode there are none,
@@ -251,7 +257,11 @@ const run_sme_report = async (run_log, request_path) => {
           batch_email,
           results,
           failures,
-          fleet_pdf_path
+          fleet_pdf_path,
+          {
+            scope_label: scope_resolution ? scope_resolution.label : null,
+            lookback_days
+          }
         );
       }
       if (!summary_only && batch_email.attachments && attachable.length) {

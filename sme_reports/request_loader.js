@@ -37,6 +37,8 @@ const normalize_request = (raw) => {
     ? parse_date(win.end, "window.end").endOf("day")
     : DateTime.utc().endOf("day");
   const lookback_days = win.lookback_days || 30;
+  if (!Number.isInteger(lookback_days) || lookback_days <= 0)
+    fail(`window.lookback_days must be a positive integer, got ${JSON.stringify(win.lookback_days)}`);
   const start = win.start
     ? parse_date(win.start, "window.start").startOf("day")
     : end.minus({ days: lookback_days }).startOf("day");
@@ -59,7 +61,10 @@ const normalize_request = (raw) => {
     system_id: raw.system_id,
     recipients: raw.recipients,
     cc_list,
-    window: { start, end },
+    // lookback_days is the period the window DEFAULTED from — null when an
+    // explicit start was supplied (the days count would be a coincidence,
+    // not a chosen period). Drives period tags on filenames and subjects.
+    window: { start, end, lookback_days: win.start ? null : lookback_days },
     event_window,
     narrative_overrides: raw.narrative_overrides || {},
     output: {
@@ -107,6 +112,20 @@ const assemble = (raw, list) => {
   const batch_email = normalize_batch_email(raw.batch_email);
   const summary_only = raw.summary_only === true;
 
+  // Top-level lookback_days: the batch's period (7 for the weekly customer
+  // product, 30 default), applied as each report's window default. A
+  // per-report window (its own lookback or explicit dates) still wins —
+  // the spread order below is the override.
+  if (raw.lookback_days !== undefined) {
+    if (!Number.isInteger(raw.lookback_days) || raw.lookback_days <= 0)
+      fail(`lookback_days must be a positive integer, got ${JSON.stringify(raw.lookback_days)}`);
+    list = list.map((r) => ({
+      ...r,
+      window: { lookback_days: raw.lookback_days, ...(r.window || {}) }
+    }));
+  }
+  const lookback_days = raw.lookback_days || 30;
+
   // Top-level "exclude": system ids dropped from the run entirely (no DB
   // pull, no report, no section row) — e.g. the RF/SC service-station
   // magnets, which are real hardware but not fleet. Exclusions are never
@@ -152,7 +171,7 @@ const assemble = (raw, list) => {
   const out_dir = requests.length
     ? requests[0].output.out_dir
     : path.join(__dirname, "out");
-  return { requests, batch_email, summary_only, excluded, out_dir };
+  return { requests, batch_email, summary_only, excluded, out_dir, lookback_days };
 };
 
 // Accepts a single request, or { "reports": [ ... ], "batch_email": {...} },

@@ -37,10 +37,15 @@ const send_summary_email = async (
   batch_email,
   results,
   failures,
-  fleet_pdf_path
+  fleet_pdf_path,
+  { scope_label = null, lookback_days = null } = {}
 ) => {
   const date = new Date().toISOString().slice(0, 10);
-  const subject = `Magnet Health Summary — ${results.length} systems — ${date}`;
+  // Scoped runs lead with WHO the summary covers; non-default periods say
+  // so in the subject — a 7-day and a 30-day summary sent the same day
+  // must be tellable apart from the inbox list.
+  const period = lookback_days && lookback_days !== 30 ? ` — ${lookback_days}-day` : "";
+  const subject = `Magnet Health Summary — ${scope_label ? `${scope_label} — ` : ""}${results.length} systems${period} — ${date}`;
 
   // Grade the distilled record, not the bare archetype: quench and current
   // breach live there, and the attached fleet PDF grades the same way. When

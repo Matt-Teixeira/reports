@@ -182,4 +182,46 @@ const {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// --- lookback_days: the batch period (plan A3) -------------------------------
+{
+  const DAY = 24 * 3600000;
+  const base = {
+    scope: { customer_id: "C0151" },
+    report_defaults: {
+      recipients: ["dev@example.com"],
+      output: { html: true, pdf: false, email: false, archive: false }
+    }
+  };
+  // Batch default applies to every synthesized report.
+  const weekly = materialize_scoped_requests({ ...base, lookback_days: 7 }, ["SME01096"]);
+  assert.strictEqual(weekly.lookback_days, 7);
+  const w = weekly.requests[0].window;
+  assert.strictEqual(w.lookback_days, 7);
+  const span_days = (w.end.toMillis() - w.start.toMillis()) / DAY;
+  assert.ok(span_days >= 7 && span_days < 8.1, `7-day default spans ~7 days, got ${span_days.toFixed(2)}`);
+  // A per-report window still wins over the batch default.
+  const override = materialize_scoped_requests(
+    { ...base, lookback_days: 7, report_defaults: { ...base.report_defaults, window: { lookback_days: 14 } } },
+    ["SME01096"]
+  );
+  assert.strictEqual(override.requests[0].window.lookback_days, 14, "per-report lookback outranks the batch default");
+  // Explicit dates mean lookback is not the chosen period — null, no tag.
+  const dated = materialize_scoped_requests(
+    { ...base, report_defaults: { ...base.report_defaults, window: { start: "2026-07-01", end: "2026-07-31" } } },
+    ["SME01096"]
+  );
+  assert.strictEqual(dated.requests[0].window.lookback_days, null, "explicit dates carry no period tag");
+  // Absent -> the 30-day default, everywhere.
+  const monthly = materialize_scoped_requests(base, ["SME01096"]);
+  assert.strictEqual(monthly.lookback_days, 30);
+  assert.strictEqual(monthly.requests[0].window.lookback_days, 30);
+  // Nonsense values fail loudly.
+  for (const bad of [0, -7, 1.5, "7"])
+    assert.throws(
+      () => materialize_scoped_requests({ ...base, lookback_days: bad }, ["SME01096"]),
+      /lookback_days must be a positive integer/,
+      `lookback_days ${JSON.stringify(bad)}`
+    );
+}
+
 console.log("check_scope: all assertions passed");
