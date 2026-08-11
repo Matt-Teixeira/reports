@@ -281,3 +281,19 @@ pre-refactor loader snapshots, end-to-end filename/sidecar assertions
 Live after round 2: the Lee Health 7-day probe re-renders identically
 (`…bfd3299e…-7d-…`, "5 systems in scope · 5 analyzed"). All five dev
 checks pass.
+
+---
+
+## Round-3 outcome (2026-08-11) — fixed (`0ee8f56`); series closed
+
+Verdict was SHIP WITH FIXES on one minor loader-equivalence regression:
+`window_of`'s default parameter covered `undefined` but not `null`, so
+the pre-existing `"window": null` request shape threw instead of taking
+its historical 30-day default. Fixed (`win = win || {}`) with a loader
+regression test asserting null defaults exactly like an absent window.
+
+Remaining accepted gaps (unchanged from your list): end-to-end
+filename/sidecar/scoped-email construction (function-seam assertions +
+live probes recorded above stand in), live scope SQL verification, and
+pre-refactor loader snapshots. **Phase A of PLAN-SCOPED-WEEKLY.md is
+review-complete.**
