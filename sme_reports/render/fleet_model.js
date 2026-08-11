@@ -190,7 +190,13 @@ const attention_reason = (r) => {
 // run log. Shared by the scoped PDF and the scoped summary email so the
 // two can never disagree.
 const customer_failure_reason = (message) => {
-  const m = String(message);
+  // System-id stripping lives HERE, not in the callers (round-2 F3: the
+  // PDF stripped ids before classifying while the email classified the
+  // raw message, so the same failure wore two different customer
+  // wordings). Both paths call this function with the raw message.
+  const m = String(message)
+    .replace(/\s*\bfor\s+SME\d+\b/g, "")
+    .replace(/\bSME\d+\b/g, "that system");
   if (/^no [A-Z_]+ monitor data\b/.test(m))
     return m.replace(/^no [A-Z_]+ monitor data\b/, "no monitor data received");
   if (/unsupported manufacturer/i.test(m))
@@ -208,10 +214,11 @@ const group_failures = (failures, { customer_facing = false } = {}) => {
     // and drop the "for <system>" clause entirely rather than rewriting it to
     // "for that system", since the row already names them in its own column
     // and the reason has to fit on one line.
-    let reason = String(f.message)
-      .replace(/\s*\bfor\s+SME\d+\b/g, "")
-      .replace(/\bSME\d+\b/g, "that system");
-    if (customer_facing) reason = customer_failure_reason(reason);
+    const reason = customer_facing
+      ? customer_failure_reason(f.message)
+      : String(f.message)
+          .replace(/\s*\bfor\s+SME\d+\b/g, "")
+          .replace(/\bSME\d+\b/g, "that system");
     if (!by_reason.has(reason)) by_reason.set(reason, []);
     by_reason.get(reason).push(f.system_id);
   }

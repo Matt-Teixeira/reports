@@ -19,6 +19,27 @@ const parse_date = (value, field) => {
   return dt;
 };
 
+// Window normalization on its own: the batch-period derivation needs the
+// EFFECTIVE window of entries that may later be excluded (round-2 F2), so
+// this cannot live only inside normalize_request.
+const window_of = (win = {}) => {
+  const end = win.end
+    ? parse_date(win.end, "window.end").endOf("day")
+    : DateTime.utc().endOf("day");
+  // ?? not ||: zero must reach validation and fail loudly, not silently
+  // become the 30-day default under a 7-day batch (review round-1 F7).
+  const lookback_days = win.lookback_days ?? 30;
+  if (!Number.isInteger(lookback_days) || lookback_days <= 0)
+    fail(`window.lookback_days must be a positive integer, got ${JSON.stringify(win.lookback_days)}`);
+  const start = win.start
+    ? parse_date(win.start, "window.start").startOf("day")
+    : end.minus({ days: lookback_days }).startOf("day");
+  if (start >= end) fail("window.start must be before window.end");
+  // lookback_days records the period the window DEFAULTED from — null when
+  // explicit dates were given (a day count would be coincidence).
+  return { start, end, lookback_days: win.start ? null : lookback_days };
+};
+
 const normalize_request = (raw) => {
   if (raw.report_type !== "magnet_health")
     fail(`report_type must be "magnet_health", got "${raw.report_type}"`);
@@ -32,19 +53,7 @@ const normalize_request = (raw) => {
   for (const c of cc_list)
     if (!EMAIL_RE.test(c)) fail(`cc "${c}" is not an email address`);
 
-  const win = raw.window || {};
-  const end = win.end
-    ? parse_date(win.end, "window.end").endOf("day")
-    : DateTime.utc().endOf("day");
-  // ?? not ||: zero must reach validation and fail loudly, not silently
-  // become the 30-day default under a 7-day batch (review round-1 F7).
-  const lookback_days = win.lookback_days ?? 30;
-  if (!Number.isInteger(lookback_days) || lookback_days <= 0)
-    fail(`window.lookback_days must be a positive integer, got ${JSON.stringify(win.lookback_days)}`);
-  const start = win.start
-    ? parse_date(win.start, "window.start").startOf("day")
-    : end.minus({ days: lookback_days }).startOf("day");
-  if (start >= end) fail("window.start must be before window.end");
+  const window = window_of(raw.window);
 
   let event_window = null;
   if (raw.event_window && raw.event_window.start) {
@@ -63,10 +72,7 @@ const normalize_request = (raw) => {
     system_id: raw.system_id,
     recipients: raw.recipients,
     cc_list,
-    // lookback_days is the period the window DEFAULTED from — null when an
-    // explicit start was supplied (the days count would be a coincidence,
-    // not a chosen period). Drives period tags on filenames and subjects.
-    window: { start, end, lookback_days: win.start ? null : lookback_days },
+    window,
     event_window,
     narrative_overrides: raw.narrative_overrides || {},
     output: {
@@ -131,6 +137,10 @@ const assemble = (raw, list) => {
       window: { lookback_days: raw.lookback_days, ...(r.window || {}) }
     }));
   }
+  // Pre-exclusion candidates: the batch-period fallback for all-excluded
+  // runs (round-2 F2) reads their windows, since no request survives to
+  // carry one.
+  const candidates = list;
 
   // Top-level "exclude": system ids dropped from the run entirely (no DB
   // pull, no report, no section row) — e.g. the RF/SC service-station
@@ -180,14 +190,34 @@ const assemble = (raw, list) => {
 
   // The batch's EFFECTIVE period, derived from the normalized windows the
   // reports will actually analyze — never from the top-level default, which
-  // per-report overrides may have diverged from (review round-1 F3: a
-  // 14-day override under a 7-day default was named and emailed as
-  // "7-day"). One shared value tags filenames and subjects; null means
-  // explicit-date windows (no chosen period, no tag). A summary document
-  // must describe ONE period, so a summary batch mixing effective periods
-  // is a fatal request error rather than a mislabeled artifact.
-  const periods = [...new Set(requests.map((r) => r.window.lookback_days))];
-  if (batch_email && batch_email.summary_pdf && periods.length > 1)
+  // per-report overrides may have diverged from (review round-1 F3). When
+  // every candidate was excluded, the period comes from the EXCLUDED
+  // candidates' windows: the exclusion document still describes a period,
+  // and a 7-day and a 30-day all-excluded run for the same scope must not
+  // share artifact names (round-2 F2).
+  const effective_windows = requests.length
+    ? requests.map((r) => r.window)
+    : candidates.map((r) => window_of(r.window));
+
+  // A summary document renders ONE date range in its heading and footers,
+  // so a summary batch must share ONE normalized window — same lookback is
+  // not enough (round-2 F1: two 7-day windows ending ten days apart union
+  // to a 17-day heading; two disjoint explicit ranges union to a span
+  // neither system was analyzed for). Mislabeled periods are fatal request
+  // errors, not artifacts.
+  if (requests.length && batch_email && batch_email.summary_pdf) {
+    const spans = [
+      ...new Set(
+        effective_windows.map((w) => `${w.start.toMillis()}|${w.end.toMillis()}`)
+      )
+    ];
+    if (spans.length > 1)
+      fail(
+        `a summary batch must share one analysis window; found ${spans.length} distinct windows`
+      );
+  }
+  const periods = [...new Set(effective_windows.map((w) => w.lookback_days))];
+  if (requests.length && batch_email && batch_email.summary_pdf && periods.length > 1)
     fail(
       `a summary batch must share one period; found ${periods
         .map((p) => (p === null ? "explicit dates" : `${p} days`))

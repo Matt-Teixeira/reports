@@ -110,9 +110,14 @@ const rows_to_resolution = ({ kind, value }, rows) => {
 // with no ASCII word characters (an empty slug) from ever falling back to
 // the INTERNAL fleet artifact names.
 const scope_artifact_id = (resolution) => {
+  // Slug capped: a multi-customer label ("A / B / C / …") must not push
+  // the filename past filesystem/attachment-name comfort — the hash, not
+  // the slug, carries the identity.
   const slug = String(resolution.label || "")
     .replace(/[^A-Za-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/, "");
   return `${slug || "Scoped"}-${resolution.scope_hash}`;
 };
 

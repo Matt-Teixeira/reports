@@ -312,7 +312,9 @@ const {
           { report_type: "magnet_health", system_id: "SME01098", window: { lookback_days: 14 } }
         ]
       }),
-    /summary batch must share one period/
+    // Different lookbacks now fail the stricter WINDOW check (round-2 F1)
+    // before the period-marker check can see them.
+    /summary batch must share one analysis window/
   );
   // Without a summary document, mixed periods are allowed (independent
   // briefs) — the batch just has no single period to tag.
@@ -323,29 +325,95 @@ const {
     ]
   });
   assert.strictEqual(mixed_briefs.lookback_days, null, "mixed periods yield no batch tag");
+
+  // Round-2 F1: same lookback is NOT enough for a summary — the normalized
+  // windows must be IDENTICAL. Two 7-day windows ending ten days apart
+  // union to a 17-day heading; two disjoint explicit ranges union to a
+  // span neither system was analyzed for. Both are fatal.
+  const summary_batch = (reports) => ({
+    batch_email: { recipients: ["dev@example.com"], summary_pdf: true },
+    reports
+  });
+  assert.throws(
+    () =>
+      load_and_mix(
+        summary_batch([
+          { report_type: "magnet_health", system_id: "SME01096", window: { lookback_days: 7, end: "2026-08-01" } },
+          { report_type: "magnet_health", system_id: "SME01098", window: { lookback_days: 7, end: "2026-08-11" } }
+        ])
+      ),
+    /summary batch must share one analysis window/,
+    "shifted same-lookback windows rejected"
+  );
+  assert.throws(
+    () =>
+      load_and_mix(
+        summary_batch([
+          { report_type: "magnet_health", system_id: "SME01096", window: { start: "2026-07-01", end: "2026-07-31" } },
+          { report_type: "magnet_health", system_id: "SME01098", window: { start: "2026-08-01", end: "2026-08-10" } }
+        ])
+      ),
+    /summary batch must share one analysis window/,
+    "disjoint explicit windows rejected"
+  );
+  // Identical explicit windows remain a valid (untagged) summary batch.
+  const same_dates = load_and_mix(
+    summary_batch([
+      { report_type: "magnet_health", system_id: "SME01096", window: { start: "2026-07-01", end: "2026-07-31" } },
+      { report_type: "magnet_health", system_id: "SME01098", window: { start: "2026-07-01", end: "2026-07-31" } }
+    ])
+  );
+  assert.strictEqual(same_dates.lookback_days, null);
+  assert.strictEqual(same_dates.requests.length, 2);
+
+  // Round-2 F2: an all-excluded run keeps its effective period — the
+  // exclusion document, sidecar, and subject must still say "-7d", or a
+  // weekly and a monthly all-excluded run for the same scope overwrite
+  // each other.
+  const all_excluded = load_and_mix({
+    lookback_days: 7,
+    exclude: ["SME01096"],
+    batch_email: { recipients: ["dev@example.com"], summary_pdf: true },
+    reports: [{ report_type: "magnet_health", system_id: "SME01096" }]
+  });
+  assert.strictEqual(all_excluded.requests.length, 0);
+  assert.strictEqual(all_excluded.lookback_days, 7, "the excluded candidates' period survives");
 }
 
 // Round-1 F2: artifact identity = slug + scope-set hash, never the
-// internal fleet name.
+// internal fleet name. End-to-end through the REAL resolution mapper
+// (round-2 fixture audit): hand-rebuilding the hash formula would pass
+// even if rows_to_resolution stopped producing one.
 {
-  const res = (ids, label) => ({
-    system_ids: ids,
-    label,
-    scope_hash: require("crypto").createHash("sha1").update([...ids].sort().join(",")).digest("hex").slice(0, 8)
+  const row = (system_id, site_id, customer_name) => ({
+    system_id, site_id, site_name: site_id, customer_id: "C1", customer_name
   });
+  const res = (ids, label) =>
+    rows_to_resolution(
+      { kind: "system_ids", value: ids },
+      ids.map((id) => row(id, "S1", label))
+    );
   const a = scope_artifact_id(res(["SME00001", "SME00002"], "Acme Health"));
   const b = scope_artifact_id(res(["SME00001", "SME00003"], "Acme Health"));
   assert.ok(a.startsWith("Acme-Health-"), a);
+  assert.ok(/-[0-9a-f]{8}$/.test(a), `resolution carries the hash: ${a}`);
   assert.notStrictEqual(a, b, "same label, different scope-sets: different artifact ids");
-  assert.strictEqual(
-    a,
-    scope_artifact_id(res(["SME00002", "SME00001"], "Acme Health")),
-    "hash is order-independent: same set, same id"
+  // Same SET, permuted resolution order: identical artifact id.
+  const permuted = rows_to_resolution(
+    { kind: "system_ids", value: ["SME00002", "SME00001"] },
+    [row("SME00002", "S1", "Acme Health"), row("SME00001", "S1", "Acme Health")]
   );
+  assert.strictEqual(a, scope_artifact_id(permuted), "hash is order-independent");
   // A label with no ASCII word characters must never fall back to the
   // internal fleet artifact names.
-  const cjk = scope_artifact_id(res(["SME00001"], "医疗集团"));
+  const cjk = scope_artifact_id(res(["SME00001"], "医疗集団"));
   assert.ok(/^Scoped-[0-9a-f]{8}$/.test(cjk), `non-ASCII label gets the Scoped fallback: ${cjk}`);
+  // A many-customer label is capped; the hash still carries identity.
+  const long = scope_artifact_id(
+    res(["SME00001"], Array.from({ length: 12 }, (_, i) => `Customer Number ${i}`).join(" / "))
+  );
+  assert.ok(long.length <= 48 + 9, `slug capped: ${long.length} chars`);
+  assert.ok(/-[0-9a-f]{8}$/.test(long), "hash survives the cap");
 }
 
 console.log("check_scope: all assertions passed");

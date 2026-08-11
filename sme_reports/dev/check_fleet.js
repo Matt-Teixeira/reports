@@ -8,6 +8,7 @@ const path = require("path");
 
 const {
   build_fleet_model,
+  customer_failure_reason,
   chunk_rows,
   group_failures,
   ROWS_PER_PAGE,
@@ -1508,9 +1509,11 @@ const rec = (over = {}) => ({
 
 // --- scoped (customer-facing) summary variant (plan A2) ---------------------
 {
+  // Counts reconcile (round-2 fixture audit): 6 in scope = 4 analyzed +
+  // 2 failed, so the cover's arithmetic is validated, not just rendered.
   const scope = {
     label: "Acme Health Network",
-    detail: { kind: "customer_id", customers: 1, sites: 3, systems: 5 }
+    detail: { kind: "customer_id", customers: 1, sites: 3, systems: 6 }
   };
   const records = [
     rec({ system_id: "SME90001", archetype: "compressor_stop_ongoing" }),
@@ -1533,9 +1536,14 @@ const rec = (over = {}) => ({
   assert.ok(!html.includes("% of fleet"), "no fleet wording on a scoped page");
   // Round-1 F4: the cover states the RESOLUTION, not just the survivors —
   // 5 in scope, 4 analyzed, and where the rest went.
-  assert.ok(html.includes("5 systems in scope"), "resolved count on the cover");
+  assert.ok(html.includes("6 systems in scope"), "resolved count on the cover");
   assert.ok(html.includes("4 analyzed"), "analyzed count on the cover");
   assert.ok(html.includes("2 failed"), "failed count on the cover");
+  assert.strictEqual(
+    vm.scope.detail.systems,
+    records.length + failures.length,
+    "fixture counts reconcile: in scope = analyzed + failed"
+  );
   assert.ok(html.includes("· 3 sites ·"), "site count on the cover");
   // Customer-facing failure reasons: the fact, not the pipeline.
   assert.ok(
@@ -1545,6 +1553,14 @@ const rec = (over = {}) => ({
   assert.ok(!html.includes("no GE monitor data"), "internal reason wording absent");
   assert.ok(!html.includes("secret_table"), "arbitrary internal errors never reach a customer page");
   assert.ok(html.includes("report could not be generated"), "unknown failures collapse to the generic line");
+  // Round-2 F3: the classifier strips system ids ITSELF, so the email
+  // (which classifies the raw message) and the PDF (which groups first)
+  // produce identical customer wording.
+  assert.strictEqual(
+    customer_failure_reason("no GE monitor data for SME90005 in the requested period"),
+    "no monitor data received in the requested period",
+    "raw-message classification matches the grouped PDF wording"
+  );
   // Round-1 F2/escaping: a hostile DB-sourced label renders escaped in
   // every sink, never as markup.
   const hostile = build_fleet_page(
