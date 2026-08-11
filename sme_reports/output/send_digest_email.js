@@ -124,8 +124,8 @@ const send_part = async (run_log, job_id, recipient, cc_list, chunk, part, total
   };
   if (cc_list && cc_list.length) message.cc = cc_list.join(",");
 
-  const transporter = await build_transporter();
   try {
+    const transporter = await build_transporter();
     const info = await send_with_retry(transporter, message);
     const accepted = (info && info.accepted) || [];
     const rejected = (info && info.rejected) || [];
@@ -148,9 +148,16 @@ const send_part = async (run_log, job_id, recipient, cc_list, chunk, part, total
     await addLogEvent(E, run_log, "send_digest_email", cat, note, error);
     throw error;
   } finally {
-    // The unique zip is consumed by the awaited send above; remove it so
-    // out/ never accumulates per-send archives.
-    if (zip_path) fs.rmSync(zip_path, { force: true });
+    // Best-effort cleanup (round-2 F3): the unique zip is consumed by the
+    // awaited send above, but a cleanup failure must NEVER convert an
+    // SMTP-accepted delivery into an error outcome — log and move on.
+    if (zip_path) {
+      try {
+        fs.rmSync(zip_path, { force: true });
+      } catch (cleanup_error) {
+        console.error(`digest zip cleanup failed (send outcome unaffected): ${cleanup_error.message}`);
+      }
+    }
   }
 };
 

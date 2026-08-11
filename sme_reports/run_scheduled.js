@@ -260,11 +260,16 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
   if (!audience.length) {
     if (unresolved_persist_errors)
       throw new Error(`${unresolved_persist_errors} unresolved-subscriber record failure(s)`);
-    throw new Error(
-      coalition.allowed
-        ? `no subscriber in [${coalition.allowed.join(", ")}] is an active, notifiable magnet user`
-        : "audience resolved to no active, notifiable magnet users"
-    );
+    // Round-2 F5: the unresolved policy must not depend on WHO ELSE shares
+    // the coalition. Unresolved named subscribers never fail the run —
+    // whether they are alone or beside valid ones — they warn and carry
+    // their error rows. An ALL_USERS row resolving to nobody is different:
+    // that is a config aimed at an empty universe, and stays fatal.
+    if (coalition.allowed) {
+      console.warn(`config ${ids}: no subscriber resolved — nothing to deliver`);
+      return { users: 0, units: 0, sent_docs: 0, unresolved };
+    }
+    throw new Error("audience resolved to no active, notifiable magnet users");
   }
 
   const { units, user_units } = plan_documents(audience, system_customer);
@@ -304,9 +309,10 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
       rendered.set(unit.key, {
         ok: true,
         unit,
-        // Live units archive now — before any SMTP. A failure here throws
-        // into the unit catch: error rows, no delivery of THIS unit.
-        archived_doc: unit_live ? archive_delivered(batch.fleet_pdf_path, base_cfg.id) : null,
+        // Archived in the eligibility step below — after the send-time
+        // access recheck decides the unit actually has a live, eligible
+        // recipient, and still BEFORE any SMTP (rounds 1-2, F3/F4).
+        archived_doc: null,
         scratch_doc: path.basename(batch.fleet_pdf_path),
         pdf_path: batch.fleet_pdf_path,
         counts: {
@@ -325,14 +331,51 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
       console.error(`customer document ${unit.customer_name} (${unit.scope_hash}) failed: ${error.message}`);
     }
   }
-  const failed_units = [...rendered.values()].filter((r) => !r.ok).length;
+  let failed_units = [...rendered.values()].filter((r) => !r.ok).length;
+
+  // Between phases (round-2 F1/F4): with CURRENT caches in hand, decide
+  // which units actually have at least one live, access-eligible
+  // recipient. Only those units are archived — after a POST-RENDER
+  // ownership recheck (the render window is long enough for a system to
+  // change customers; a document must never be archived or shipped under
+  // a stale customer identity) and still before any SMTP. Units whose
+  // live recipients all lost access archive nothing.
+  const caches = await load_user_caches([...user_units.keys()]);
+  const eligible = (email, r) => {
+    const u = caches.get(email);
+    return (
+      u &&
+      u.status === "active" &&
+      u.notify_email === true &&
+      access_covers(u.system_list_cache, r.unit.system_ids)
+    );
+  };
+  for (const r of rendered.values()) {
+    if (!r.ok) continue;
+    const has_live_eligible = r.unit.users.some(
+      (e) => coalition.dry_run_of(e) === false && eligible(e, r)
+    );
+    if (!has_live_eligible) continue;
+    try {
+      const recheck = await resolve_scope({ system_ids: r.unit.system_ids });
+      if (recheck.customer_ids.length !== 1 || recheck.customer_ids[0] !== r.unit.customer_id)
+        throw new Error(
+          `customer ownership changed during rendering (planned ${r.unit.customer_id}, now ${recheck.customer_ids.join(", ")})`
+        );
+      r.archived_doc = archive_delivered(r.pdf_path, base_cfg.id);
+    } catch (error) {
+      rendered.set(r.unit.key, { ok: false, unit: r.unit, error: error.message });
+      failed_units += 1;
+      await addLogEvent(E, run_log, "run_user_summary", cat, { job_id, config_ids: ids, customer: r.unit.customer_id, scope_hash: r.unit.scope_hash }, error);
+      console.error(`customer document ${r.unit.customer_name} (${r.unit.scope_hash}) failed pre-archive: ${error.message}`);
+    }
+  }
 
   // Phase 2 — one digest per user, isolated; sends attribute to the
   // user's OWN config row and honor their own dry_run gate. Partial
   // delivery is deliberate: one failed customer document yields an error
   // row while the user's other documents still go out. record_unit is
-  // persistence-ONLY (review F3): document names were resolved at render.
-  const caches = await load_user_caches([...user_units.keys()]);
+  // persistence-ONLY (review F3): document names were resolved above.
   const user_failures = [];
   let sent_docs = 0;
   for (const [email, keys] of user_units) {
@@ -359,8 +402,6 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
       }
     };
     try {
-      const u = caches.get(email);
-      const user_ok = u && u.status === "active" && u.notify_email === true;
       const deliverable = [];
       for (const key of keys) {
         const r = rendered.get(key);
@@ -368,9 +409,10 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
           await record_unit(key, null, { status: "error", error: r.error });
           continue;
         }
-        // Send-time re-check per unit against the CURRENT cache. Skipped
-        // deliveries archive nothing and name nothing.
-        if (!user_ok || !access_covers(u.system_list_cache, r.unit.system_ids)) {
+        // Send-time re-check per unit against the SAME cache snapshot the
+        // archive-eligibility step used. Skipped deliveries archive
+        // nothing and name nothing.
+        if (!eligible(email, r)) {
           await record_unit(key, null, { status: "skipped_access" });
           continue;
         }

@@ -3,6 +3,8 @@ const path = require("path");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const exec_file = promisify(execFile);
+const { v4: uuidv4 } = require("uuid");
+const { build_fresh_zip } = require("./fresh_zip");
 
 const build_transporter = require("../../email/build-transporter");
 const send_with_retry = require("./send_with_retry");
@@ -76,17 +78,20 @@ const send_one = async (run_log, job_id, batch_email, chunk, out_dir, part, tota
     );
 
   let attachments;
+  let zip_path = null;
   if (use_zip) {
     const zip_name =
       total_parts > 1
         ? `Magnet-Health-Briefs-${date}-part${part}.zip`
         : `Magnet-Health-Briefs-${date}.zip`;
-    const zip_path = path.join(out_dir, zip_name);
-    // Fresh archive, never an update: `zip` ADDS to an existing file, so a
-    // reused path retained files from earlier runs inside later emails
-    // (same defect class as the digest sender's review F1).
-    fs.rmSync(zip_path, { force: true });
-    await exec_file("zip", ["-j", zip_path, ...chunk.map((r) => r.pdf_path)]);
+    // Fresh archive at a PRIVATE unique path (subscriptions review rounds
+    // 1–2): `zip` ADDS to an existing file, and a shared date path lets a
+    // concurrent run rebuild the archive out from under an in-flight
+    // send. The recipient sees only the clean zip_name.
+    zip_path = await build_fresh_zip(
+      path.join(out_dir, `batch-${uuidv4().slice(0, 8)}-${zip_name}`),
+      chunk.map((r) => r.pdf_path)
+    );
     attachments = [{ filename: zip_name, path: zip_path }];
   } else {
     attachments = chunk.map((r) => ({
@@ -126,6 +131,16 @@ const send_one = async (run_log, job_id, batch_email, chunk, out_dir, part, tota
     const note = { job_id, to: message.to, part: `${part}/${total_parts}`, status: "ERROR" };
     await addLogEvent(E, run_log, "send_batch_email", cat, note, error);
     throw error;
+  } finally {
+    // Best-effort cleanup of the private zip — a cleanup failure must
+    // never change the send outcome.
+    if (zip_path) {
+      try {
+        fs.rmSync(zip_path, { force: true });
+      } catch (cleanup_error) {
+        console.error(`batch zip cleanup failed (send outcome unaffected): ${cleanup_error.message}`);
+      }
+    }
   }
 };
 
