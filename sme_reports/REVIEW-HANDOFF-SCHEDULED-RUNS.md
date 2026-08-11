@@ -239,3 +239,23 @@ dev checks pass.
 
 **Rollout may proceed to step 3 (first real send to internal addresses)
 on the user's go.**
+
+---
+
+## Round-3 outcome (2026-08-11) — both findings fixed (`289b51f`); series closed
+
+Verdict was SHIP WITH FIXES on two minors; both fixed with regressions.
+Within-list recipient dedup is now case-insensitive with first spelling
+kept (fixture: case variants collapse in both lists), and
+`send_summary_email` logs SENT / PARTIAL / ERROR graded from
+`info.accepted`/`info.rejected` — with both lists in the log note and
+the error log type for anything short of full acceptance — so
+operational logs and the sends table can no longer disagree.
+
+Accepted gaps, unchanged in kind: runner integration around
+`smtp_outcomes`, the archive helper's uuid/EXCL behavior (verified by
+construction), and partial-result logging semantics are not
+fixture-tested — they sit at the SMTP/filesystem seams the DB-free
+checks deliberately do not cross, and the recorded live runs stand in.
+**Phase B of PLAN-SCOPED-WEEKLY.md is review-complete; the rollout
+ladder resumes at step 3.**
