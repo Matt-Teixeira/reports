@@ -216,3 +216,26 @@ full outbox/idempotency design is future work if it ever bites.
 
 Live after fixes: all six dev checks pass; file-mode Lee Health probe
 unchanged; `--config abc` aborts with exit 1 before any run state.
+
+---
+
+## Round-2 outcome (2026-08-11) — all three findings fixed (`da111be`)
+
+Verdict was SHIP WITH FIXES; all three fixed with regressions.
+
+| # | Fix | Regression test |
+|---|---|---|
+| R2-F1 | `smtp_outcomes` grades every envelope address from nodemailer's returned accepted list (partial rejection resolves successfully; only all-rejected throws). Explicit deliveries record sent/error per recipient and fail the run on any rejection; the single-recipient user_summary send is graded from the info, not assumed. A missing/odd info shape grades everyone NOT delivered — delivery claims need evidence | `check_config.js`: partial-rejection map, `{address}`-object entries, missing-info conservatism |
+| R2-F2 | Archive names are attempt-unique (`…-cfg<id>-<uuid8>.pdf`) and copied with `COPYFILE_EXCL` — a residual collision fails instead of overwriting the artifact a sends row names | naming covered by construction (uuid per document + EXCL); collision scenario documented |
+| R2-F3 | Recipient dedup crosses the To/CC boundary case-insensitively: an address on both lists stays a single To entry — one email, one sends row | `check_config.js` cross-list case-drift fixture |
+| audit | Duplicate CLI flags rejected; `--config` values past integer precision rejected | CLI matrix additions |
+
+Accepted gaps (unchanged in kind): runner-level integration (SMTP
+suppression, backfills, isolation) is asserted by the recorded live runs
+rather than fixtures; `current_slot` timezone behavior is inherited from
+the shared legacy helper. Live after round 2: `--config 1 --dry-run`
+re-ran cleanly (16-hex scope hash, `recipient_role` recorded); all six
+dev checks pass.
+
+**Rollout may proceed to step 3 (first real send to internal addresses)
+on the user's go.**
