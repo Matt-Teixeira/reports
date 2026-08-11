@@ -203,3 +203,24 @@ subscription-shaped row re-verified by forced dry run afterward.
    tautology, each.
 5. **Ran**: exact commands and results.
 6. **Test gaps**: behaviors you judged correct but found unasserted.
+
+---
+
+## Round-1 outcome (2026-08-11) — fixed (`258cfeb`), one deliberate stance
+
+Verdict was DO NOT SHIP; five findings fixed outright, one split into a
+fix plus a recorded design stance. For re-review: verify each fix holds
+and judge the F4 disposition on its merits.
+
+| # | Disposition | Fix | Regression |
+|---|---|---|---|
+| F1 (critical) | fixed | `zip` updates rather than replaces: new dependency-free `fresh_zip` module — stale target removed, per-send uuid path, cleanup after the awaited send, recipient still sees the clean filename. Same latent defect fixed in `send_batch_email` | DB-free check: two builds at one path → the second archive contains ONLY the second file set |
+| F2 (high) | fixed | resolutions carry current `customer_ids`; a unit render rejects when ownership moved between plan and render | `check_scope.js` asserts `customer_ids` on resolution; the render guard is runner-level |
+| F3 (high) | fixed | live units archive at RENDER time, pre-SMTP (archive failure = pre-delivery unit failure); `record_unit` is persistence-only; skipped/error rows never archive and name no document | code-path restructure; live dry-run re-verified |
+| F4 (major) | **part fixed, part deliberate** | the swallowed `.catch(() => {})` is gone — a failed unresolved-subscriber insert is a counted persistence failure that FAILS the coalition. Unresolved subscribers themselves WARN + record error rows + surface in return counts but do NOT fail the run: a deactivated subscriber is user state, and a weekly-red cron until someone edits a row is alert fatigue, not signal. Challenge this stance with a concrete harm if you disagree | warning + counted persistence failures |
+| F5 (major) | fixed | liveness is PER UNIT: all-dry units write no sidecar and archive nothing inside mixed coalitions | code-path; coalesced `dry_run_of` fixtures already cover the gates |
+| F6 (moderate) | fixed | digest counts: systems = produced + failed; failures render "N status unavailable", never a reassuring zero | rendering change in `send_digest_email` |
+
+Live after fixes: the subscription dry run re-renders "1 user → 11
+customer documents", 11 rows recorded; all six dev checks pass including
+the fresh-zip and customer_ids regressions.
