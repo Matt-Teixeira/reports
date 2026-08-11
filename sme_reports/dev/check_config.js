@@ -10,7 +10,8 @@ const {
   resolve_audience,
   group_by_scope,
   access_covers,
-  config_to_raw
+  config_to_raw,
+  smtp_outcomes
 } = require("../fanout");
 const { scope_set_hash } = require("../scope");
 const { materialize_scoped_requests } = require("../request_loader");
@@ -30,6 +31,11 @@ const { parse_sme_args } = require("../cli_args");
     [["--slot", "mon-24:00"], /day-HH:MM/],
     [["--slot"], /day-HH:MM/],
     [["--conifg", "1"], /unknown argument/],
+    // Round-2 audit: duplicate flags and unsafe-precision ids abort.
+    [["--config", "1", "--config", "2"], /given twice/],
+    [["--slot", "mon-08:00", "--slot", "tue-08:00"], /given twice/],
+    [["--dry-run", "--dry-run"], /given twice/],
+    [["--config", "9007199254740993"], /positive integer/],
     [["./requests/x.json", "--dry-run"], /file mode takes no scheduler flags/],
     [["a.json", "b.json"], /more than one request file/]
   ];
@@ -128,6 +134,19 @@ const { parse_sme_args } = require("../cli_args");
   });
   assert.deepStrictEqual(deduped.recipients, ["ops@example.com"]);
   assert.deepStrictEqual(deduped.cc_list, ["cc@example.com"]);
+  // Round-2 F3: an address on BOTH lists stays a single To entry — one
+  // email, one sends row, even with case drift.
+  const cross = validate_config({
+    ...base,
+    id: 5,
+    report_kind: "fleet_summary",
+    scope: null,
+    recipient_mode: "explicit",
+    recipients: ["same@example.com"],
+    cc_list: ["Same@Example.com", "other@example.com"]
+  });
+  assert.deepStrictEqual(cross.recipients, ["same@example.com"]);
+  assert.deepStrictEqual(cross.cc_list, ["other@example.com"], "cross-list duplicate removed from CC");
 
   const bad = [
     [{ ...base, report_kind: "briefs" }, /not implemented/],
@@ -260,6 +279,28 @@ const { parse_sme_args } = require("../cli_args");
   const fleet_loaded = materialize_scoped_requests(fleet_raw, ["SME00001", "SME00002"]);
   assert.deepStrictEqual(fleet_loaded.requests.map((r) => r.system_id), ["SME00001"]);
   assert.deepStrictEqual(fleet_loaded.excluded, { ids: ["SME00002"], note: "excluded by report config" });
+}
+
+// --- smtp_outcomes (round-2 F1) ----------------------------------------------
+{
+  // Nodemailer resolves on PARTIAL rejection; each envelope address is
+  // graded from the accepted list, case-insensitively, string or
+  // {address} entries alike.
+  const partial = smtp_outcomes(
+    { accepted: ["A@x.co"], rejected: ["b@x.co"] },
+    ["a@x.co", "b@x.co"]
+  );
+  assert.strictEqual(partial.get("a@x.co"), "sent");
+  assert.strictEqual(partial.get("b@x.co"), "error");
+  const objects = smtp_outcomes(
+    { accepted: [{ address: "a@x.co" }], rejected: [] },
+    ["a@x.co"]
+  );
+  assert.strictEqual(objects.get("a@x.co"), "sent");
+  // Claiming delivery needs evidence: a missing/odd info shape grades
+  // everyone as NOT delivered.
+  const missing = smtp_outcomes(undefined, ["a@x.co"]);
+  assert.strictEqual(missing.get("a@x.co"), "error");
 }
 
 console.log("check_config: all assertions passed");

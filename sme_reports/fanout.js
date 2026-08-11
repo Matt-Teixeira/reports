@@ -41,9 +41,15 @@ const validate_config = (row) => {
   if (!Number.isInteger(row.lookback_days) || row.lookback_days <= 0)
     fail(`${at}: lookback_days must be a positive integer`);
 
-  // Deduplicated — a frontend double-entry must not double-send.
-  const recipients = [...new Set(row.recipients || [])];
-  const cc_list = [...new Set(row.cc_list || [])];
+  // Deduplicated — a frontend double-entry must not double-send — and
+  // deduplicated ACROSS the To/CC boundary (round-2 F3): an address on
+  // both lists stays a single To entry, so it can never collect two rows
+  // or two copies.
+  const recipients = [...new Set((row.recipients || []).map((e) => String(e).trim()))];
+  const to_lower = new Set(recipients.map((e) => e.toLowerCase()));
+  const cc_list = [...new Set((row.cc_list || []).map((e) => String(e).trim()))].filter(
+    (e) => !to_lower.has(e.toLowerCase())
+  );
   for (const r of [...recipients, ...cc_list])
     if (!EMAIL_RE.test(r)) fail(`${at}: "${r}" is not an email address`);
 
@@ -151,11 +157,28 @@ const config_to_raw = (cfg, { recipients }) => ({
   }
 });
 
+// Nodemailer resolves SUCCESSFULLY on partial rejection — it only throws
+// when every recipient is refused — so "the promise resolved" is not "this
+// recipient got the email" (round-2 F1). Map each envelope email to its
+// real outcome from the returned info. Entries may be strings or
+// {address} objects; comparison is case-insensitive. A missing/odd info
+// shape counts everyone REJECTED — claiming delivery needs evidence.
+const smtp_outcomes = (info, emails) => {
+  const addr = (e) =>
+    String(typeof e === "object" && e !== null ? e.address : e).toLowerCase();
+  const accepted = new Set((info && info.accepted ? info.accepted : []).map(addr));
+  const out = new Map();
+  for (const email of emails)
+    out.set(email, accepted.has(String(email).toLowerCase()) ? "sent" : "error");
+  return out;
+};
+
 module.exports = {
   validate_config,
   resolve_audience,
   group_by_scope,
   access_covers,
   config_to_raw,
+  smtp_outcomes,
   KNOWN_OPTIONS
 };

@@ -43,15 +43,19 @@ const {
 // - A row/group that dies before delivery still owes its whole intended
 //   audience error rows, so "did X get their report" is always answerable.
 
-// Delivered documents are archived under a run-unique name BEFORE sending
-// (F7): out/ is overwrite-by-design scratch, so the name a sends row
-// carries must be immutable. Dry runs deliberately archive nothing — their
-// rows carry the scratch name of what WOULD have been sent.
-const archive_delivered = (pdf_path, job_id) => {
+// Delivered documents are archived under an ATTEMPT-unique name BEFORE
+// sending (F7; round-2 F2): out/ is overwrite-by-design scratch, so the
+// name a sends row carries must be immutable — and the process-wide job id
+// alone was not unique enough (two configs in one slot with the same scope
+// but different exclusions produced different documents under one name).
+// config id + a fresh uuid per document, copied with EXCL so a collision
+// FAILS instead of overwriting history. Dry runs deliberately archive
+// nothing — their rows carry the scratch name of what WOULD have sent.
+const archive_delivered = (pdf_path, config_id) => {
   const archive_dir = path.join(__dirname, "archive");
   fs.mkdirSync(archive_dir, { recursive: true });
-  const name = `${path.basename(pdf_path, ".pdf")}-run-${job_id.slice(0, 8)}.pdf`;
-  fs.copyFileSync(pdf_path, path.join(archive_dir, name));
+  const name = `${path.basename(pdf_path, ".pdf")}-cfg${config_id}-${uuidv4().slice(0, 8)}.pdf`;
+  fs.copyFileSync(pdf_path, path.join(archive_dir, name), fs.constants.COPYFILE_EXCL);
   return name;
 };
 
@@ -90,7 +94,7 @@ const deliver_explicit = async (run_log, job_id, cfg, slot, ctx, outcomes, count
   const { results, failures, fleet_pdf_path, resolution } = ctx;
   const doc = cfg.dry_run
     ? path.basename(fleet_pdf_path)
-    : archive_delivered(fleet_pdf_path, job_id);
+    : archive_delivered(fleet_pdf_path, cfg.id);
   const base = {
     config_id: cfg.id,
     slot,
@@ -106,11 +110,13 @@ const deliver_explicit = async (run_log, job_id, cfg, slot, ctx, outcomes, count
       await record_outcome(outcomes, counts, { ...base, recipient: email, recipient_role: role, status: "dry_run" });
     return;
   }
-  let status = "sent";
-  let err = null;
+  // Per-recipient SMTP truth (round-2 F1): nodemailer resolves on PARTIAL
+  // rejection, so each envelope address is graded from the returned
+  // accepted list, never from "the promise resolved".
+  let per_recipient;
   try {
     const send_summary_email = require("./output/send_summary_email");
-    await send_summary_email(
+    const info = await send_summary_email(
       run_log,
       job_id,
       { recipients: cfg.recipients, cc_list: cfg.cc_list },
@@ -122,20 +128,24 @@ const deliver_explicit = async (run_log, job_id, cfg, slot, ctx, outcomes, count
         lookback_days: cfg.lookback_days
       }
     );
-    counts.sent += envelope.length;
+    const { smtp_outcomes } = require("./fanout");
+    per_recipient = smtp_outcomes(info, envelope.map((e) => e.email));
   } catch (error) {
-    status = "error";
-    err = error.message;
-    counts.send_errors += 1;
+    per_recipient = new Map(envelope.map((e) => [e.email, "error"]));
+    per_recipient.error_message = error.message;
   }
-  for (const { email, role } of envelope)
+  for (const { email, role } of envelope) {
+    const status = per_recipient.get(email);
+    if (status === "sent") counts.sent += 1;
+    else counts.send_errors += 1;
     await record_outcome(outcomes, counts, {
       ...base,
       recipient: email,
       recipient_role: role,
       status,
-      error: err
+      error: status === "sent" ? null : per_recipient.error_message || "rejected by mail server"
     });
+  }
 };
 
 const run_customer_or_fleet = async (run_log, job_id, cfg, slot, counts) => {
@@ -213,7 +223,7 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
         throw new Error("group produced no summary document");
       const doc = cfg.dry_run
         ? path.basename(batch.fleet_pdf_path)
-        : archive_delivered(batch.fleet_pdf_path, job_id);
+        : archive_delivered(batch.fleet_pdf_path, cfg.id);
 
       // Send-time access re-check against CURRENT caches: access revoked
       // (or a user deactivated) between render and send must not receive
@@ -233,10 +243,13 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
         else if (cfg.dry_run) status = "dry_run";
         else {
           // SMTP boundary: a send failure is an error OUTCOME; a record
-          // failure below is a persistence failure, never an error row.
+          // failure below is a persistence failure, never a fabricated
+          // error row. Even the single-recipient send is graded from the
+          // returned accepted list (round-2 F1) — delivery claims need
+          // evidence, not a resolved promise.
           try {
             const send_summary_email = require("./output/send_summary_email");
-            await send_summary_email(
+            const info = await send_summary_email(
               run_log,
               job_id,
               { recipients: [email], cc_list: [] },
@@ -245,8 +258,13 @@ const run_user_summary = async (run_log, job_id, cfg, slot) => {
               batch.fleet_pdf_path,
               { scope_label: resolution.label, lookback_days: cfg.lookback_days }
             );
-            status = "sent";
-            counts.sent += 1;
+            const { smtp_outcomes } = require("./fanout");
+            status = smtp_outcomes(info, [email]).get(email);
+            if (status === "sent") counts.sent += 1;
+            else {
+              err = "rejected by mail server";
+              counts.send_errors += 1;
+            }
           } catch (error) {
             status = "error";
             err = error.message;

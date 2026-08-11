@@ -20,20 +20,25 @@ const parse_sme_args = (args) => {
       continue;
     }
     if (a === "--dry-run") {
+      if (out.force_dry_run) fail("--dry-run given twice");
       out.force_dry_run = true;
       continue;
     }
     if (a === "--slot") {
+      if (out.slot !== null) fail("--slot given twice");
       const v = args[++i];
       if (!v || !SLOT_RE.test(v)) fail(`--slot requires day-HH:MM (e.g. mon-08:00), got "${v ?? ""}"`);
       out.slot = v;
       continue;
     }
     if (a === "--config") {
+      if (out.config_id !== null) fail("--config given twice");
       const v = args[++i];
       // Anchored integer: "abc", "1junk", "0", and "-3" all fail here
-      // rather than silently selecting the wrong mode or row.
-      if (!v || !/^[1-9]\d*$/.test(v)) fail(`--config requires a positive integer row id, got "${v ?? ""}"`);
+      // rather than silently selecting the wrong mode or row; a value past
+      // integer precision would silently target the wrong row.
+      if (!v || !/^[1-9]\d*$/.test(v) || !Number.isSafeInteger(parseInt(v, 10)))
+        fail(`--config requires a positive integer row id, got "${v ?? ""}"`);
       out.config_id = parseInt(v, 10);
       continue;
     }
