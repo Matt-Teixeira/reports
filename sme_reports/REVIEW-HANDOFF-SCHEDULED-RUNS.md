@@ -184,3 +184,35 @@ the DB as the rollout's first artifacts.
    per section.
 5. **Ran**: the exact commands you executed and their results.
 6. **Test gaps**: behaviors you judged correct but found unasserted.
+
+---
+
+## Round-1 outcome (2026-08-11) — all seven findings fixed (`924344c`)
+
+Verdict was DO NOT SHIP; every finding fixed with regressions. For
+re-review: verify each fix holds and no fix introduced a new defect.
+**Note: the DDL gained `sme_report_sends.recipient_role` — the user must
+re-run `sql/sme_reports_config.sql` (repeatable) before the next
+scheduled/`--config` run.**
+
+| # | Fix | Regression test |
+|---|---|---|
+| F1 (blocker) | `validate_config` rejects `cc_list` on `user_summary` rows — a derived CC would receive every scope-group's document with no access check | `check_config.js` cc rejection |
+| F2 (blocker) | New `cli_args.js`: strict, anchored parsing BEFORE any run state; `--config abc`/`1junk`/`0`/missing/unknown args abort; file mode rejects scheduler flags; `run_scheduled` tests `config_id != null` | full CLI matrix in `check_config.js`; verified live: `--config abc` exits 1 with the parse message |
+| F3 (major) | `group_by_scope` keys by the canonical sorted id set (`scope_set_key`); `scope_set_hash` widened to 16 hex and demoted to artifact/sends metadata | the real colliding pair (SME099875/SME122693) asserted as two distinct groups |
+| F4 (major) | Per-recipient outcome tracking with separate SMTP/persistence/render boundaries: record-failure after a delivered email = persistence failure (fails the run, no fabricated error row); backfills cover only outcome-less recipients | boundary semantics documented in RULES; runner-level (accepted gap below) |
+| F5 (major) | Explicit-path pre-delivery failures backfill error rows for the whole intended audience (To + CC) | same |
+| F6 (major) | Every envelope recipient recorded with `recipient_role` (to/cc); DDL addendum `ADD COLUMN IF NOT EXISTS` | DDL re-validated via rollback against live tables |
+| F7 (major) | Delivered documents archived under `…-run-<jobid8>.pdf` BEFORE sending; sends rows carry the immutable name; dry-run rows carry the scratch name | `archive_delivered` in `run_scheduled.js` |
+| audit | options must be an object; recipients/cc deduplicated; `current_slot` format asserted | `check_config.js` |
+
+Accepted gaps, unchanged in kind from your list: runner/send-status
+semantics (F4/F5 flows) are not unit-tested — they live at the
+SMTP/DB seam the checks deliberately do not cross; the two-gate,
+dry-run-SMTP-suppression, and isolation behaviors are asserted by the
+recorded live runs rather than fixtures; SMTP-success/record-failure
+ambiguity is narrowed (no contradictory rows; run fails loudly) but a
+full outbox/idempotency design is future work if it ever bites.
+
+Live after fixes: all six dev checks pass; file-mode Lee Health probe
+unchanged; `--config abc` aborts with exit 1 before any run state.
