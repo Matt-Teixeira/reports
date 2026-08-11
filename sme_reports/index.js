@@ -136,11 +136,13 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
     const vm = build_fleet_model(records, failures, { excluded, scope });
     const date = new Date().toISOString().slice(0, 10);
     const html = build_fleet_page(vm);
-    // Scoped documents are named by their scope so a customer summary can
-    // never collide with (or be mistaken for) the internal fleet document.
-    const slug = scope
-      ? scope.label.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
-      : null;
+    // Scoped documents are named by their scope IDENTITY (slug + scope-set
+    // hash — see scope_artifact_id) so a customer summary can never collide
+    // with the internal fleet document, with another subset under the same
+    // customer label, or with its own history sidecar from a different
+    // scope the same day.
+    const { scope_artifact_id } = require("./scope");
+    const slug = scope ? scope_artifact_id(scope) : null;
     const base = slug
       ? `Avante-${slug}-Magnet-Health-Summary${period_tag}-${date}`
       : `Avante-Fleet-Magnet-Health${period_tag}-${date}`;
@@ -230,7 +232,9 @@ const run_sme_report = async (run_log, request_path) => {
       loaded = materialize_scoped_requests(loaded.raw, scope_resolution.system_ids);
     }
     const { requests, batch_email, summary_only, excluded, out_dir, lookback_days } = loaded;
-    const period_tag = lookback_days !== 30 ? `-${lookback_days}d` : "";
+    // Null = explicit-date windows: no chosen period, no tag (F3).
+    const period_tag =
+      lookback_days && lookback_days !== 30 ? `-${lookback_days}d` : "";
     const results = [];
     const failures = [];
     for (const request of requests) {

@@ -36,7 +36,9 @@ const normalize_request = (raw) => {
   const end = win.end
     ? parse_date(win.end, "window.end").endOf("day")
     : DateTime.utc().endOf("day");
-  const lookback_days = win.lookback_days || 30;
+  // ?? not ||: zero must reach validation and fail loudly, not silently
+  // become the 30-day default under a 7-day batch (review round-1 F7).
+  const lookback_days = win.lookback_days ?? 30;
   if (!Number.isInteger(lookback_days) || lookback_days <= 0)
     fail(`window.lookback_days must be a positive integer, got ${JSON.stringify(win.lookback_days)}`);
   const start = win.start
@@ -129,7 +131,6 @@ const assemble = (raw, list) => {
       window: { lookback_days: raw.lookback_days, ...(r.window || {}) }
     }));
   }
-  const lookback_days = raw.lookback_days || 30;
 
   // Top-level "exclude": system ids dropped from the run entirely (no DB
   // pull, no report, no section row) — e.g. the RF/SC service-station
@@ -176,6 +177,24 @@ const assemble = (raw, list) => {
   const out_dir = requests.length
     ? requests[0].output.out_dir
     : path.join(__dirname, "out");
+
+  // The batch's EFFECTIVE period, derived from the normalized windows the
+  // reports will actually analyze — never from the top-level default, which
+  // per-report overrides may have diverged from (review round-1 F3: a
+  // 14-day override under a 7-day default was named and emailed as
+  // "7-day"). One shared value tags filenames and subjects; null means
+  // explicit-date windows (no chosen period, no tag). A summary document
+  // must describe ONE period, so a summary batch mixing effective periods
+  // is a fatal request error rather than a mislabeled artifact.
+  const periods = [...new Set(requests.map((r) => r.window.lookback_days))];
+  if (batch_email && batch_email.summary_pdf && periods.length > 1)
+    fail(
+      `a summary batch must share one period; found ${periods
+        .map((p) => (p === null ? "explicit dates" : `${p} days`))
+        .join(", ")}`
+    );
+  const lookback_days = periods.length === 1 ? periods[0] : null;
+
   return { requests, batch_email, summary_only, excluded, out_dir, lookback_days };
 };
 
@@ -219,14 +238,31 @@ const load_requests = (request_path) => {
 // flags / anything normalize_request accepts), then flow through the SAME
 // assembly path as an explicit batch — exclusions, batch defaults, and
 // validation behave identically for both.
-const materialize_scoped_requests = (raw, system_ids) =>
-  assemble(
-    raw,
-    system_ids.map((id) => ({
-      report_type: "magnet_health",
-      system_id: id,
-      ...(raw.report_defaults || {})
-    }))
-  );
+//
+// The scope is the ONLY authority on which systems run and what report
+// they get (review round-1 F1: report_defaults.system_id spread after the
+// synthesized id replaced every scope-resolved system with an arbitrary —
+// possibly other-customer — one). Reserved keys are rejected outright, the
+// authoritative fields are applied LAST, and the materialized ids are
+// asserted against the resolution before exclusions.
+const RESERVED_DEFAULTS = ["system_id", "report_type"];
+
+const materialize_scoped_requests = (raw, system_ids) => {
+  const defaults = raw.report_defaults || {};
+  for (const k of RESERVED_DEFAULTS)
+    if (defaults[k] !== undefined)
+      fail(`report_defaults.${k} is not allowed — the scope decides it`);
+  const list = system_ids.map((id) => ({
+    ...defaults,
+    report_type: "magnet_health",
+    system_id: id
+  }));
+  if (
+    list.length !== system_ids.length ||
+    list.some((r, i) => r.system_id !== system_ids[i])
+  )
+    fail("materialized system ids diverge from the resolved scope");
+  return assemble(raw, list);
+};
 
 module.exports = { load_requests, materialize_scoped_requests, normalize_request };

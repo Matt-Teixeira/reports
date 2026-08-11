@@ -182,6 +182,22 @@ const attention_reason = (r) => {
   return condition_label(r.archetype);
 };
 
+// Customer-facing failure wording is a WHITELIST, not a rewrite (review
+// round-1 F5): known failure classes map to reader-appropriate facts, and
+// everything else — thrown SQL errors, identity failures, whatever a
+// future code path produces — collapses to a generic line rather than
+// leaking internal detail onto a customer page. Raw messages stay in the
+// run log. Shared by the scoped PDF and the scoped summary email so the
+// two can never disagree.
+const customer_failure_reason = (message) => {
+  const m = String(message);
+  if (/^no [A-Z_]+ monitor data\b/.test(m))
+    return m.replace(/^no [A-Z_]+ monitor data\b/, "no monitor data received");
+  if (/unsupported manufacturer/i.test(m))
+    return "unsupported system configuration";
+  return "report could not be generated";
+};
+
 // Failures collapse to a reason -> systems map: 17 systems with no data in
 // the window is one fact, not 17.
 const group_failures = (failures, { customer_facing = false } = {}) => {
@@ -195,13 +211,7 @@ const group_failures = (failures, { customer_facing = false } = {}) => {
     let reason = String(f.message)
       .replace(/\s*\bfor\s+SME\d+\b/g, "")
       .replace(/\bSME\d+\b/g, "that system");
-    // A scoped (customer-facing) document states the fact, not the
-    // pipeline: vendor-variant tokens in the raw error are internal detail.
-    if (customer_facing)
-      reason = reason.replace(
-        /^no [A-Z_]+ monitor data\b/,
-        "no monitor data received"
-      );
+    if (customer_facing) reason = customer_failure_reason(reason);
     if (!by_reason.has(reason)) by_reason.set(reason, []);
     by_reason.get(reason).push(f.system_id);
   }
@@ -386,6 +396,7 @@ const build_fleet_model = (records, failures, meta = {}) => {
 
 module.exports = {
   build_fleet_model,
+  customer_failure_reason,
   attention_reason,
   data_issue_reason,
   data_issue_readings,

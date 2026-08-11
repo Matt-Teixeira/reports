@@ -32,13 +32,16 @@ const validate_scope = (scope) => {
     Object.keys(scope).length === 2
   )
     return validate_scope({ [scope.kind]: scope.value });
+  // EXACTLY one key, and it must be recognized (review round-1 F6: a
+  // recognized key beside an unknown one — {customer_id, typo_filter} —
+  // was accepted as the recognized scope alone, silently ignoring the
+  // extra selector; a typo must never broaden a scope).
   const keys = Object.keys(scope);
-  const present = known.filter((k) => scope[k] !== undefined);
-  if (present.length !== 1)
+  if (keys.length !== 1 || !known.includes(keys[0]))
     fail(
       `scope must carry exactly one of ${known.join(", ")} (got ${keys.join(", ") || "nothing"})`
     );
-  const kind = present[0];
+  const kind = keys[0];
   const value = scope[kind];
   if (kind === "customer_id") {
     if (typeof value !== "string" || !value.trim())
@@ -79,9 +82,18 @@ const rows_to_resolution = ({ kind, value }, rows) => {
   // Display label: the customer's name where the scope is one customer
   // (the overwhelmingly common case); otherwise the customers joined.
   const label = customers.join(" / ");
+  const system_ids = rows.map((r) => r.system_id);
   return {
-    system_ids: rows.map((r) => r.system_id),
+    system_ids,
     label,
+    // Stable identity of the resolved SET, independent of the label: two
+    // different scopes under one customer share a label but must never
+    // share artifact names (review round-1 F2).
+    scope_hash: require("crypto")
+      .createHash("sha1")
+      .update([...system_ids].sort().join(","))
+      .digest("hex")
+      .slice(0, 8),
     detail: {
       kind,
       customers: customers.length,
@@ -89,6 +101,19 @@ const rows_to_resolution = ({ kind, value }, rows) => {
       systems: rows.length
     }
   };
+};
+
+// The filename identity of a scoped run: human-readable slug + the
+// scope-set hash. The hash keeps same-label-different-scope runs (and
+// same-day reruns of different subsets) from overwriting each other's
+// documents and history sidecars; the "Scoped" fallback keeps a label
+// with no ASCII word characters (an empty slug) from ever falling back to
+// the INTERNAL fleet artifact names.
+const scope_artifact_id = (resolution) => {
+  const slug = String(resolution.label || "")
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `${slug || "Scoped"}-${resolution.scope_hash}`;
 };
 
 const resolve_scope = async (scope) => {
@@ -106,4 +131,9 @@ const resolve_scope = async (scope) => {
   return rows_to_resolution(canonical, rows);
 };
 
-module.exports = { validate_scope, rows_to_resolution, resolve_scope };
+module.exports = {
+  validate_scope,
+  rows_to_resolution,
+  resolve_scope,
+  scope_artifact_id
+};

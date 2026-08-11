@@ -1519,7 +1519,10 @@ const rec = (over = {}) => ({
     rec({ system_id: "SME90004" })
   ];
   const failures = [
-    { system_id: "SME90005", message: "no GE monitor data for SME90005 in the requested period" }
+    { system_id: "SME90005", message: "no GE monitor data for SME90005 in the requested period" },
+    // Round-1 F5: an arbitrary internal error must never reach a customer
+    // page verbatim — the whitelist collapses it to a generic line.
+    { system_id: "SME90006", message: `relation "mag.secret_table" does not exist` }
   ];
   const vm = build_fleet_model(records, failures, { scope });
   assert.strictEqual(vm.title, "Magnet Health Summary — Acme Health Network");
@@ -1528,19 +1531,36 @@ const rec = (over = {}) => ({
   assert.ok(!html.includes("Fleet Magnet Health Summary"), "scoped document never says fleet");
   assert.ok(html.includes("% of these systems"), "scoped rollup wording");
   assert.ok(!html.includes("% of fleet"), "no fleet wording on a scoped page");
-  assert.ok(html.includes("· 3 sites ·"), "cover states the scope resolution");
-  // Customer-facing failure reason: the fact, not the pipeline.
+  // Round-1 F4: the cover states the RESOLUTION, not just the survivors —
+  // 5 in scope, 4 analyzed, and where the rest went.
+  assert.ok(html.includes("5 systems in scope"), "resolved count on the cover");
+  assert.ok(html.includes("4 analyzed"), "analyzed count on the cover");
+  assert.ok(html.includes("2 failed"), "failed count on the cover");
+  assert.ok(html.includes("· 3 sites ·"), "site count on the cover");
+  // Customer-facing failure reasons: the fact, not the pipeline.
   assert.ok(
     html.includes("no monitor data received in the requested period"),
     "vendor-variant tokens stripped from customer-facing reasons"
   );
   assert.ok(!html.includes("no GE monitor data"), "internal reason wording absent");
+  assert.ok(!html.includes("secret_table"), "arbitrary internal errors never reach a customer page");
+  assert.ok(html.includes("report could not be generated"), "unknown failures collapse to the generic line");
+  // Round-1 F2/escaping: a hostile DB-sourced label renders escaped in
+  // every sink, never as markup.
+  const hostile = build_fleet_page(
+    build_fleet_model(records, [], {
+      scope: { label: `Smith & Sons <script>alert(1)</script>`, detail: { kind: "customer_id", customers: 1, sites: 1, systems: 4 } }
+    })
+  );
+  assert.ok(!hostile.includes("<script>alert(1)</script>"), "label markup is escaped");
+  assert.ok(hostile.includes("Smith &amp; Sons"), "escaped label renders");
   // The internal document is untouched: fleet title, fleet wording,
-  // vendor-token reasons.
+  // vendor-token reasons, raw internal errors (ops needs them).
   const internal = build_fleet_page(build_fleet_model(records, failures, {}));
   assert.ok(internal.includes("<h1>Fleet Magnet Health Summary</h1>"));
   assert.ok(internal.includes("% of fleet"));
   assert.ok(internal.includes("no GE monitor data in the requested period"));
+  assert.ok(internal.includes("secret_table"), "the internal document keeps the raw error");
 }
 
 // --- full-scale pagination + artifacts --------------------------------------

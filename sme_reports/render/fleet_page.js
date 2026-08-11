@@ -416,16 +416,27 @@ const overview_body = (vm, rows, first) => {
 
   // The masthead and rollup ride the first overview page only; continuation
   // pages carry the attention table alone.
-  // A scoped cover states the resolution — who this document is about and
-  // how many sites/systems that became — so a reader can spot a system
-  // missing from THEIR summary as loudly as the fleet spots one missing
-  // from the fleet.
-  const scope_line = vm.scope
-    ? ` · ${vm.scope.detail.sites} site${vm.scope.detail.sites === 1 ? "" : "s"}`
-    : "";
+  // A scoped cover states the RESOLUTION, not just the survivors: N systems
+  // in scope, how many analyzed, and where the rest went (failed /
+  // excluded) — the loud-resolution contract. vm.total alone counts only
+  // successful records, which silently understated the scope whenever a
+  // system failed (review round-1 F4).
+  const sub = vm.scope
+    ? [
+        esc(vm.window_span),
+        `${vm.scope.detail.systems} system${vm.scope.detail.systems === 1 ? "" : "s"} in scope`,
+        `${vm.total} analyzed`,
+        vm.failure_count ? `${vm.failure_count} failed` : null,
+        vm.excluded ? `${vm.excluded.ids.length} excluded` : null,
+        `${vm.scope.detail.sites} site${vm.scope.detail.sites === 1 ? "" : "s"}`,
+        esc(vendors || "no vendor sections")
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : `${esc(vm.window_span)} · ${vm.total} systems · ${esc(vendors || "no vendor sections")}${vm.excluded ? ` · ${vm.excluded.ids.length} excluded` : ""}`;
   let body = first
     ? `<h1>${esc(vm.title)}</h1>` +
-      `<div class="sub">${esc(vm.window_span)} · ${vm.total} systems${scope_line} · ${esc(vendors || "no vendor sections")}${vm.excluded ? ` · ${vm.excluded.ids.length} excluded` : ""}</div>` +
+      `<div class="sub">${sub}</div>` +
       `<div class="lead">${lead}</div>` +
       (rollup ? `<div class="roll">${rollup}</div>` : "")
     : "";

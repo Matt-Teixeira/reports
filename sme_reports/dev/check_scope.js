@@ -8,7 +8,11 @@ const path = require("path");
 // pure, and the loader paths run on temp files. The SQL itself is verified
 // by live probe (resolution results recorded in the plan doc).
 
-const { validate_scope, rows_to_resolution } = require("../scope");
+const {
+  validate_scope,
+  rows_to_resolution,
+  scope_artifact_id
+} = require("../scope");
 const {
   load_requests,
   materialize_scoped_requests
@@ -41,6 +45,10 @@ const {
     [{}, "exactly one of"],
     [{ customer_id: "C1", site_ids: ["S1"] }, "exactly one of"],
     [{ customer: "C1" }, "exactly one of"], // unknown key never silently ignored
+    // Round-1 F6: a recognized key BESIDE an unknown one must fail — a
+    // typo'd second selector must never silently broaden the scope.
+    [{ customer_id: "C1", site_id: "S1" }, "exactly one of"],
+    [{ customer_id: "C1", typo_filter: "C2" }, "exactly one of"],
     [{ customer_id: "  " }, "non-empty string"],
     [{ site_ids: [] }, "non-empty array"],
     [{ site_ids: [42] }, "must be strings"],
@@ -165,6 +173,40 @@ const {
     assert.strictEqual(r.output.email, false);
   }
 
+  // Round-1 F1 (blocker): the scope is the ONLY authority on which systems
+  // run. report_defaults must not be able to smuggle in a system id or a
+  // report type — that replaced every scope-resolved system with an
+  // arbitrary, possibly other-customer, one.
+  for (const k of ["system_id", "report_type"])
+    assert.throws(
+      () =>
+        materialize_scoped_requests(
+          {
+            scope: { customer_id: "C0151" },
+            report_defaults: { recipients: ["dev@example.com"], [k]: k === "system_id" ? "SME99999" : "magnet_health" }
+          },
+          ["SME01096"]
+        ),
+      new RegExp(`report_defaults.${k} is not allowed`),
+      `reserved key ${k}`
+    );
+  // ...and even benign defaults can never change the materialized ids.
+  const authoritative = materialize_scoped_requests(
+    {
+      scope: { customer_id: "C0151" },
+      report_defaults: {
+        recipients: ["dev@example.com"],
+        output: { html: true, pdf: false, email: false, archive: false }
+      }
+    },
+    ["SME01096", "SME01098"]
+  );
+  assert.deepStrictEqual(
+    authoritative.requests.map((r) => r.system_id),
+    ["SME01096", "SME01098"],
+    "materialized ids are exactly the resolved ids"
+  );
+
   // With a batch_email block, synthesized entries inherit batch recipients
   // and the batch pdf/email overrides, exactly like explicit members.
   const b = materialize_scoped_requests(
@@ -185,6 +227,17 @@ const {
 // --- lookback_days: the batch period (plan A3) -------------------------------
 {
   const DAY = 24 * 3600000;
+  // Explicit-reports loader round trip via a temp file.
+  const load_and_mix = (obj) => {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), "sme-period-"));
+    const p = path.join(t, "r.json");
+    fs.writeFileSync(p, JSON.stringify(obj));
+    try {
+      return load_requests(p);
+    } finally {
+      fs.rmSync(t, { recursive: true, force: true });
+    }
+  };
   const base = {
     scope: { customer_id: "C0151" },
     report_defaults: {
@@ -222,6 +275,77 @@ const {
       /lookback_days must be a positive integer/,
       `lookback_days ${JSON.stringify(bad)}`
     );
+  // Round-1 F7: a per-report zero must FAIL, never silently become 30
+  // under a 7-day batch (`||` swallowed it before validation).
+  assert.throws(
+    () =>
+      materialize_scoped_requests(
+        { ...base, lookback_days: 7, report_defaults: { ...base.report_defaults, window: { lookback_days: 0 } } },
+        ["SME01096"]
+      ),
+    /lookback_days must be a positive integer, got 0/
+  );
+
+  // Round-1 F3: the batch period is the EFFECTIVE one, derived from the
+  // normalized windows — never the top-level default.
+  // Per-report lookback with no top-level field still yields the period.
+  const weekly_by_report = materialize_scoped_requests(
+    { ...base, report_defaults: { ...base.report_defaults, window: { lookback_days: 7 } } },
+    ["SME01096"]
+  );
+  assert.strictEqual(weekly_by_report.lookback_days, 7, "effective period without a top-level default");
+  // Uniform explicit dates mean NO period, even under a top-level default.
+  const dated_batch = materialize_scoped_requests(
+    { ...base, lookback_days: 7, report_defaults: { ...base.report_defaults, window: { start: "2026-07-01", end: "2026-07-31" } } },
+    ["SME01096"]
+  );
+  assert.strictEqual(dated_batch.lookback_days, null, "explicit dates carry no batch period");
+  // A summary batch mixing effective periods is a fatal request error, not
+  // a mislabeled artifact.
+  assert.throws(
+    () =>
+      load_and_mix({
+        lookback_days: 7,
+        batch_email: { recipients: ["dev@example.com"], summary_pdf: true },
+        reports: [
+          { report_type: "magnet_health", system_id: "SME01096" },
+          { report_type: "magnet_health", system_id: "SME01098", window: { lookback_days: 14 } }
+        ]
+      }),
+    /summary batch must share one period/
+  );
+  // Without a summary document, mixed periods are allowed (independent
+  // briefs) — the batch just has no single period to tag.
+  const mixed_briefs = load_and_mix({
+    reports: [
+      { report_type: "magnet_health", system_id: "SME01096", recipients: ["dev@example.com"], output: { email: false, pdf: false } },
+      { report_type: "magnet_health", system_id: "SME01098", recipients: ["dev@example.com"], window: { lookback_days: 7 }, output: { email: false, pdf: false } }
+    ]
+  });
+  assert.strictEqual(mixed_briefs.lookback_days, null, "mixed periods yield no batch tag");
+}
+
+// Round-1 F2: artifact identity = slug + scope-set hash, never the
+// internal fleet name.
+{
+  const res = (ids, label) => ({
+    system_ids: ids,
+    label,
+    scope_hash: require("crypto").createHash("sha1").update([...ids].sort().join(",")).digest("hex").slice(0, 8)
+  });
+  const a = scope_artifact_id(res(["SME00001", "SME00002"], "Acme Health"));
+  const b = scope_artifact_id(res(["SME00001", "SME00003"], "Acme Health"));
+  assert.ok(a.startsWith("Acme-Health-"), a);
+  assert.notStrictEqual(a, b, "same label, different scope-sets: different artifact ids");
+  assert.strictEqual(
+    a,
+    scope_artifact_id(res(["SME00002", "SME00001"], "Acme Health")),
+    "hash is order-independent: same set, same id"
+  );
+  // A label with no ASCII word characters must never fall back to the
+  // internal fleet artifact names.
+  const cjk = scope_artifact_id(res(["SME00001"], "医疗集团"));
+  assert.ok(/^Scoped-[0-9a-f]{8}$/.test(cjk), `non-ASCII label gets the Scoped fallback: ${cjk}`);
 }
 
 console.log("check_scope: all assertions passed");

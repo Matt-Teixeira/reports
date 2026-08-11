@@ -81,13 +81,18 @@ const send_summary_email = async (
     themed_table(columns, rows);
 
   if (failures && failures.length) {
+    // A scoped run's email is customer-facing: failure wording goes
+    // through the same whitelist classifier as the scoped PDF (raw
+    // messages stay in the run log), so the two can never disagree.
+    const { customer_failure_reason } = require("../render/fleet_model");
+    const reason_of = (m) => (scope_label ? customer_failure_reason(m) : m);
     body_html +=
       `<p style="${FONT}font-size:13px;color:${COLORS.navy};margin:18px 0 8px 0;"><b>${failures.length} system${failures.length === 1 ? "" : "s"} did not produce a report</b></p>` +
       themed_table(
         [{ label: "SYSTEM", width: "90" }, { label: "REASON" }],
         failures.map((f) => [
           `<b>${esc(f.system_id)}</b>`,
-          `<span style="color:${COLORS.grey};">${esc(f.message)}</span>`
+          `<span style="color:${COLORS.grey};">${esc(reason_of(f.message))}</span>`
         ])
       );
   }
@@ -98,9 +103,12 @@ const send_summary_email = async (
       filename: path.basename(fleet_pdf_path),
       path: fleet_pdf_path
     });
+    const doc_name = scope_label
+      ? `Magnet Health Summary — ${esc(scope_label)}`
+      : "Fleet Magnet Health Summary";
     body_html =
       `<p style="${FONT}font-size:13px;color:${COLORS.navy};margin:0 0 12px 0;">` +
-      `The attached <b>Fleet Magnet Health Summary</b> carries current helium, primary metric, and compressor state for every system below.</p>` +
+      `The attached <b>${doc_name}</b> carries current helium, primary metric, and compressor state for every system below.</p>` +
       body_html;
   }
 
