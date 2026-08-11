@@ -220,3 +220,38 @@ rather than assuming it.
    `check_fleet.js` — failure mode or tautology, each.
 5. **Ran**: the exact commands you executed and their results.
 6. **Test gaps**: behaviors you judged correct but found unasserted.
+
+---
+
+## Round-1 outcome (2026-08-11) — all seven findings fixed (`7e06078`)
+
+Verdict was DO NOT SHIP; every finding was reproduced, fixed, and given a
+regression test. For re-review: verify each fix holds and that no fix
+introduced a new defect.
+
+| # | Fix | Regression test |
+|---|---|---|
+| F1 (blocker) | `report_defaults` rejects reserved keys (`system_id`, `report_type`); authoritative fields applied LAST in synthesis; materialized ids asserted equal to the resolved scope | `check_scope.js`: reserved-key rejection both keys; benign defaults leave ids exactly the resolved set |
+| F2 | Artifact identity = slug + 8-hex scope-set hash (`scope_artifact_id`), order-independent; non-ASCII labels get `Scoped-<hash>` — a scoped run can never fall back to the internal fleet names, and same-label different-set runs cannot collide | `check_scope.js`: distinct sets differ, permuted set matches, CJK label fallback |
+| F3 | Batch period derived from the normalized windows AFTER overrides; summary batches mixing effective periods are fatal; uniform explicit dates yield null (no tag); brief-only batches may mix (no single tag) | `check_scope.js`: per-report-only period, dated batch null, mixed-summary rejection, mixed-briefs null |
+| F4 | Scoped cover states resolution: `N systems in scope · N analyzed · N failed · N excluded · N sites` | `check_fleet.js` scoped fixture: 5 in scope / 4 analyzed / 2 failed asserted on the rendered cover |
+| F5 | `customer_failure_reason` whitelist shared by scoped PDF and scoped summary email; unknown errors collapse to "report could not be generated"; raw errors stay on the internal document and in logs; the scoped email attachment line names the scoped document | `check_fleet.js`: SQL-error message absent from the scoped page, present on the internal one, generic line present |
+| F6 | A scope must be exactly ONE recognized key — recognized-beside-unknown fails | `check_scope.js`: `{customer_id, site_id}` and `{customer_id, typo_filter}` both rejected |
+| F7 | `?? 30` not `\|\| 30`: zero reaches validation and fails | `check_scope.js`: per-report zero under a 7-day batch throws |
+
+Also closed from the fixture-audit list: hostile scope label
+(`Smith & Sons <script>…`) asserted escaped in the rendered page; the
+scoped cover-count case Codex spotted latent in the fixture is now
+asserted. Refactor-equivalence note accepted as stated: pre-existing
+shapes gain `window.lookback_days`, the returned batch period, and the
+(delivery-isolated) sidecar — intended additions, no decision changes.
+
+Still accepted: SQL untestable without live DB (live results recorded
+above); email bodies not built in tests (prior-series stance) beyond the
+shared classifier; no snapshot harness for pre-refactor loader output —
+the fleet fixtures and live probes stand in.
+
+Live after fixes: the Lee Health probe renders
+`Avante-Lee-Health-bfd3299e-Magnet-Health-Summary-7d-2026-08-11` with
+"5 systems in scope · 5 analyzed · 4 sites" on the cover. All five dev
+checks pass.
