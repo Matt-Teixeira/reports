@@ -156,26 +156,33 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
     // them ("changes since last report" is buildable only if this history
     // exists). Capture starts now, consumer comes later.
     if (opts.archive_records) {
-      const archive_dir = path.join(__dirname, "archive");
-      fs.mkdirSync(archive_dir, { recursive: true });
-      const sidecar = path.join(
-        archive_dir,
-        `summary-records-${slug || "fleet"}${period_tag}-${date}.json`
-      );
-      fs.writeFileSync(
-        sidecar,
-        JSON.stringify(
-          {
-            generated_at: new Date().toISOString(),
-            scope: scope || null,
-            period_tag: period_tag || null,
-            records,
-            failures
-          },
-          null,
-          1
-        )
-      );
+      // Isolated: history capture is auxiliary — a failed sidecar write
+      // must never sink the summary document's delivery.
+      try {
+        const archive_dir = path.join(__dirname, "archive");
+        fs.mkdirSync(archive_dir, { recursive: true });
+        const sidecar = path.join(
+          archive_dir,
+          `summary-records-${slug || "fleet"}${period_tag}-${date}.json`
+        );
+        fs.writeFileSync(
+          sidecar,
+          JSON.stringify(
+            {
+              generated_at: new Date().toISOString(),
+              scope: scope || null,
+              period_tag: period_tag || null,
+              records,
+              failures
+            },
+            null,
+            1
+          )
+        );
+      } catch (sidecar_error) {
+        await addLogEvent(E, run_log, "build_fleet_summary", cat, { job_id, sidecar: true }, sidecar_error);
+        console.error(`records sidecar failed (delivery unaffected): ${sidecar_error.message}`);
+      }
     }
     const note = {
       job_id,
