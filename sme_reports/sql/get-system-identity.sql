@@ -4,6 +4,7 @@ SELECT
     systems.modality,
     systems.model,
     systems.cus_sys_id,
+    systems.site_id,
     sites.name AS site_name,
     sites.city,
     sites.state,

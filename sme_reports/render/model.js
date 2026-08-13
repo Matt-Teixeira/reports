@@ -345,20 +345,22 @@ const build_render_model = ({
     (thr.high_gt !== null && v >= thr.high_gt) ||
     (thr.high_lt !== null && v <= thr.high_lt);
 
-  // Threshold line(s): single OEM-style line, or high+low pair for
-  // band-alerted metrics (Siemens absolute PSIA).
-  const alert_prefix = vendor.key.split("_")[0]; // SIEMENS_NON_TIM -> SIEMENS
+  // Threshold line(s): a single upper line, or upper+lower pair for
+  // band-alerted metrics (Siemens absolute PSIA). Deliberately NOT named
+  // after the manufacturer ("PHILIPS ALERT — …"): these are OUR alert
+  // limits from alert.models, and a vendor's name on the line read as an
+  // OEM specification. "UPPER/LOWER LIMIT" names the line's role and
+  // makes the >/< glyphs redundant.
   const threshold_lines = [];
   if (thr.high_gt !== null)
     threshold_lines.push({
       value: thr.high_gt,
-      label: `${alert_prefix} ALERT — ${thr.high_lt !== null ? ">" : ""}${thr.high_gt} ${units.pressure}`
+      label: `UPPER LIMIT — ${thr.high_gt} ${units.pressure}`
     });
   if (thr.high_lt !== null)
     threshold_lines.push({
       value: thr.high_lt,
-      // &lt; — a literal "<" inside SVG text is unsafe markup
-      label: `${alert_prefix} ALERT — &lt;${thr.high_lt} ${units.pressure}`
+      label: `LOWER LIMIT — ${thr.high_lt} ${units.pressure}`
     });
 
   // Data-quality banner (RULES.md §5): a convicted sensor chain reframes the
@@ -516,14 +518,17 @@ const build_render_model = ({
     title: `Avante — ${identity.system_id} Magnet Health`,
     analyzed_date: analyzed,
     h1_text: `${identity.system_id} — ${identity.site_name} ${identity.modality || ""}`.trim(),
+    // Identity + period only. The capture count lives in foot_source and the
+    // analyzed date in the header, so the sub-line no longer repeats them —
+    // it leads with the site id, the id a customer files this magnet under.
     sub_line: [
+      identity.site_id,
       identity.customer_name,
       `${identity.manufacturer} ${identity.modality || ""}`.trim(),
       identity.city && identity.state
         ? `${identity.city}, ${identity.state}`
         : identity.city || identity.state,
-      `${win_span} monitor data (${fmt.count(facts.counts.captures)} captures)`,
-      `analyzed ${analyzed}`
+      win_span
     ]
       .filter(Boolean)
       .join(" · "),

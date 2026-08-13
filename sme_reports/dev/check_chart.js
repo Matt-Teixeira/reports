@@ -29,14 +29,14 @@ const T0 = Date.UTC(2026, 5, 28);
     y_spec: pressure_domain(28, 272, { high_gt: 100, high_lt: null }),
     y_format: (v) => `${v}`,
     event_windows: [{ start: T0 + 1.5 * DAY, end: T0 + 2 * DAY }],
-    thresholds: [{ value: 100, label: "PHILIPS ALERT — 100 mbar" }],
+    thresholds: [{ value: 100, label: "UPPER LIMIT — 100 mbar" }],
     markers: [{ t: T0 + 2 * DAY, v: 262, color: "#C25E00", label: "now 262", dy: 15 }]
   });
   assert.ok(svg.startsWith('<svg viewBox="0 0 640 152"'), "viewBox");
   assert.ok(svg.includes("<polygon"), "band polygon present in band mode");
   assert.ok(svg.includes("<polyline"), "series polyline");
   assert.ok(svg.includes('stroke-dasharray="5,4"'), "threshold dashes");
-  assert.ok(svg.includes("PHILIPS ALERT — 100 mbar"), "threshold label");
+  assert.ok(svg.includes("UPPER LIMIT — 100 mbar"), "threshold label");
   assert.ok(svg.includes('fill="#F58025" opacity="0.09"'), "event rect");
   // Pinned geometry: a single event must keep the exact rect the pre-cluster
   // single-window code emitted — the loop changed how many rects are drawn,
@@ -98,6 +98,7 @@ const philips_identity = {
   manufacturer: "Philips",
   modality: "MRI",
   cus_sys_id: "1046",
+  site_id: "C104201",
   site_name: "Althea Smyrna",
   city: "Smyrna",
   state: "TN",
@@ -152,7 +153,7 @@ const philips_series = [];
     ["COMPRESSOR", "PRESSURE NOW", "EVENT PEAK", "TEMP ALARM", "HELIUM"]
   );
   assert.ok(vm.tiles[3].v === "TRIGGERED", "temp alarm tile triggered");
-  assert.ok(vm.pressure_chart_svg.includes("PHILIPS ALERT — 100 mbar"));
+  assert.ok(vm.pressure_chart_svg.includes("UPPER LIMIT — 100 mbar"));
   assert.ok(
     vm.pressure_chart_svg.includes('height="3" fill="#C25E00"'),
     "temp-alarm strip on pressure chart"
@@ -836,7 +837,7 @@ const philips_series = [];
     vm.tiles.map((t) => t.k),
     ["COMPRESSOR", "COLDHEAD", "PRESSURE NOW", "EVENT PEAK", "HELIUM"]
   );
-  assert.ok(vm.pressure_chart_svg.includes("GE ALERT — 5 PSI"));
+  assert.ok(vm.pressure_chart_svg.includes("UPPER LIMIT — 5 PSI"));
   assert.ok(vm.tiles[3].s.includes("under threshold"), "peak under GE line");
   const notes = vm.rx_cards[2].body;
   assert.ok(notes.includes("72 min"), `clock skew surfaced in data notes: ${notes}`);
@@ -894,8 +895,8 @@ const philips_series = [];
   assert.ok(vm.tiles[1].cls === "good", "43 K coldhead is good for Siemens (warm_k 55)");
   assert.ok(vm.tiles[2].s.includes("within the 14.4–16.4"), `band wording: ${vm.tiles[2].s}`);
   // Band renders BOTH alert lines and a non-zero-anchored y domain
-  assert.ok(vm.pressure_chart_svg.includes(">16.4 PSI"), "high band line");
-  assert.ok(vm.pressure_chart_svg.includes("&lt;14.4 PSI"), "low band line");
+  assert.ok(vm.pressure_chart_svg.includes("UPPER LIMIT — 16.4 PSI"), "high band line");
+  assert.ok(vm.pressure_chart_svg.includes("LOWER LIMIT — 14.4 PSI"), "low band line");
   write_html(path.join(__dirname, "..", "out"), "dev-synthetic-siemens", build_page(vm));
 }
 
@@ -968,7 +969,7 @@ const philips_series = [];
     ["COMPRESSOR", "SHIELD NOW", "EVENT PEAK", "CABINET", "HELIUM"]
   );
   assert.ok(vm.pressure_heading.startsWith("SHIELD TEMP"), vm.pressure_heading);
-  assert.ok(vm.pressure_chart_svg.includes("SIEMENS ALERT — 100 K"), "shield alert line");
+  assert.ok(vm.pressure_chart_svg.includes("UPPER LIMIT — 100 K"), "shield alert line");
   assert.ok(vm.tiles[3].s.includes("warn 38 · alarm 43"), `cabinet tile: ${vm.tiles[3].s}`);
   assert.ok(
     vm.story_html.includes("per EDU vibration sensor"),
@@ -1585,7 +1586,11 @@ const philips_series = [];
     for (let h = 0; h < 720; h++)
       edu_rows.push({ t: Date.UTC(2026, 6, 1, h), room_temp_f: 70 + (h % 5), humidity_pct: 45, probe_0_f: 66, probe_1_f: 68, comp_vib: true });
     return build_render_model({
-      identity: { system_id: "SME99098", manufacturer: "Philips", modality: "MRI", site_name: "Maximal Story Medical Center", city: "Longtown", state: "TN", customer_name: "Maximal Health Network" },
+      // The customer name is deliberately outsized: the sub-line now carries
+      // only identity + period (site id · customer · make · city · span), so
+      // a long name is what pushes it past the page edge and keeps the
+      // ellipsis assertion below honest.
+      identity: { system_id: "SME99098", manufacturer: "Philips", modality: "MRI", site_id: "C990098", site_name: "Maximal Story Medical Center", city: "Longtown", state: "TN", customer_name: "Maximal Health Network of the Greater Cumberland Valley and Environs" },
       vendor: VENDORS.PHILIPS, series: normalize_philips(raw, VENDORS.PHILIPS), source: "synthetic",
       request: normalize_request({
         report_type: "magnet_health", system_id: "SME99098", recipients: ["dev@example.com"],
@@ -1654,6 +1659,125 @@ const philips_series = [];
     }
   } finally {
     await browser.close();
+  }
+
+  // --- chart label collisions, measured -------------------------------
+  // Labels are laid out against estimated boxes (chart.js); the truth is
+  // what Chromium draws. Every synthetic page's charts AND a set of
+  // adversarial charts are audited here: no two <text> nodes inside one
+  // svg may overlap. The adversarial set reproduces the shipped failure —
+  // SME01403's peak marker printed straight through the threshold label,
+  // because a peak a few mbar under the line put both fixed-position
+  // texts on the same pixels.
+  {
+    const adversarial = [];
+    const T0 = Date.UTC(2026, 6, 1);
+    const DAY = 24 * 3600 * 1000;
+    const days = (n) => T0 + n * DAY;
+    const flat = (v, n = 30, spike, spike_at = 25) =>
+      Array.from({ length: n }, (_, i) => {
+        const val = spike !== undefined && i === spike_at ? spike : v;
+        return { t: days(i), min: val, max: val, v: val };
+      });
+    // (a) The SME01403 shape, faithfully: a 275-mbar start (which stretches
+    // the y-domain to [0,300] and squeezes every label band together), a
+    // peak just UNDER the upper limit ~40% through the window — its label
+    // box lands exactly on the threshold label's historical x=300 spot —
+    // and a late spike ABOVE the line that fouls the right end too, so the
+    // threshold label's first relocation choice is also taken. The first
+    // fix moved the label onto the spike's stroke; this shape keeps all
+    // three constraints live at once.
+    adversarial.push(
+      render_timeseries_chart({
+        points: flat(33, 30, 74, 12).map((p, i) => {
+          const v = i < 3 ? 275 : i === 28 ? 110 : p.v;
+          return { ...p, min: v, max: v, v };
+        }),
+        x_domain: [days(0), days(29)],
+        y_spec: pressure_domain(31, 275, { high_gt: 80, high_lt: null }),
+        y_format: (v) => `${v}`,
+        event_windows: [{ start: days(11), end: days(13) }],
+        thresholds: [{ value: 80, label: "UPPER LIMIT — 80 mbar" }],
+        markers: [
+          { t: days(12), v: 74, color: "#C25E00", label: "peak 74 · Jul 26", dy: -9 },
+          { t: days(29), v: 33, color: "#00695C", label: "now 33", dy: 15 }
+        ]
+      })
+    );
+    // (b) Peak and now both crowded against the line from either side.
+    adversarial.push(
+      render_timeseries_chart({
+        points: flat(78, 30, 84, 27),
+        x_domain: [days(0), days(29)],
+        y_spec: pressure_domain(76, 84, { high_gt: 80, high_lt: null }),
+        y_format: (v) => `${v}`,
+        event_windows: null,
+        thresholds: [{ value: 80, label: "UPPER LIMIT — 80 mbar" }],
+        markers: [
+          { t: days(27), v: 84, color: "#E50B14", label: "peak 84 · Jul 28", dy: -9 },
+          { t: days(29), v: 78, color: "#C25E00", label: "now 78", dy: 15 }
+        ]
+      })
+    );
+    // (c) A banded metric whose data hugs both limits.
+    adversarial.push(
+      render_timeseries_chart({
+        points: flat(16.2, 30, 14.6, 15),
+        x_domain: [days(0), days(29)],
+        y_spec: pressure_domain(14.6, 16.2, { high_gt: 16.4, high_lt: 14.4 }),
+        y_format: (v) => `${v}`,
+        event_windows: null,
+        thresholds: [
+          { value: 16.4, label: "UPPER LIMIT — 16.4 PSI" },
+          { value: 14.4, label: "LOWER LIMIT — 14.4 PSI" }
+        ],
+        markers: [{ t: days(29), v: 16.2, color: "#004E79", label: "16.2 PSI · +0.1", dy: -8 }],
+        start_label: "16.1 PSI"
+      })
+    );
+    write_html(
+      path.join(__dirname, "..", "out"),
+      "dev-synthetic-chart-labels",
+      `<!DOCTYPE html><html><body>${adversarial.map((svg) => `<div style="width:640px">${svg}</div>`).join("")}</body></html>`
+    );
+
+    const files = [
+      ...pages.map((name) => `Avante-dev-synthetic-${name}-Magnet-Health.html`),
+      "Avante-dev-synthetic-chart-labels-Magnet-Health.html"
+    ];
+    const audit_browser = await puppeteer.launch({
+      headless: "new",
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    });
+    try {
+    const page = await audit_browser.newPage();
+    for (const file of files) {
+      await page.goto(`file://${path.join(__dirname, "..", "out", file)}`, { waitUntil: "networkidle0" });
+      const collisions = await page.evaluate(() => {
+        const bad = [];
+        document.querySelectorAll("svg").forEach((svg, si) => {
+          const texts = [...svg.querySelectorAll("text")].map((t) => ({
+            label: t.textContent,
+            r: t.getBoundingClientRect()
+          }));
+          for (let i = 0; i < texts.length; i++)
+            for (let j = i + 1; j < texts.length; j++) {
+              const a = texts[i].r;
+              const b = texts[j].r;
+              // 1px of shared edge is contact, not collision.
+              const x = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+              const y = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+              if (x > 1 && y > 1)
+                bad.push(`svg${si}: "${texts[i].label}" ∩ "${texts[j].label}" (${Math.round(x)}x${Math.round(y)}px)`);
+            }
+        });
+        return bad;
+      });
+      assert.deepStrictEqual(collisions, [], `${file}: overlapping chart labels: ${collisions.join("; ")}`);
+    }
+    } finally {
+      await audit_browser.close();
+    }
   }
   console.log("check_chart: all assertions passed");
 })().catch((e) => {
