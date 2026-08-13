@@ -17,7 +17,7 @@ const {
   section_limit,
   SECTIONS
 } = require("../render/fleet_model");
-const { build_fleet_page, esc, trunc } = require("../render/fleet_page");
+const { build_fleet_page, esc, trunc, SECTION_W } = require("../render/fleet_page");
 const {
   build_summary_facts,
   is_centered_band,
@@ -298,6 +298,36 @@ const rec = (over = {}) => ({
   assert.strictEqual(chunk_rows(new Array(27).fill(0), 26, 30).length, 2, "one over spills");
   assert.strictEqual(chunk_rows(new Array(56).fill(0), 26, 30).length, 2);
   assert.strictEqual(chunk_rows(new Array(57).fill(0), 26, 30).length, 3);
+
+  // The legend is pinned above the LAST page's footer, so the last page can
+  // never also be a full table. reserve_tail re-splits a final chunk that
+  // would have run into it, and leaves a short one alone.
+  const { reserve_tail, LEGEND_ROWS } = require("../render/fleet_model");
+  assert.deepStrictEqual(
+    reserve_tail([[1, 2, 3]], LEGEND_ROWS),
+    [[1, 2, 3]],
+    "a last page already short enough is untouched"
+  );
+  assert.deepStrictEqual(reserve_tail([], LEGEND_ROWS), [], "no pages, nothing to reserve");
+  {
+    const full = Array.from({ length: 25 }, (_, i) => i);
+    const out = reserve_tail([full], LEGEND_ROWS);
+    assert.strictEqual(out.length, 2, "a full last page splits in two");
+    assert.ok(out[out.length - 1].length <= LEGEND_ROWS, "the tail fits the budget");
+    assert.deepStrictEqual(out.flat(), full, "and no row is lost or duplicated");
+  }
+  {
+    // Balanced, not shoved: 14 rows against a 12-row budget must not strand a
+    // two-row page just to make the last one exactly the budget.
+    const rows = Array.from({ length: 14 }, (_, i) => i);
+    const out = reserve_tail([rows], LEGEND_ROWS);
+    assert.deepStrictEqual(
+      out.map((p) => p.length),
+      [7, 7],
+      "a small overflow halves instead of stranding a sliver page"
+    );
+    assert.deepStrictEqual(out.flat(), rows, "no row lost");
+  }
   // Every row lands on exactly one page.
   const rows = Array.from({ length: 163 }, (_, i) => i);
   const pages = chunk_rows(rows, ROWS_FIRST_PAGE, ROWS_PER_PAGE);
@@ -1219,6 +1249,18 @@ const rec = (over = {}) => ({
   for (const s of SECTIONS) {
     assert.strictEqual(s.columns[3], "primary", `${s.vendor_key} primary at position 4`);
     assert.strictEqual(s.columns[4], "line", `${s.vendor_key} line at position 5`);
+    // SECTION_W is a per-section PIXEL budget of the 7.5in (720px) content
+    // column, with every column present. A row that drifts off 720 silently
+    // rescales every column in that section; a missing key renders width
+    // "undefined" — both are cheaper to catch here than in the browser pass.
+    const w = SECTION_W[s.vendor_key];
+    for (const c of s.columns)
+      assert.ok(Number.isFinite(w[c]), `${s.vendor_key} SECTION_W missing ${c}`);
+    assert.strictEqual(
+      s.columns.reduce((n, c) => n + w[c], 0),
+      720,
+      `${s.vendor_key} SECTION_W must sum to the 720px content column`
+    );
   }
 
   // The legend ties the pair together and the other columns to their own
@@ -1226,8 +1268,23 @@ const rec = (over = {}) => ({
   // The legend is a structured glossary, not prose: every term the document
   // uses without inline explanation has an entry, including per-system
   // vocabulary like "flicker" that readers meet when they open a brief.
-  assert.ok(html.includes('class="legend pin"'), "legend box pinned to the cover");
+  assert.ok(html.includes('class="legend pin"'), "legend box present");
   assert.ok(html.includes(">LEGEND<"), "captioned");
+  // It closes the document rather than riding the cover: reference material
+  // sits behind the findings, and a bottom-pinned box on a SHORT cover (a
+  // five-system scoped summary) stranded white space in the middle of the
+  // flagship page instead of collecting it at the foot.
+  {
+    const sheets = html.split('<div class="page">');
+    const carrying = sheets
+      .map((s, i) => (s.includes('class="legend pin"') ? i : -1))
+      .filter((i) => i > 0);
+    assert.deepStrictEqual(
+      carrying,
+      [sheets.length - 1],
+      "the legend rides the LAST page, and only the last page"
+    );
+  }
   for (const term of [
     "% OF LIMIT</b> — that reading as a share",
     "PEAK OVER LIMIT</b> — the period",
@@ -1244,7 +1301,7 @@ const rec = (over = {}) => ({
     !html.includes("Each system's full one-page brief — charts, timeline"),
     "the verbose paragraph is gone"
   );
-  // One legend, cover only.
+  // One legend, last page only.
   assert.strictEqual((html.match(/class="legend pin"/g) || []).length, 1);
 }
 
@@ -1599,7 +1656,18 @@ const rec = (over = {}) => ({
     // Every condition must appear in every vendor section: column widths
     // differ per section, so a label that fits in Siemens (8 columns) can
     // still ellipsise in GE (9). 4 vendors x 5 conditions = the first 20.
-    const archetype = i < 20 ? ARCH[Math.floor(i / 4) % 5] : "stable_healthy";
+    // Records 28-43 are attention-bearing too, purely so the attention list
+    // OVERFLOWS the cover's ATTENTION_FIRST_PAGE budget. With only ~20
+    // attention rows the fixture never filled page one, so the browser
+    // measurement could not see the cover's real capacity — and the cover
+    // budget was raised to a value that measured 100% full with ONE pixel
+    // spare on the live document while this file still reported green.
+    const archetype =
+      i < 20
+        ? ARCH[Math.floor(i / 4) % 5]
+        : i >= 28 && i < 44
+          ? "compressor_stop_recovered"
+          : "stable_healthy";
     // Records 20-27: every overlay state, in every vendor, so the browser
     // measurement covers the DATA ISSUES section and warm/no-signal rows —
     // the SYSTEM column of that section shipped truncated once because no
@@ -1634,6 +1702,62 @@ const rec = (over = {}) => ({
         data_flags: { primary: true, helium: false, coldhead: false, shield: true, cabinet: false },
         shield_k: 382.8
       });
+    // Records 44-47: ONE centered-band row per vendor, so every section MIXES
+    // banded rows with one-sided ones and therefore wears the widest header
+    // this column can take — "VS ALERT LIMIT". Without a mixed section the
+    // measurement only ever saw "% OF LIMIT" (54px) or "WITHIN BAND" (66px),
+    // and the 74px mixed header shipped truncated in a real customer document
+    // while this file reported green. Banding is a property of per-system
+    // threshold data, not of the vendor, so all four sections carry one.
+    if (i >= 44 && i < 48)
+      return rec({
+        system_id: `SME${String(10000 + i)}`,
+        site_name: `Site ${i} Regional Medical Center`,
+        city: `City ${i}`,
+        vendor_key: v.key,
+        manufacturer: v.manufacturer,
+        archetype: "stable_healthy",
+        primary_pct: null,
+        primary_band: 0.5,
+        primary_band_pos: 0.62,
+        thr_high_gt: 16.3,
+        thr_high_lt: 4.1,
+        coldhead_k: v.key === "GE" ? 4.4 : v.key === "SIEMENS" ? 43 : null,
+        coldhead_warm_k: v.key === "GE" ? 10 : v.key === "SIEMENS" ? 55 : null,
+        shield_k: v.key === "GE" ? 51 : null,
+        cabinet_c: v.key === "SIEMENS_NON_TIM" ? 25 : null,
+        cabinet_warn: v.key === "SIEMENS_NON_TIM" ? 38 : null,
+        cabinet_alarm: v.key === "SIEMENS_NON_TIM" ? 43 : null
+      });
+    // Records 28-39: the compressor history's DISPLAY BOUNDS, one of each
+    // capped form in every vendor section — count cap beside the widest
+    // decimal total ("99+ evt · 99.5h"), integer hours ("10 evt · 720h"),
+    // and the hour cap ("3 evt · 999+h") — so the geometry pass measures
+    // the widest second lines cell_compressor can produce, not just the
+    // mild "2 evt · 12.5h" that once let an undersized column pass green.
+    if (i >= 28 && i < 40) {
+      const [event_count, off_hours_total] = [
+        [120, 99.5],
+        [10, 720],
+        [3, 1200]
+      ][Math.floor((i - 28) / 4)];
+      return rec({
+        system_id: `SME${String(10000 + i)}`,
+        site_name: `Site ${i} Regional Medical Center`,
+        city: `City ${i}`,
+        vendor_key: v.key,
+        manufacturer: v.manufacturer,
+        archetype: "compressor_stop_recovered",
+        event_count,
+        off_hours_total,
+        coldhead_k: v.key === "GE" ? 4.4 : v.key === "SIEMENS" ? 43 : null,
+        coldhead_warm_k: v.key === "GE" ? 10 : v.key === "SIEMENS" ? 55 : null,
+        shield_k: v.key === "GE" ? 51 : null,
+        cabinet_c: v.key === "SIEMENS_NON_TIM" ? 25 : null,
+        cabinet_warn: v.key === "SIEMENS_NON_TIM" ? 38 : null,
+        cabinet_alarm: v.key === "SIEMENS_NON_TIM" ? 43 : null
+      });
+    }
     return rec({
       system_id: `SME${String(10000 + i)}`,
       site_name: `Site ${i} Regional Medical Center`,
@@ -1652,6 +1776,19 @@ const rec = (over = {}) => ({
       off_hours_total: archetype.startsWith("compressor") ? 12.5 : 0
     });
   });
+  // Two of three systems carry a customer's own id (534 of 865 live), in the
+  // real fleet's shapes up to the widest on record ("2342574 / SUMMITVCT",
+  // 19 chars) — the SYSTEM column is measured against the two-line cell, and
+  // the widest customer id is what sizes it.
+  for (const [i, r] of records.entries())
+    r.cus_sys_id =
+      i === 0
+        ? "ЩЩЩЩЩЩЩЩ" // non-ASCII: priced by the conservative fallback, must render whole at 6pt
+        : i % 3 === 2
+          ? null
+          : i % 7 === 1
+            ? "2342574 / SUMMITVCT"
+            : `45${String(600 + (i % 40))}-13${String(10000 + i)}`;
   const failures = Array.from({ length: 17 }, (_, i) => ({
     system_id: `SME${String(90000 + i)}`,
     message: `no PHILIPS monitor data for SME${String(90000 + i)} in the requested window`
@@ -1740,11 +1877,30 @@ const rec = (over = {}) => ({
         scope: {
           label: "Scoped Fixture Health Network",
           detail: { kind: "customer_id", customers: 1, sites: 4, systems: 16 }
-        }
+        },
+        // Exclusions here exercise the RIDE-ALONG placement: failures exist
+        // and vendor sections follow, so the block shares the failures page
+        // while the legend closes the document elsewhere.
+        excluded: { ids: ["SME13604", "SME13605", "SME13606"], note: "RF/SC service stations, not fleet" }
       }
     )
   );
   const scoped_path = write_html(out_dir, "dev-scoped-summary", scoped_html);
+
+  // The exclusion statement's WORST page, at the loader's bounds (100 ids,
+  // a 239-char note against the 240 cap): an all-excluded run — no
+  // sections, no failures — puts the block and the pinned legend on the
+  // SAME page, the layout that once let an unbounded note run underneath
+  // the legend while the gate, which did not measure .note, stayed green.
+  const exclusion_html = build_fleet_page(
+    build_fleet_model([], [], {
+      excluded: {
+        ids: Array.from({ length: 100 }, (_, i) => `SME9${String(1000 + i)}`),
+        note: "Excluded at the customer's request pending the service-contract renewal; these systems remain monitored by the site's own team and will rejoin the weekly summary once coverage resumes. Contact remote solutions before re-adding any of them"
+      }
+    })
+  );
+  const exclusion_path = write_html(out_dir, "dev-exclusions-summary", exclusion_html);
 
   // Render a real PDF and MEASURE the result. Page-break placement is
   // invisible in the HTML string, and `.page` is a fixed 11in with
@@ -1768,9 +1924,19 @@ const rec = (over = {}) => ({
         // Both artifacts go through the same geometry pass. The fullness
         // guard applies to the internal fleet document only: a small
         // customer's scoped summary legitimately produces sparse pages.
+        // The one tolerated truncation: a customer id that exceeds even the
+        // 6pt font floor of its section's SYSTEM column. With today's widths
+        // that is exactly the 19-char id in GE rows (6pt needs ~101px, GE's
+        // system column holds 74) — anywhere else, or any shorter id, the
+        // font tiers must have fitted it, so the expected count is computed
+        // from the fixture rather than waved through.
+        const WIDE_CID = "2342574 / SUMMITVCT";
+        const cid_overflow = (rs) =>
+          rs.filter((r) => r.vendor_key === "GE" && r.cus_sys_id === WIDE_CID).length;
         for (const doc of [
-          { name: "fleet", file: html_path, dense: true },
-          { name: "scoped", file: scoped_path, dense: false }
+          { name: "fleet", file: html_path, dense: true, cid_clips: cid_overflow(records) },
+          { name: "scoped", file: scoped_path, dense: false, cid_clips: cid_overflow(records.slice(16, 32)) },
+          { name: "exclusions", file: exclusion_path, dense: false, cid_clips: 0 }
         ]) {
         await page.goto(`file://${doc.file}`, { waitUntil: "networkidle0" });
         const measured = await page.evaluate(() => {
@@ -1784,7 +1950,10 @@ const rec = (over = {}) => ({
             if (pinned) usable = Math.min(usable, pinned.getBoundingClientRect().top - top);
             let overflowing = 0;
             let lowest = 0;
-            for (const el of pg.querySelectorAll("tbody tr, h1, h2, table, .roll")) {
+            // .note and .lead are flowed prose (the exclusion statement is a
+            // .note) — leaving them out of this scan once let an exclusion
+            // block run underneath the pinned legend with the gate green.
+            for (const el of pg.querySelectorAll("tbody tr, h1, h2, table, .roll, .note, .lead")) {
               const bottom = el.getBoundingClientRect().bottom - top;
               lowest = Math.max(lowest, bottom);
               if (el.tagName === "TR" && bottom > usable) overflowing += 1;
@@ -1823,15 +1992,33 @@ const rec = (over = {}) => ({
             const clipped_cells = {};
             pg.querySelectorAll("table").forEach((table) => {
               const keys = keys_of(table);
+              const measure = (el) => {
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                const w = range.getBoundingClientRect().width;
+                range.detach();
+                return w;
+              };
               table.querySelectorAll("thead th, tbody td").forEach((td) => {
                 const style = getComputedStyle(td);
                 const pad =
                   parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
-                const range = document.createRange();
-                range.selectNodeContents(td);
-                const text_width = range.getBoundingClientRect().width;
-                range.detach();
-                if (text_width <= td.clientWidth - pad + 1) return;
+                const avail = td.clientWidth - pad + 1;
+                // A two-line SYSTEM cell holds two different promises: the
+                // SME id line must NEVER clip, while the customer-id line is
+                // font-tiered to fit and allowed to ellipsise only past its
+                // 6pt floor — so the lines are measured separately, against
+                // separately asserted budgets below.
+                const cid = td.querySelector(".cid");
+                if (cid) {
+                  if (measure(cid) > avail)
+                    clipped_cells["SYSTEM (customer id)"] =
+                      (clipped_cells["SYSTEM (customer id)"] || 0) + 1;
+                  if (measure(td.querySelector(".m")) > avail)
+                    clipped_cells["SYSTEM"] = (clipped_cells["SYSTEM"] || 0) + 1;
+                  return;
+                }
+                if (measure(td) <= avail) return;
                 const label =
                   td.tagName === "TH"
                     ? `${td.textContent.trim()} (header)`
@@ -1887,6 +2074,18 @@ const rec = (over = {}) => ({
           squeezed,
           {},
           `${doc.name}: columns truncated that must not be: ${JSON.stringify(squeezed)}`
+        );
+        // The customer-id line clips exactly as often as the fixture says it
+        // must — more means the font tiers or widths regressed, fewer means
+        // the fixture no longer exercises the overflow path.
+        const cid_clipped = measured.reduce(
+          (n, m) => n + (m.clipped_cells["SYSTEM (customer id)"] || 0),
+          0
+        );
+        assert.strictEqual(
+          cid_clipped,
+          doc.cid_clips,
+          `${doc.name}: ${cid_clipped} customer-id lines clipped, expected ${doc.cid_clips}`
         );
         }
       } finally {

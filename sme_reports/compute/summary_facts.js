@@ -225,6 +225,9 @@ const build_summary_facts = (facts, identity) => {
   return {
     // --- identity -----------------------------------------------------
     system_id: identity.system_id,
+    // The id the customer files this magnet under; null-normalized so an
+    // empty DB string can't render an empty first line in the SYSTEM cell.
+    cus_sys_id: identity.cus_sys_id || null,
     site_name: identity.site_name,
     customer_name: identity.customer_name,
     city: identity.city,

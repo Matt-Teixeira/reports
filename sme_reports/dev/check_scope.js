@@ -171,6 +171,38 @@ const {
     ["SME01096", "SME01098"]
   );
   assert.deepStrictEqual(m.excluded, { ids: ["SME01097"], note: "test rig" });
+
+  // The exclusion statement renders verbatim in one block that can share a
+  // page with the pinned legend, so its inputs are bounded AT THE LOADER —
+  // an oversized list or note is a fatal request error, never a clipped
+  // page. check_fleet's all-excluded geometry doc measures the bound
+  // maxima; these assert the bounds actually hold the line.
+  const many = Array.from({ length: 101 }, (_, i) => `SME9${String(1000 + i)}`);
+  assert.throws(
+    () =>
+      materialize_scoped_requests(
+        {
+          scope: { customer_id: "C0151" },
+          report_defaults: { recipients: ["dev@example.com"] },
+          exclude: many
+        },
+        many
+      ),
+    /at most 100/
+  );
+  assert.throws(
+    () =>
+      materialize_scoped_requests(
+        {
+          scope: { customer_id: "C0151" },
+          report_defaults: { recipients: ["dev@example.com"] },
+          exclude: ["SME01097"],
+          exclude_note: "x".repeat(241)
+        },
+        ["SME01096", "SME01097"]
+      ),
+    /keep it under 240/
+  );
   for (const r of m.requests) {
     assert.deepStrictEqual(r.recipients, ["dev@example.com"]);
     assert.strictEqual(r.output.pdf, false);

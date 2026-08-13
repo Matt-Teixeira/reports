@@ -159,6 +159,20 @@ const assemble = (raw, list) => {
     const drop = new Set(raw.exclude);
     const removed = list.filter((r) => drop.has(r.system_id)).map((r) => r.system_id);
     list = list.filter((r) => !drop.has(r.system_id));
+    // The document states every excluded id and the note VERBATIM in one
+    // block (fleet_page.js), which in the worst layout shares its page with
+    // the pinned legend. These bounds are what keeps that block clear of the
+    // legend — check_fleet's all-excluded geometry doc measures exactly the
+    // bound maxima — so past them the request fails loudly here rather than
+    // the page clipping silently there.
+    if (removed.length > 100)
+      fail(
+        `exclude removes ${removed.length} systems; the exclusion statement can name at most 100 — split the run or narrow the exclusion`
+      );
+    if (typeof raw.exclude_note === "string" && raw.exclude_note.length > 240)
+      fail(
+        `exclude_note is ${raw.exclude_note.length} chars; keep it under 240 so the exclusion statement stays one block`
+      );
     if (removed.length)
       excluded = {
         ids: removed,

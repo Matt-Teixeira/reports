@@ -33,12 +33,44 @@ const ROWS_FIRST_PAGE = 23;
 // The overview's own budgets: page 1 spends most of its height on the
 // headline and the condition rollup, so it holds fewer attention rows than a
 // continuation page.
-// The pinned legend box claims the bottom of page 1; every time it grows,
-// this shrinks — check_fleet.js measures the real geometry, so a mismatch
-// fails loudly instead of clipping rows.
-const ATTENTION_FIRST_PAGE = 15;
+// The legend used to be pinned to the bottom of page 1 and cost this budget
+// 12 rows; it now closes the document instead (see LEGEND_ROWS and the
+// .legend.pin note in fleet_page.js), so the cover got those rows back.
+// check_fleet.js measures the real geometry, so a mismatch fails loudly
+// instead of clipping rows.
+// 25 measured at 100% of the cover's usable height with ONE pixel to spare on
+// the live fleet document — passing, but a single-pixel margin on a page whose
+// masthead content varies week to week is not a margin. 24 keeps a row's worth.
+const ATTENTION_FIRST_PAGE = 24;
 const ATTENTION_PER_PAGE = 24;
 const FAILURES_PER_PAGE = 20;
+
+// The legend is pinned above the footer of the LAST page, so the last page
+// cannot also carry a full table. This is that room expressed in table rows,
+// measured in Chromium against the rendered legend box — not estimated.
+// Whichever group of pages ends the document has its final chunk re-split so
+// it never exceeds this.
+const LEGEND_ROWS = 12;
+
+// Re-split a page group's final chunk so it leaves room for the pinned
+// legend. One split always suffices: the final chunk is at most a full page,
+// so the head is itself under a page.
+//
+// The split is balanced rather than "shove exactly `tail` onto a new page":
+// a 14-row final chunk against a 12-row budget would otherwise become 2 + 12
+// and strand a two-row page, so it takes the larger of an even halving and
+// the budget — whichever still fits. Capped at `tail`, which is the actual
+// constraint.
+const reserve_tail = (pages, tail) => {
+  if (!pages.length) return pages;
+  const out = pages.slice();
+  const last = out[out.length - 1];
+  if (last.length <= tail) return out;
+  const take = Math.min(tail, Math.ceil(last.length / 2));
+  out[out.length - 1] = last.slice(0, last.length - take);
+  out.push(last.slice(last.length - take));
+  return out;
+};
 
 // Section order and per-variant column sets. Each variant lists only the
 // channels it actually has — Philips has no coldhead, GE has no cabinet,
@@ -338,22 +370,46 @@ const build_fleet_model = (records, failures, meta = {}) => {
   // this document, so it is shown in full rather than truncated with a
   // "+N more" that sends the reader hunting through the vendor sections.
   const attention_pages = chunk_rows(attention, ATTENTION_FIRST_PAGE, ATTENTION_PER_PAGE);
-  const data_issue_pages = chunk_rows(data_issues, FAILURES_PER_PAGE, FAILURES_PER_PAGE);
-  const failure_pages = chunk_rows(
+  let data_issue_pages = chunk_rows(data_issues, FAILURES_PER_PAGE, FAILURES_PER_PAGE);
+  let failure_pages = chunk_rows(
     expand_failures(group_failures(failed, { customer_facing: !!scope })),
     FAILURES_PER_PAGE,
     FAILURES_PER_PAGE
   );
-  const overview_pages = attention_pages.length ? attention_pages : [[]];
+  let overview_pages = attention_pages.length ? attention_pages : [[]];
 
-  // The exclusion statement rides the last failures page when one exists;
-  // with no failures it takes its own page (see fleet_page.js), which must
-  // be counted HERE or every footer reads "page N of N−1".
+  // The exclusion statement rides the last failures page only when vendor
+  // sections FOLLOW it — the legend then closes the document pages away.
+  // With no sections, that same page would also carry the pinned legend,
+  // and a tail-reserved failures page plus the exclusion block measured
+  // within pixels of the legend box — so it takes its own page instead.
+  // Own pages must be counted HERE or every footer reads "page N of N−1".
+  // The block itself is bounded by the loader (≤100 ids, note ≤240 chars),
+  // which is what makes "one page, clear of the legend" a fact.
+  // fleet_page.js mirrors this placement condition — keep the two in sync.
   const excluded_meta =
     meta.excluded && meta.excluded.ids && meta.excluded.ids.length
       ? meta.excluded
       : null;
-  const exclusion_pages = excluded_meta && !failure_pages.length ? 1 : 0;
+  const exclusion_pages =
+    excluded_meta && (!failure_pages.length || !sections.length) ? 1 : 0;
+
+  // Reserve the legend's room on whichever group ENDS the document. Page
+  // order in fleet_page.js is overview → data issues → failures → exclusions
+  // → vendor sections, so sections claim the tail whenever any exist. The
+  // exclusion statement, when it takes its own page, is a heading plus a
+  // loader-bounded block (≤100 ids, note ≤240 chars — measured against the
+  // pinned legend in check_fleet), so it ends the document without needing
+  // the reservation.
+  if (sections.length) {
+    const last = sections[sections.length - 1];
+    last.pages = reserve_tail(last.pages, LEGEND_ROWS);
+  } else if (exclusion_pages) {
+    // nothing to reserve — the exclusion page ends the document
+  } else if (failure_pages.length) failure_pages = reserve_tail(failure_pages, LEGEND_ROWS);
+  else if (data_issue_pages.length)
+    data_issue_pages = reserve_tail(data_issue_pages, LEGEND_ROWS);
+  else overview_pages = reserve_tail(overview_pages, LEGEND_ROWS);
 
   const page_count =
     overview_pages.length +
@@ -413,10 +469,12 @@ module.exports = {
   expand_failures,
   FAILURE_IDS_PER_ROW,
   chunk_rows,
+  reserve_tail,
   SECTIONS,
   ROWS_PER_PAGE,
   ROWS_FIRST_PAGE,
   ATTENTION_FIRST_PAGE,
   ATTENTION_PER_PAGE,
-  FAILURES_PER_PAGE
+  FAILURES_PER_PAGE,
+  LEGEND_ROWS
 };
