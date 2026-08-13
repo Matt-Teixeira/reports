@@ -716,7 +716,7 @@ const build_fleet_page = (vm) => {
           ? ` <span class="n">— ${vm.edu_section.count} system${vm.edu_section.count === 1 ? "" : "s"}</span>`
           : "";
       pages.push(
-        `<h2>${esc(vm.edu_section.title).toUpperCase()}${count} <span class="n">· °F / %RH · last reading, period range beneath</span>${cont}</h2>` +
+        `<h2>${esc(vm.edu_section.title).toUpperCase()}${count} <span class="n">· °F / Relative Humidity</span>${cont}</h2>` +
           section_table(vm.edu_section, rows)
       );
     });
