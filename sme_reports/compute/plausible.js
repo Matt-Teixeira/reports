@@ -15,7 +15,13 @@ const PLAUSIBLE = {
   helium_ltrs: { min: 0, max: 5000 },
   coldhead_k: { min: 1, max: 320 },
   shield_k: { min: 1, max: 320 },
-  cabinet_c: { min: -20, max: 80 }
+  cabinet_c: { min: -20, max: 80 },
+  // EDU environmental channels (°F / %RH). An open probe input emits its
+  // scale floor — a live unit reported −196.6 °F for a ROOM probe — so the
+  // bounds are what a machine room can physically be, not what the sensor
+  // can emit.
+  edu_temp_f: { min: -40, max: 150 },
+  edu_humidity_pct: { min: 0, max: 100 }
 };
 
 const outside = (v, b) => v !== null && v !== undefined && (v < b.min || v > b.max);

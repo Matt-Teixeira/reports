@@ -493,7 +493,9 @@ const philips_series = [];
       compressor_on: h === 0 ? true : null, // one reading, then cable errors
       coldhead_k: null, shield_k: null, temp_alarm: null, quenched: null
     });
-    edu_rows.push({ t, room_temp_f: 70, humidity_pct: 45, probe_0_f: 66, probe_1_f: 68, comp_vib: !(h >= 100 && h < 106) });
+    // One open-probe scale default (-196.6 °F, seen on a live unit) rides
+    // probe_0: the EDU plausibility screen must drop it from the stats.
+    edu_rows.push({ t, room_temp_f: 70, humidity_pct: 45, probe_0_f: h === 5 ? -196.6 : 66, probe_1_f: 68, comp_vib: !(h >= 100 && h < 106) });
   }
   const vm = build_render_model({
     identity: philips_identity,
@@ -509,6 +511,77 @@ const philips_series = [];
   });
   assert.strictEqual(vm.facts.compressor_source, "edu_comp_vib", "one stray malf reading is not coverage");
   assert.strictEqual(vm.facts.archetype, "compressor_stop_recovered", "the EDU-measured stop is not hidden");
+  // The open-probe default is screened: never the period minimum, never the
+  // last reading, and counted PER CHANNEL so the brief can name the probe.
+  assert.strictEqual(vm.facts.edu.probe_0.min.v, 66, "open-probe scale default excluded from EDU stats");
+  assert.deepStrictEqual(
+    vm.facts.edu.rejected,
+    { room_temp: 0, humidity: 0, probe_0: 1, probe_1: 0, total: 1 },
+    "the drop is counted against its channel"
+  );
+  // ...and the DATA NOTES line states the exclusion beside the probe's own
+  // range instead of quietly absorbing it.
+  {
+    const data_notes = vm.rx_cards.find((c) => c.heading === "DATA NOTES").body;
+    assert.ok(
+      data_notes.includes("probe 0 66.0–66.0 °F (stopped Aug 9 · 1 implausible reading excluded)"),
+      `partial-garbage probe names its exclusion, got: ${data_notes}`
+    );
+    assert.ok(data_notes.includes("probe 1 68.0–68.0 °F"), "clean probe keeps its plain range");
+  }
+
+  // A probe emitting NOTHING plausible is flagged as a sensor fault, and
+  // a probe that never reported says so — neither vanishes silently, which
+  // is exactly what the pre-annotation line did (it required BOTH probes to
+  // have data before mentioning either).
+  {
+    const dead_probe_edu = edu_rows.map((r) => ({ ...r, probe_0_f: -196.6, probe_1_f: null }));
+    const vmd = build_render_model({
+      identity: philips_identity, vendor: VENDORS.PHILIPS, series, source: "synthetic",
+      request: normalize_request({
+        report_type: "magnet_health", system_id: "SME15809", recipients: ["dev@example.com"],
+        window: { start: "2026-08-01", end: "2026-08-10" }, output: { html: false, pdf: false, email: false }
+      }),
+      edu: dead_probe_edu, edu_source: "edu.v2"
+    });
+    assert.strictEqual(vmd.facts.edu.probe_0, null, "an all-garbage channel has no stats");
+    const data_notes = vmd.rx_cards.find((c) => c.heading === "DATA NOTES").body;
+    assert.ok(
+      /probe 0: no plausible readings \([\d,]+ excluded\) — sensor fault likely/.test(data_notes),
+      `dead probe is diagnosed, got: ${data_notes}`
+    );
+    assert.ok(
+      data_notes.includes("probe 1: no readings this period"),
+      `silent probe is stated, got: ${data_notes}`
+    );
+  }
+
+  // A channel that STOPPED reporting mid-period says when — its range must
+  // not read as the room's current state (review round-2 P2: a stale value
+  // was indistinguishable from a current one).
+  {
+    const stop_t = Date.UTC(2026, 7, 5); // window runs Aug 1 – Aug 10
+    const stopped_edu = edu_rows.map((r) => ({
+      ...r,
+      room_temp_f: r.t <= stop_t ? r.room_temp_f : null,
+      // Probe 0's base fixture carries one garbage reading; restore it clean
+      // here so this case isolates staleness from exclusion annotations.
+      probe_0_f: 66
+    }));
+    const vms = build_render_model({
+      identity: philips_identity, vendor: VENDORS.PHILIPS, series, source: "synthetic",
+      request: normalize_request({
+        report_type: "magnet_health", system_id: "SME15809", recipients: ["dev@example.com"],
+        window: { start: "2026-08-01", end: "2026-08-10" }, output: { html: false, pdf: false, email: false }
+      }),
+      edu: stopped_edu, edu_source: "edu.v2"
+    });
+    const data_notes = vms.rx_cards.find((c) => c.heading === "DATA NOTES").body;
+    assert.ok(
+      data_notes.includes("(stopped Aug 5)"),
+      `early-stopping room channel states its stop date, got: ${data_notes}`
+    );
+  }
 
   // 24 scanner readings IS coverage — the scanner keeps its priority.
   const covered = series.map((r, i) => ({ ...r, compressor_on: i < 24 ? true : null }));

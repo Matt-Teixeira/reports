@@ -167,6 +167,15 @@ const offline_state = (facts) => {
   };
 };
 
+// One EDU channel distilled to what the summary table shows: the last
+// reading (WITH its timestamp — a value without its age let a sensor that
+// died three weeks ago top the hottest-room sort as if it were current)
+// and the period range. null when the channel never reported.
+const edu_channel = (stats) =>
+  stats
+    ? { last: stats.last.v, last_t: stats.last.t, min: stats.min.v, max: stats.max.v }
+    : null;
+
 const build_summary_facts = (facts, identity) => {
   const { vendor, thr, he_thr, units, pressure, helium } = facts;
 
@@ -315,6 +324,28 @@ const build_summary_facts = (facts, identity) => {
     sensor_suspect,
     left_censored,
     offline_kind,
+
+    // --- environmental (EDU) ------------------------------------------
+    // Room/probe temperature and humidity from the system's EDU hardware
+    // (°F / %RH), null when the system has no EDU or it produced nothing
+    // this period. Last reading plus the period range per channel — the
+    // summary's EDU section renders exactly these numbers, so a system
+    // "has an edu" for the document iff this block is present.
+    edu: facts.edu
+      ? {
+          source: facts.edu.source,
+          captures: facts.edu.count,
+          // Readings outside the EDU plausibility bounds (open-sensor scale
+          // defaults) were dropped before these stats — this is how many.
+          // The per-channel split stays on the brief (its DATA NOTES names
+          // the probe); the fleet record keeps the clean total.
+          rejected: facts.edu.rejected ? facts.edu.rejected.total : 0,
+          room_temp: edu_channel(facts.edu.room_temp),
+          humidity: edu_channel(facts.edu.humidity),
+          probe_0: edu_channel(facts.edu.probe_0),
+          probe_1: edu_channel(facts.edu.probe_1)
+        }
+      : null,
 
     // --- data quality -------------------------------------------------
     captures: facts.counts.captures,

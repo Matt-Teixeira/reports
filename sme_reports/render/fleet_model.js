@@ -74,7 +74,7 @@ const reserve_tail = (pages, tail) => {
 
 // Section order and per-variant column sets. Each variant lists only the
 // channels it actually has — Philips has no coldhead, GE has no cabinet,
-// only non-TIM has cabinet temperature — so no section carries a column
+// only Siemens 10K (non-TIM) has cabinet temperature — so no section carries a column
 // that is dashes all the way down.
 const SECTIONS = [
   {
@@ -89,12 +89,12 @@ const SECTIONS = [
   },
   {
     vendor_key: "SIEMENS",
-    title: "Siemens (TIM)",
+    title: "Siemens (4K)",
     columns: ["system", "site", "condition", "primary", "line", "helium", "coldhead", "compressor"]
   },
   {
     vendor_key: "SIEMENS_NON_TIM",
-    title: "Siemens (non-TIM)",
+    title: "Siemens (10K)",
     columns: ["system", "site", "condition", "primary", "line", "helium", "cabinet", "compressor"]
   }
 ];
@@ -278,6 +278,14 @@ const expand_failures = (groups) => {
   return rows;
 };
 
+// An EDU channel is CURRENT when its last plausible reading falls within a
+// day of the period end — the same 24h staleness line the brief's tiles use
+// for their "as of <day>" prefix. Anything older renders dimmed with its
+// date and never drives the hottest-room sort.
+const EDU_STALE_MS = 24 * 3600000;
+const edu_channel_fresh = (r, ch) =>
+  !!ch && r.window_end - ch.last_t <= EDU_STALE_MS;
+
 // One line saying WHY a system landed in DATA ISSUES, plus the raw readings
 // that put it there — raw values always stay visible, so someone can judge
 // the sensors rather than take our word for it.
@@ -364,6 +372,38 @@ const build_fleet_model = (records, failures, meta = {}) => {
     // Sections with no members are dropped below rather than rendered empty.
   }).filter((s) => s.count > 0);
 
+  // Environmental (EDU) section: every analyzed system whose EDU hardware
+  // reported this period, regardless of vendor — the channels are the same
+  // (°F / %RH) across all EDU generations, so one table serves them all.
+  // Hottest CURRENT room first: environmental data is read to find the room
+  // that needs the HVAC call, and a sensor that last reported early in the
+  // period must not top that list on an old hot reading — stale channels
+  // (last plausible reading >24h before the period end, the brief tiles'
+  // staleness convention) sort with the unknowns, and render dimmed with an
+  // "as of" date. No thresholds are configured for these channels, so the
+  // section states readings and judges nothing.
+  const edu_members = rows
+    .filter((r) => r.edu)
+    .sort((a, b) => {
+      const ta = edu_channel_fresh(a, a.edu.room_temp)
+        ? a.edu.room_temp.last
+        : -Infinity;
+      const tb = edu_channel_fresh(b, b.edu.room_temp)
+        ? b.edu.room_temp.last
+        : -Infinity;
+      if (ta !== tb) return tb - ta;
+      return String(a.system_id).localeCompare(String(b.system_id));
+    });
+  const edu_section = edu_members.length
+    ? {
+        vendor_key: "EDU",
+        title: "Environmental (EDU)",
+        columns: ["system", "site", "edu_room", "edu_humidity", "edu_probe_0", "edu_probe_1"],
+        count: edu_members.length,
+        pages: chunk_rows(edu_members, ROWS_FIRST_PAGE, ROWS_PER_PAGE)
+      }
+    : null;
+
   const vendor_rollup = sections.map((s) => ({ title: s.title, count: s.count }));
 
   // The overview paginates too. The attention list is the actionable part of
@@ -396,12 +436,16 @@ const build_fleet_model = (records, failures, meta = {}) => {
 
   // Reserve the legend's room on whichever group ENDS the document. Page
   // order in fleet_page.js is overview → data issues → failures → exclusions
-  // → vendor sections, so sections claim the tail whenever any exist. The
-  // exclusion statement, when it takes its own page, is a heading plus a
-  // loader-bounded block (≤100 ids, note ≤240 chars — measured against the
-  // pinned legend in check_fleet), so it ends the document without needing
-  // the reservation.
-  if (sections.length) {
+  // → vendor sections → EDU section, so the EDU section claims the tail
+  // whenever it exists (and vendor sections otherwise — an EDU section can
+  // only exist when vendor sections do, since its members are a subset of
+  // the analyzed rows). The exclusion statement, when it takes its own page,
+  // is a heading plus a loader-bounded block (≤100 ids, note ≤240 chars —
+  // measured against the pinned legend in check_fleet), so it ends the
+  // document without needing the reservation.
+  if (edu_section) {
+    edu_section.pages = reserve_tail(edu_section.pages, LEGEND_ROWS);
+  } else if (sections.length) {
     const last = sections[sections.length - 1];
     last.pages = reserve_tail(last.pages, LEGEND_ROWS);
   } else if (exclusion_pages) {
@@ -416,7 +460,8 @@ const build_fleet_model = (records, failures, meta = {}) => {
     data_issue_pages.length +
     failure_pages.length +
     exclusion_pages +
-    sections.reduce((n, s) => n + s.pages.length, 0);
+    sections.reduce((n, s) => n + s.pages.length, 0) +
+    (edu_section ? edu_section.pages.length : 0);
 
   const window_start = rows.length ? Math.min(...rows.map((r) => r.window_start)) : null;
   const window_end = rows.length ? Math.max(...rows.map((r) => r.window_end)) : null;
@@ -440,6 +485,7 @@ const build_fleet_model = (records, failures, meta = {}) => {
     condition_rollup,
     vendor_rollup,
     sections,
+    edu_section,
     overview_pages,
     data_issues,
     data_issue_count: data_issues.length,
@@ -459,6 +505,7 @@ const build_fleet_model = (records, failures, meta = {}) => {
 
 module.exports = {
   build_fleet_model,
+  edu_channel_fresh,
   customer_failure_reason,
   attention_reason,
   data_issue_reason,

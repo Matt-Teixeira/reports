@@ -291,3 +291,51 @@ working tree:
    Attack surface: box estimation vs Chromium truth is the same measured
    gamble as the fleet id tiers (kerning margin), and the audit only sees
    the fixtures' geometries.
+
+## Addendum (2026-08-13, later still): ENVIRONMENTAL (EDU) section
+
+Product asked for an environmental section in the summary document: every
+analyzed system whose EDU hardware (`config.edu` → `edu.v1/v2/v3`) reported
+this period gets a row, regardless of vendor. One table — the channels
+(room temp, humidity, probe 0/1, °F / %RH) are identical across EDU
+generations. Sorted hottest room first. Each channel cell is the last
+reading over the period range in the shared grey second line. No alert
+limits exist for these channels, so the section states readings and judges
+nothing; the legend says so.
+
+Mechanics: `summary_facts` carries a distilled `edu` block (null = no row);
+`build_fleet_model` builds `edu_section` inline (not in `SECTIONS` — no
+condition/limit machinery); it renders after the vendor sections, ends the
+document, and therefore carries the legend reservation (`reserve_tail`
+ladder gained a head). `SECTION_W.EDU` gives SITE ~338px — the one table
+where site names mostly survive whole — and `cell_site` skips its 30-char
+server cap there. The first live render surfaced an open-probe scale
+default (−196.6 °F) becoming a period minimum, so EDU channels are now
+screened against new `plausible.js` bounds (`edu_temp_f` −40..150,
+`edu_humidity_pct` 0..100) with drops counted (`edu.rejected`) and the
+exclusion stated in the legend; `check_chart` asserts the screen, and the
+`check_fleet` fixture gives every 5th record EDU data (probe-less,
+humidity-less, and wide-range shapes included) through the measured
+geometry pass. The fixture-uniqueness assertion's page arithmetic also got
+fixed in passing — it had omitted `data_issue_pages` and only balanced by
+coincidence; EDU systems now assert exactly 2 section appearances, others 1.
+
+Follow-on (same day): per product, the fleet summary stays the clean
+screened dataset and the BRIEF carries the machine-specific diagnosis. EDU
+drops are now counted per channel (`edu.rejected = {room_temp, humidity,
+probe_0, probe_1, total}`; the fleet record keeps only the total), and the
+brief's DATA NOTES names findings per channel instead of dropping silent
+lines: a screened channel shows its clean range plus "(N implausible
+readings excluded)", an all-garbage channel reads "no plausible readings
+(N excluded) — sensor fault likely", and a silent channel reads "no
+readings this period" — the old line required BOTH probes to report before
+mentioning either, so a dead probe vanished. The wording is deliberately
+"implausible", never "open-sensor": the screen knows a reading broke
+physical bounds, not why — a shorted probe reading 200 °F trips the same
+bound as an open input at its scale floor, and naming a cause the data
+cannot establish would misdiagnose it (REVIEW-HANDOFF-EDU.md carries this
+as a contract). Two clean probes keep the compact "probes A–B / C–D °F"
+form. `check_chart` covers partial-garbage, all-garbage, and silent-probe
+shapes. Verified live on SME19034, whose two probes carry 19 and 30
+intermittent implausible readings respectively — both now stated beside
+clean ranges.

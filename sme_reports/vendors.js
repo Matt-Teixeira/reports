@@ -11,7 +11,7 @@
 
 // Every vendor names a PRIMARY escalation metric that drives the first chart,
 // the NOW/EVENT PEAK tiles, the alert line(s), and the archetypes. For
-// magnet-monitored vendors that's He pressure; Siemens non-TIM has no
+// magnet-monitored vendors that's He pressure; Siemens 10K (non-TIM) has no
 // pressure channel, so shield temperature takes the slot. Internally the
 // normalized series always carries the primary metric in the `pressure`
 // field; `primary` holds the display strings.

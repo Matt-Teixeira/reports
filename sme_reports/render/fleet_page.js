@@ -10,7 +10,7 @@ const {
   URGENT
 } = require("../conditions");
 const { he_suffix } = require("./tiles");
-const { limit_key } = require("./fleet_model");
+const { limit_key, edu_channel_fresh } = require("./fleet_model");
 
 // Renders the fleet summary view-model to a multi-page HTML document.
 // Interpolation only — all decisions live in fleet_model.js.
@@ -112,7 +112,7 @@ table.vendor thead th:nth-child(6) { border-left: .5pt solid #DCE4EB; }
 .sys { font-weight: 700; }
 /* Miniature band gauge: two edge ticks and a dot at the current reading.
    Position IS the meaning — centered is healthy, an edge is an alert line —
-   which is why centered-band (Siemens TIM) rows draw this instead of a
+   which is why centered-band (Siemens 4K) rows draw this instead of a
    percentage that would call a healthy magnet "93% of the line". */
 .bg { position: relative; display: inline-block; width: 44px; height: 8px; vertical-align: middle; }
 .bg::before, .bg::after { content: ""; position: absolute; top: 0; bottom: 0; width: 1.2px; background: ${COLORS.blue}; }
@@ -199,8 +199,13 @@ const cell_system = (r, section, geom) => {
   );
 };
 
-const cell_site = (r) =>
-  `<td class="site">${esc(trunc(r.site_name, 30))}<div class="m">${esc(trunc([r.city, r.state].filter(Boolean).join(", "), 26))}</div></td>`;
+// The 30/26-char server-side caps are sized for the vendor tables' narrow
+// SITE column; the EDU table's SITE is ~3× wider, so it gets the full name
+// and lets CSS ellipsise the (rare) overflow instead.
+const cell_site = (r, section) => {
+  const wide = section && section.vendor_key === "EDU";
+  return `<td class="site">${esc(wide ? r.site_name : trunc(r.site_name, 30))}<div class="m">${esc(trunc([r.city, r.state].filter(Boolean).join(", "), wide ? 60 : 26))}</div></td>`;
+};
 
 // Overlay states replace the archetype label — a dead compressor signal
 // would otherwise wear "STOP, ONGOING" in red, which is the exact claim the
@@ -380,6 +385,34 @@ const cell_temp_alarm = (r) =>
     ? `<td style="color:${COLORS.amber};">${r.temp_alarm_runs}×</td>`
     : `<td class="dim">none</td>`;
 
+// EDU channel cell: last reading on top, the period range beneath in the
+// shared second-line grey. No alert limits are configured for environmental
+// channels, so these cells state readings and judge nothing — no color.
+// A STALE channel (last plausible reading >24h before the period end) is a
+// different claim than a current one: the cell dims and the reading's date
+// sits beside the value, so an old number can never pass as the room's
+// state right now. The period range KEEPS its line — the data the sensor
+// produced while it ran is good data, and a probe fault or a dead unit is
+// no reason to hide the room's real Aug-6-to-Aug-10 span (product review:
+// "I would not want to truncate all data because some column has a
+// problem"). Only the claim of currency changes, never the record.
+const edu_cell = (r, ch, sfx, decimals) => {
+  if (!ch) return dash;
+  if (!edu_channel_fresh(r, ch))
+    return (
+      `<td class="n dim">${fmt.num(ch.last, decimals)}${sfx} · ${fmt.day(ch.last_t)}` +
+      `<div class="m">${fmt.num(ch.min, decimals)}–${fmt.num(ch.max, decimals)}</div></td>`
+    );
+  return (
+    `<td class="n">${fmt.num(ch.last, decimals)}${sfx}` +
+    `<div class="m">${fmt.num(ch.min, decimals)}–${fmt.num(ch.max, decimals)}</div></td>`
+  );
+};
+const cell_edu_room = (r) => edu_cell(r, r.edu.room_temp, " °F", 1);
+const cell_edu_humidity = (r) => edu_cell(r, r.edu.humidity, "%", 0);
+const cell_edu_probe_0 = (r) => edu_cell(r, r.edu.probe_0, " °F", 1);
+const cell_edu_probe_1 = (r) => edu_cell(r, r.edu.probe_1, " °F", 1);
+
 const CELLS = {
   // The SME id (and the customer-id line, up to its font floor — see
   // cell_system) must never ellipsise — a truncated id makes the row unusable.
@@ -398,7 +431,11 @@ const CELLS = {
   shield: { label: "SHIELD", render: cell_shield, numeric: true },
   cabinet: { label: "CABINET", render: cell_cabinet, numeric: true },
   compressor: { label: "COMPRESSOR", render: cell_compressor },
-  temp_alarm: { label: "ALARM", render: cell_temp_alarm }
+  temp_alarm: { label: "ALARM", render: cell_temp_alarm },
+  edu_room: { label: "ROOM TEMP", render: cell_edu_room, numeric: true },
+  edu_humidity: { label: "HUMIDITY", render: cell_edu_humidity, numeric: true },
+  edu_probe_0: { label: "PROBE 0", render: cell_edu_probe_0, numeric: true },
+  edu_probe_1: { label: "PROBE 1", render: cell_edu_probe_1, numeric: true }
 };
 
 // Column widths, PER SECTION, in px of the 7.5in (720px) content column —
@@ -424,7 +461,12 @@ const SECTION_W = {
   PHILIPS: { system: 111, site: 113, condition: 121, primary: 76, line: 85, helium: 81, compressor: 89, temp_alarm: 44 },
   GE: { system: 81, site: 77, condition: 121, primary: 76, line: 85, helium: 88, coldhead: 51, shield: 52, compressor: 89 },
   SIEMENS: { system: 111, site: 106, condition: 121, primary: 76, line: 85, helium: 81, coldhead: 51, compressor: 89 },
-  SIEMENS_NON_TIM: { system: 111, site: 105, condition: 121, primary: 76, line: 85, helium: 81, cabinet: 52, compressor: 89 }
+  SIEMENS_NON_TIM: { system: 111, site: 105, condition: 121, primary: 76, line: 85, helium: 81, cabinet: 52, compressor: 89 },
+  // Six columns and no condition/limit machinery, so SITE still gets more
+  // room than any vendor section even after the channel columns were sized
+  // for their widest STALE line ("118.2 \u00b0F \u00b7 Aug 26", 93.3px measured) —
+  // the dimmed date rides beside the value so the range line survives.
+  EDU: { system: 111, site: 189, edu_room: 105, edu_humidity: 105, edu_probe_0: 105, edu_probe_1: 105 }
 };
 
 // td horizontal padding both sides, matching the tbody td CSS above.
@@ -481,7 +523,10 @@ const section_table = (section, rows) => {
   const body = rows
     .map((r) => `<tr>${section.columns.map((key) => CELLS[key].render(r, section, geom)).join("")}</tr>`)
     .join("\n");
-  return `<table class="vendor">${colgroup}<thead><tr>${head}</tr></thead><tbody>\n${body}\n</tbody></table>`;
+  // The EDU table skips the .vendor class: its nth-child hairlines fence the
+  // metric + % OF LIMIT pair, positions the EDU column set does not have.
+  const cls = section.vendor_key === "EDU" ? "edu" : "vendor";
+  return `<table class="${cls}">${colgroup}<thead><tr>${head}</tr></thead><tbody>\n${body}\n</tbody></table>`;
 };
 
 // --- overview page ----------------------------------------------------
@@ -578,13 +623,14 @@ const LEGEND = `<div class="legend pin"><div class="lg-cap">LEGEND</div><div cla
 <div><b>PEAK OVER LIMIT</b> — the period's peak crossed the limit; the current reading may since have come back under it</div>
 <div><b>STOP, ONGOING · recovered</b> — compressor stop observed this period; red while unrecovered</div>
 <div><b>2 evt · 12.5h</b> — stop events this period · total observed downtime</div>
-<div><b>WITHIN BAND</b> <span class="bg"><span class="t"></span><span class="d" style="left:62%;"></span></span> — dot = reading between the low and high alert edges (Siemens TIM); centered is healthy, an edge is an alert</div>
+<div><b>WITHIN BAND</b> <span class="bg"><span class="t"></span><span class="d" style="left:62%;"></span></span> — dot = reading between the low and high alert edges (Siemens 4K); centered is healthy, an edge is an alert</div>
 <div><b>flicker</b> — single-reading compressor dropout with no thermal response; noted on the system's brief, never counted as a stop</div>
 <div><b>OFF ENTIRE PERIOD</b> — off since before the period began, start unknown; magnet already warm, so listed but not urgent</div>
 <div><b>no signal · sensor suspect</b> — monitoring faults, not magnet faults; counted as DATA ISSUES with raw readings shown</div>
 <div><b>‡ ✕</b> — reading outside plausible physical bounds; shown greyed but excluded from all status judgments</div>
 <div><b>ᶜ</b> — concluded, not directly read: inferred (GE compressor from coldhead) or corroborated; unmarked = a reading or arithmetic on one</div>
 <div><b>HELIUM · COLDHD · CABINET</b> — judged against their own thresholds; red or amber marks a reading past them</div>
+<div><b>ENVIRONMENTAL (EDU)</b> — room/probe temperature and humidity from the site's EDU hardware; no alert limits are configured, so readings are stated, not judged; readings outside physical bounds (e.g. open-sensor defaults) are excluded; a dimmed value paired with a date is the sensor's last reading, from that day — the channel stopped reporting early; its range still covers the days it ran</div>
 <div><b>urgent</b> — wrong right now (unrecovered stop, live breach, quench); each system's full one-page brief is generated separately</div>
 </div></div>`;
 
@@ -655,6 +701,23 @@ const build_fleet_page = (vm) => {
       pages.push(
         `<h2>${esc(section.title).toUpperCase()}${count}${limit}${cont}</h2>` +
           section_table(section, rows)
+      );
+    });
+  }
+
+  // Environmental section closes the data: every analyzed system whose EDU
+  // reported this period, hottest room first. Units ride the heading like
+  // the vendor sections' limits do.
+  if (vm.edu_section) {
+    vm.edu_section.pages.forEach((rows, i) => {
+      const cont = i > 0 ? ` <span class="n">(cont.)</span>` : "";
+      const count =
+        i === 0
+          ? ` <span class="n">— ${vm.edu_section.count} system${vm.edu_section.count === 1 ? "" : "s"}</span>`
+          : "";
+      pages.push(
+        `<h2>${esc(vm.edu_section.title).toUpperCase()}${count} <span class="n">· °F / %RH · last reading, period range beneath</span>${cont}</h2>` +
+          section_table(vm.edu_section, rows)
       );
     });
   }

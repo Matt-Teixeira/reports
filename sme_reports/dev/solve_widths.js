@@ -36,19 +36,25 @@ const HEADROOM = 4; // px of tolerance kept in every non-SITE column
 // the measured "99+ evt · 999+h" second line at 7pt — 78px — not whatever
 // the worst record happens to produce. The one-line era sized this column
 // by the fixture's mild "2 evt · 12.5h" and clipped valid extremes.
+// EDU channel columns are sized for their widest bounded line: a STALE
+// cell's "118.2 °F · Aug 26" top line (93.3px measured in Chromium) — the
+// date rides beside the value so the range line survives staleness.
 const NEEDS = {
   PHILIPS: { system: 100, condition: 110, primary: 65, line: 74, helium: 70, compressor: 78, temp_alarm: 33 },
   GE: { system: 70, condition: 110, primary: 65, line: 74, helium: 77, coldhead: 40, shield: 41, compressor: 78 },
   SIEMENS: { system: 100, condition: 110, primary: 65, line: 74, helium: 70, coldhead: 40, compressor: 78 },
-  SIEMENS_NON_TIM: { system: 100, condition: 110, primary: 65, line: 74, helium: 70, cabinet: 41, compressor: 78 }
+  SIEMENS_NON_TIM: { system: 100, condition: 110, primary: 65, line: 74, helium: 70, cabinet: 41, compressor: 78 },
+  EDU: { system: 100, edu_room: 94, edu_humidity: 94, edu_probe_0: 94, edu_probe_1: 94 }
 };
 
-// Column order per section must match fleet_model.js SECTIONS.
+// Column order per section must match fleet_model.js SECTIONS (EDU's is
+// built inline in build_fleet_model).
 const SETS = {
   PHILIPS: ["system", "site", "condition", "primary", "line", "helium", "compressor", "temp_alarm"],
   GE: ["system", "site", "condition", "primary", "line", "helium", "coldhead", "shield", "compressor"],
   SIEMENS: ["system", "site", "condition", "primary", "line", "helium", "coldhead", "compressor"],
-  SIEMENS_NON_TIM: ["system", "site", "condition", "primary", "line", "helium", "cabinet", "compressor"]
+  SIEMENS_NON_TIM: ["system", "site", "condition", "primary", "line", "helium", "cabinet", "compressor"],
+  EDU: ["system", "site", "edu_room", "edu_humidity", "edu_probe_0", "edu_probe_1"]
 };
 
 console.log("SECTION_W (paste into fleet_page.js):");

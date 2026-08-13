@@ -293,21 +293,64 @@ const build_cards = (f) => {
       `Tech Room Temp ${fmt.num(f.room_temp.min.v, 1)}–${fmt.num(f.room_temp.max.v, 1)} °C this period.`
     );
   if (f.edu) {
-    const parts = [];
-    if (f.edu.room_temp)
+    // Per-channel, never silent: the fleet section shows the clean screened
+    // numbers, so the brief is where a probe problem gets NAMED. A channel
+    // whose garbage was screened says how much was excluded; a channel with
+    // ONLY garbage is diagnosed (an open input emitting its scale floor is
+    // a disconnected probe, not a cold room); a channel that reported
+    // nothing says so rather than vanishing from the line.
+    const rej = f.edu.rejected || {};
+    const range = (stats, decimals) =>
+      `${fmt.num(stats.min.v, decimals)}–${fmt.num(stats.max.v, decimals)}`;
+    // "implausible", not "open-sensor": the screen knows a reading was
+    // outside physical bounds, not WHY — an open input emitting its scale
+    // floor is the common cause, but a shorted probe reading 200 °F trips
+    // the same bound and calling that "open-sensor" would misdiagnose it.
+    // A channel whose last plausible reading predates the period end by
+    // more than a day says WHEN it stopped — an old range must not read as
+    // the room's current state (same 24h line the tiles' "as of" uses).
+    const stopped = (stats) =>
+      f.window_end - stats.last.t > 24 * 3600000
+        ? `stopped ${fmt.day(stats.last.t)}`
+        : "";
+    const channel = (label, stats, rejected, decimals, sfx) => {
+      if (stats) {
+        // Findings share one parenthetical — "(stopped Aug 9 · 3 implausible
+        // readings excluded)" — two adjacent brackets read like a typo.
+        const flags = [
+          stopped(stats),
+          rejected
+            ? `${fmt.count(rejected)} implausible reading${rejected === 1 ? "" : "s"} excluded`
+            : ""
+        ].filter(Boolean);
+        return `${label} ${range(stats, decimals)}${sfx}${flags.length ? ` (${flags.join(" · ")})` : ""}`;
+      }
+      if (rejected)
+        return `${label}: no plausible readings (${fmt.count(rejected)} excluded) — sensor fault likely`;
+      return `${label}: no readings this period`;
+    };
+    const parts = [channel("room", f.edu.room_temp, rej.room_temp, 1, " °F")];
+    // Two clean, CURRENT probes keep the compact combined form; anything
+    // remarkable on either — exclusions or an early stop — splits them so
+    // the finding names its probe.
+    if (
+      f.edu.probe_0 &&
+      f.edu.probe_1 &&
+      !rej.probe_0 &&
+      !rej.probe_1 &&
+      !stopped(f.edu.probe_0) &&
+      !stopped(f.edu.probe_1)
+    )
       parts.push(
-        `room ${fmt.num(f.edu.room_temp.min.v, 1)}–${fmt.num(f.edu.room_temp.max.v, 1)} °F`
+        `probes ${range(f.edu.probe_0, 1)} / ${range(f.edu.probe_1, 1)} °F`
       );
-    if (f.edu.probe_0 && f.edu.probe_1)
+    else
       parts.push(
-        `probes ${fmt.num(f.edu.probe_0.min.v, 1)}–${fmt.num(f.edu.probe_0.max.v, 1)} / ${fmt.num(f.edu.probe_1.min.v, 1)}–${fmt.num(f.edu.probe_1.max.v, 1)} °F`
+        channel("probe 0", f.edu.probe_0, rej.probe_0, 1, " °F"),
+        channel("probe 1", f.edu.probe_1, rej.probe_1, 1, " °F")
       );
-    if (f.edu.humidity)
-      parts.push(
-        `humidity ${fmt.num(f.edu.humidity.min.v, 0)}–${fmt.num(f.edu.humidity.max.v, 0)}%`
-      );
-    if (parts.length)
-      notes.push(`EDU (${fmt.count(f.edu.count)} captures): ${parts.join(" · ")}.`);
+    parts.push(channel("humidity", f.edu.humidity, rej.humidity, 0, "%"));
+    notes.push(`EDU (${fmt.count(f.edu.count)} captures): ${parts.join(" · ")}.`);
   }
   if (f.clock_skew_minutes !== null && f.clock_skew_minutes > 15)
     notes.push(

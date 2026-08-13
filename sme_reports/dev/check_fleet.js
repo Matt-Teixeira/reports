@@ -1262,6 +1262,19 @@ const rec = (over = {}) => ({
       `${s.vendor_key} SECTION_W must sum to the 720px content column`
     );
   }
+  // The EDU section's column set is built inline in build_fleet_model, so
+  // its width row is asserted here by name rather than via SECTIONS.
+  {
+    const edu_cols = ["system", "site", "edu_room", "edu_humidity", "edu_probe_0", "edu_probe_1"];
+    const w = SECTION_W.EDU;
+    for (const c of edu_cols)
+      assert.ok(Number.isFinite(w[c]), `EDU SECTION_W missing ${c}`);
+    assert.strictEqual(
+      edu_cols.reduce((n, c) => n + w[c], 0),
+      720,
+      "EDU SECTION_W must sum to the 720px content column"
+    );
+  }
 
   // The legend ties the pair together and the other columns to their own
   // thresholds.
@@ -1789,6 +1802,28 @@ const rec = (over = {}) => ({
           : i % 7 === 1
             ? "2342574 / SUMMITVCT"
             : `45${String(600 + (i % 40))}-13${String(10000 + i)}`;
+  // Every 5th system carries EDU data (259 of 865 live systems have EDU
+  // hardware), with the channel-shape variety the section must render:
+  // full channels, a probe-less v1-style row, a humidity-less row, a wide
+  // range ("68.0–104.3") that sizes the range line — and one STALE room
+  // channel (record 10) whose last reading is the fixture's hottest but
+  // five days old: it must render dimmed with an "as of" date and rank
+  // with the unknowns, not top the hottest-room sort.
+  const FRESH_T = W_END - HOUR;
+  for (const [i, r] of records.entries()) {
+    if (i % 5 !== 0) continue;
+    const room_stale = i === 10;
+    r.edu = {
+      source: "edu.v2",
+      captures: 336,
+      room_temp: room_stale
+        ? { last: 118.2, last_t: W_END - 5 * 24 * HOUR, min: 68, max: 118.2 }
+        : { last: 72.4, last_t: FRESH_T, min: 68, max: i % 10 === 0 ? 104.3 : 75.2 },
+      humidity: i % 15 === 0 ? null : { last: 44, last_t: FRESH_T, min: 31, max: 100 },
+      probe_0: i % 20 === 0 ? null : { last: 65.8, last_t: FRESH_T, min: 61.2, max: 88.4 },
+      probe_1: i % 20 === 0 ? null : { last: 67.1, last_t: FRESH_T, min: 63.4, max: 90.2 }
+    };
+  }
   const failures = Array.from({ length: 17 }, (_, i) => ({
     system_id: `SME${String(90000 + i)}`,
     message: `no PHILIPS monitor data for SME${String(90000 + i)} in the requested window`
@@ -1803,13 +1838,45 @@ const rec = (over = {}) => ({
     vm.overview_pages.length +
     vm.data_issue_pages.length +
     vm.failure_pages.length +
-    vm.sections.reduce((n, s) => n + s.pages.length, 0);
+    vm.sections.reduce((n, s) => n + s.pages.length, 0) +
+    (vm.edu_section ? vm.edu_section.pages.length : 0);
   assert.strictEqual(vm.page_count, expected_pages);
   assert.strictEqual(
     vm.sections.reduce((n, s) => n + s.count, 0),
     163,
     "every system lands in exactly one vendor section"
   );
+  assert.strictEqual(
+    vm.edu_section.count,
+    records.filter((r) => r.edu).length,
+    "every EDU-reporting system lands in the EDU section"
+  );
+  // Hottest CURRENT room first — the sort the section is read by. Fresh
+  // rooms lead in descending order; stale or missing room channels follow,
+  // and the fixture's stale record is the HOTTEST value on the page, so a
+  // regression that ignores age puts it first and fails here.
+  {
+    const flat = vm.edu_section.pages.flat();
+    const fresh = (r) =>
+      r.edu.room_temp && W_END - r.edu.room_temp.last_t <= 24 * HOUR;
+    let seen_unfresh = false;
+    let prev = Infinity;
+    for (const r of flat) {
+      if (fresh(r)) {
+        assert.ok(!seen_unfresh, "a fresh room sorted after a stale one");
+        assert.ok(prev >= r.edu.room_temp.last, "fresh rooms sort hottest first");
+        prev = r.edu.room_temp.last;
+      } else seen_unfresh = true;
+    }
+    assert.ok(seen_unfresh, "the fixture exercises a stale/missing room channel");
+    const stale = flat.find((r) => r.system_id === "SME10010");
+    assert.ok(stale, "the stale-room record is in the section");
+    assert.notStrictEqual(
+      flat[0].system_id,
+      "SME10010",
+      "an old hot reading must not top the hottest-room sort"
+    );
+  }
   // The attention list is shown in full, not truncated with a "+N more".
   assert.strictEqual(
     vm.overview_pages.flat().length,
@@ -1825,14 +1892,24 @@ const rec = (over = {}) => ({
   // Every system appears exactly once across the vendor sections. (The
   // overview's attention list repeats a handful of them by design, so it is
   // excluded from this count.)
-  const first_section = 1 + vm.overview_pages.length + vm.failure_pages.length;
+  // Count every page group BEFORE the sections region — the old arithmetic
+  // omitted data_issue_pages and only balanced by coincidence of the
+  // fixture's page counts.
+  const first_section =
+    1 +
+    vm.overview_pages.length +
+    vm.data_issue_pages.length +
+    vm.failure_pages.length;
   const sections_html = html
     .split('<div class="page">')
     .slice(first_section)
     .join("");
   for (const r of records) {
+    // Once per vendor section, plus once more in the EDU section for
+    // systems whose EDU reported.
+    const expected = r.edu ? 2 : 1;
     const hits = sections_html.split(r.system_id).length - 1;
-    assert.strictEqual(hits, 1, `${r.system_id} appears ${hits} times in sections, expected 1`);
+    assert.strictEqual(hits, expected, `${r.system_id} appears ${hits} times in sections, expected ${expected}`);
   }
   // ...and every attention system also appears on the overview.
   const overview_html = html
@@ -1843,6 +1920,11 @@ const rec = (over = {}) => ({
     assert.ok(overview_html.includes(r.system_id), `${r.system_id} missing from attention list`);
   // Continuation pages repeat their section heading.
   assert.ok(html.includes("(cont.)"), "multi-page sections mark continuations");
+  assert.ok(html.includes("ENVIRONMENTAL (EDU)"), "EDU section heading present");
+  // The stale room cell pairs its date with the value AND keeps its range —
+  // staleness changes the claim of currency, never hides the record.
+  assert.ok(html.includes("118.2 °F · Aug 26"), "stale EDU channel carries its date beside the value");
+  assert.ok(html.includes("118.2 °F · Aug 26<div class=\"m\">68.0–118.2</div>"), "stale EDU channel keeps its period range");
   // The logo is 412KB of base64 — it must appear once, not once per page.
   const logo_hits = html.split("data:image/png;base64,").length - 1;
   assert.strictEqual(logo_hits, 1, `logo embedded ${logo_hits} times, expected 1`);

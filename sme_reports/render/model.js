@@ -238,14 +238,33 @@ const build_render_model = ({
   const room_temp = stats_for(metric_points(rows, "room_temp_c"));
 
   // EDU environmental telemetry (vendor-independent, °F / %); supplemental.
+  // Screened against the EDU plausibility bounds first: an open probe input
+  // emits its scale floor (−196.6 °F on a live unit), and without the screen
+  // that default becomes the channel's period minimum and last reading. A
+  // channel with no plausible points at all reads as absent, and the drops
+  // are counted so the exclusion is stated, never silent.
+  // Drops are counted PER CHANNEL: "which probe is emitting garbage" is the
+  // diagnosis the brief's DATA NOTES states, and one aggregate number can't
+  // name the probe.
+  const edu_rejected = { room_temp: 0, humidity: 0, probe_0: 0, probe_1: 0 };
+  const edu_channel_stats = (name, key, bounds) => {
+    const points = metric_points(edu, key);
+    const kept = points.filter((p) => !outside(p.v, bounds));
+    edu_rejected[name] = points.length - kept.length;
+    return stats_for(kept);
+  };
   const edu_facts = edu.length
     ? {
         source: edu_source,
         count: edu.length,
-        room_temp: stats_for(metric_points(edu, "room_temp_f")),
-        humidity: stats_for(metric_points(edu, "humidity_pct")),
-        probe_0: stats_for(metric_points(edu, "probe_0_f")),
-        probe_1: stats_for(metric_points(edu, "probe_1_f"))
+        room_temp: edu_channel_stats("room_temp", "room_temp_f", PLAUSIBLE.edu_temp_f),
+        humidity: edu_channel_stats("humidity", "humidity_pct", PLAUSIBLE.edu_humidity_pct),
+        probe_0: edu_channel_stats("probe_0", "probe_0_f", PLAUSIBLE.edu_temp_f),
+        probe_1: edu_channel_stats("probe_1", "probe_1_f", PLAUSIBLE.edu_temp_f),
+        rejected: {
+          ...edu_rejected,
+          total: Object.values(edu_rejected).reduce((n, c) => n + c, 0)
+        }
       }
     : null;
   if (edu_facts && temp_alarm) {
@@ -253,7 +272,7 @@ const build_render_model = ({
       metric_points(
         edu.filter((r) => r.t >= temp_alarm.start && r.t <= temp_alarm.end),
         "room_temp_f"
-      )
+      ).filter((p) => !outside(p.v, PLAUSIBLE.edu_temp_f))
     );
   }
 
