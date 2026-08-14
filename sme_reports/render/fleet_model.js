@@ -372,6 +372,27 @@ const build_fleet_model = (records, failures, meta = {}) => {
     // Sections with no members are dropped below rather than rendered empty.
   }).filter((s) => s.count > 0);
 
+  // PARTITION assertion (never-silent): every analyzed row must land in
+  // exactly one section over the section list, because `total` below counts
+  // ALL rows — a record whose vendor_key matches no section would be
+  // counted in the headline yet appear in no vendor table, silently. The
+  // include-filters above make double-membership impossible, so the sum
+  // check plus naming the strays is the whole partition. Throwing here
+  // soft-fails the summary document (build_fleet_summary isolates it),
+  // which is the correct failure: loud and visible, never a shrunk table.
+  {
+    const sectioned = sections.reduce((n, s) => n + s.count, 0);
+    if (sectioned !== rows.length) {
+      const known = new Set(SECTIONS.map((s) => s.vendor_key));
+      const strays = rows
+        .filter((r) => !known.has(r.vendor_key))
+        .map((r) => `${r.system_id} ("${r.vendor_key}")`);
+      throw new Error(
+        `fleet partition violated: ${rows.length} analyzed rows, ${sectioned} sectioned — unsectioned: ${strays.join(", ") || "(none identified — duplicate membership?)"}`
+      );
+    }
+  }
+
   // Environmental (EDU) section: every analyzed system whose EDU hardware
   // reported this period, regardless of vendor — the channels are the same
   // (°F / %RH) across all EDU generations, so one table serves them all.

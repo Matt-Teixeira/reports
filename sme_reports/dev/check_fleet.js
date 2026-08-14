@@ -379,6 +379,23 @@ const rec = (over = {}) => ({
   assert.strictEqual(vm.sections[0].vendor_key, "PHILIPS");
 }
 
+// --- partition assertion: unsectioned rows fail loudly (phase 3) ------------
+// `total` counts ALL rows, so a record whose vendor_key matches no section
+// would be counted in the headline yet appear in no vendor table — the
+// runtime partition assertion turns that silent omission into a loud,
+// named failure (soft-failing only the summary document).
+{
+  assert.throws(
+    () =>
+      build_fleet_model(
+        [rec({}), rec({ system_id: "SME00099", vendor_key: "CANON" })],
+        []
+      ),
+    /fleet partition violated: 2 analyzed rows, 1 sectioned — unsectioned: SME00099 \("CANON"\)/,
+    "an unknown vendor_key names its system and key"
+  );
+}
+
 // --- empty / degenerate models ----------------------------------------------
 {
   const none = build_fleet_model([], []);
