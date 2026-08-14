@@ -486,17 +486,21 @@ const { parse_sme_args } = require("../cli_args");
       "VENDORS and units_queries must register the same vendor keys"
     );
 
-    // A vendor whose compressor state is inferred from the coldhead must
-    // carry the warm_k boundary the inference divides at — it is the same
-    // physical line the coldhead tile judges against (one field since
-    // phase 5; this pins the dependency).
-    const { is_inferred } = require("../compute/provenance");
-    for (const v of Object.values(VENDORS))
-      if (is_inferred(v.compressor.source))
+    // Every vendor's compressor source must resolve through the CLOSED
+    // provenance registry (source_kind throws on anything unregistered —
+    // round-2 F3: a typoed source must not fail open as "measured"), and a
+    // vendor whose state is inferred from the coldhead must carry the
+    // warm_k boundary the inference divides at — the same physical line
+    // the coldhead tile judges against.
+    const { source_kind } = require("../compute/provenance");
+    for (const v of Object.values(VENDORS)) {
+      const kind = source_kind(v.compressor.source); // throws on unregistered
+      if (kind === "inferred")
         assert.ok(
           v.coldhead && Number.isFinite(v.coldhead.warm_k),
           `${v.key}: coldhead-inferred compressor needs coldhead.warm_k`
         );
+    }
   }
 
   console.log("check_config: all assertions passed");
