@@ -47,11 +47,16 @@ const ATTENTION_PER_PAGE = 24;
 const FAILURES_PER_PAGE = 20;
 
 // The legend is pinned above the footer of the LAST page, so the last page
-// cannot also carry a full table. This is that room expressed in table rows,
-// measured in Chromium against the rendered legend box — not estimated.
-// Whichever group of pages ends the document has its final chunk re-split so
-// it never exceeds this.
-const LEGEND_ROWS = 12;
+// cannot also carry a full table. This is the MOST ROWS the legend page may
+// still carry (reserve_tail re-splits whichever group ends the document so
+// its final chunk never exceeds it), measured in Chromium against the
+// rendered legend box — not estimated.
+// The categorical legend (three captioned columns, term-over-description,
+// 2026-08-14) measures 396.6px — 118.7px / 4.4 rows taller than the packed
+// column-flow legend (277.9px) that fit beside 12 rows — so the budget
+// drops by 5: 7 rows beside the taller box, the extra fraction kept as
+// slack. check_fleet's geometry pass measures the real clearance.
+const LEGEND_ROWS = 7;
 
 // Re-split a page group's final chunk so it leaves room for the pinned
 // legend. One split always suffices: the final chunk is at most a full page,

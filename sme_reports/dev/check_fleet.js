@@ -1026,7 +1026,7 @@ const rec = (over = {}) => ({
   );
   assert.ok(html.includes(">ON<"), "measured rows are unmarked");
   // The legend defines the mark; the email overlay labels still carry theirs.
-  assert.ok(html.includes("ᶜ</b> — concluded"), "legend defines ᶜ");
+  assert.ok(html.includes("ᶜ</b><br>concluded"), "legend defines ᶜ");
   assert.ok(
     condition_cell_record({ archetype: "compressor_stop_ongoing", offline_kind: "warm" }).includes("<sup>c</sup>"),
     "email overlay labels carry the mark"
@@ -1423,7 +1423,15 @@ const rec = (over = {}) => ({
   // uses without inline explanation has an entry, including per-system
   // vocabulary like "flicker" that readers meet when they open a brief.
   assert.ok(html.includes('class="legend pin"'), "legend box present");
-  assert.ok(html.includes(">LEGEND<"), "captioned");
+  assert.ok(html.includes(">Legend<"), "titled");
+  assert.ok(
+    html.includes("how to read a page"),
+    "the subtitle names what the box is for"
+  );
+  // The categorical layout (reformat reference): three captioned columns,
+  // each term under the caption that says what KIND of thing it is.
+  for (const cap of [">A value<", ">A mark on a value<", ">A status label<"])
+    assert.ok(html.includes(cap), `legend category caption ${cap}`);
   // It closes the document rather than riding the cover: reference material
   // sits behind the findings, and a bottom-pinned box on a SHORT cover (a
   // five-system scoped summary) stranded white space in the middle of the
@@ -1440,14 +1448,16 @@ const rec = (over = {}) => ({
     );
   }
   for (const term of [
-    "% OF LIMIT</b> — that reading as a share",
-    "PEAK OVER LIMIT</b> — the period",
-    "flicker</b> — single-reading compressor dropout",
-    "OFF ENTIRE PERIOD</b> — off since before the period",
+    "% OF LIMIT</b><br>that reading as a share",
+    "PEAK OVER LIMIT</b><br>the period",
+    "flicker</b><br>single-reading compressor dropout",
+    "OFF ENTIRE PERIOD</b><br>off since before the period",
     "no signal · sensor suspect",
-    "‡ ✕</b> — reading outside plausible",
+    "‡ ✕</b><br>outside plausible",
     "judged against their own thresholds",
-    "urgent</b> — wrong right now"
+    "urgent</b><br>wrong right now",
+    "value · date</b><br>a dimmed value paired with a date",
+    "LIMITED COVERAGE</b><br>identified systems with no magnet monitoring adapter"
   ])
     assert.ok(html.includes(term), `legend covers: ${term.slice(0, 30)}`);
   // The old prose paragraph is fully replaced, not duplicated.

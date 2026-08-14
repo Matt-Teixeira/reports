@@ -143,10 +143,17 @@ td .m { color: ${COLORS.grey}; font-size: 7pt; font-weight: 400; overflow: hidde
    tallest cell, which cost the old legend ragged vertical gutters and about
    a quarter of its height for nothing. */
 .legend.pin { position: absolute; left: .5in; right: .5in; bottom: .5in; margin: 0; border: 1.5px solid ${COLORS.light}; border-radius: .1in; padding: .07in .12in .08in; background: #fff; }
-.legend .lg-cap { font-size: 7pt; letter-spacing: .12em; color: ${COLORS.blue}; font-weight: 700; margin-bottom: .035in; }
-.legend .lg-grid { column-count: 3; column-gap: .16in; }
-.legend .lg-grid div { font-size: 6.8pt; color: ${COLORS.grey}; line-height: 1.32; break-inside: avoid; margin-bottom: .028in; }
-.legend .lg-grid b { color: ${COLORS.navy}; }
+.legend .lg-title { font-size: 9pt; color: ${COLORS.navy}; font-weight: 700; }
+.legend .lg-sub { font-size: 6.6pt; color: ${COLORS.grey}; margin: .005in 0 .05in; }
+/* Three EXPLICIT columns (flex, not CSS column flow): each category carries
+   its own captioned heading, so entries must stay under their caption
+   rather than auto-balancing across the gutter. Each column flows its own
+   entries independently, so no grid row-height waste either. */
+.legend .lg-cols { display: flex; gap: .16in; }
+.legend .lg-col { flex: 1 1 0; min-width: 0; }
+.legend .lg-h { font-size: 7pt; color: ${COLORS.navy}; font-weight: 700; border-bottom: 1px solid ${COLORS.light}; padding-bottom: .02in; margin-bottom: .035in; }
+.legend .lg-e { font-size: 6.6pt; color: ${COLORS.grey}; line-height: 1.26; margin-bottom: .035in; }
+.legend .lg-e b { color: ${COLORS.navy}; }
 .foot { position: absolute; left: 0; right: 0; bottom: 0; height: .38in; background: ${COLORS.navy}; color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 .5in; font-size: 8.5pt; }
 `;
 
@@ -646,23 +653,39 @@ const overview_body = (vm, rows, first) => {
 
 // The legend closes the document — see the .legend.pin CSS note for why it is
 // no longer on the cover. One legend per document, on the last page.
-const LEGEND = `<div class="legend pin"><div class="lg-cap">LEGEND</div><div class="lg-grid">
-<div><b>period</b> — the span of dates this report covers, shown beside every page number &nbsp; <b>HE PRESSURE · SHIELD TEMP</b> — current reading of the section's metric; units and limit in the heading</div>
-<div><b>% OF LIMIT</b> — that reading as a share of the alert limit, comparable across mbar, PSI and Kelvin</div>
-<div><b>↑ ↓</b> — rising · easing back from the period's peak &nbsp; <b>*</b> vendor-default limit &nbsp; <b>(16.3)</b> own limit differs from heading</div>
-<div><b>PEAK OVER LIMIT</b> — the period's peak crossed the limit; the current reading may since have come back under it</div>
-<div><b>STOP, ONGOING · recovered</b> — compressor stop observed this period; red while unrecovered</div>
-<div><b>2 evt · 12.5h</b> — stop events this period · total observed downtime</div>
-<div><b>WITHIN BAND</b> <span class="bg"><span class="t"></span><span class="d" style="left:62%;"></span></span> — dot = reading between the low and high alert edges (Siemens 4K); centered is healthy, an edge is an alert</div>
-<div><b>flicker</b> — single-reading compressor dropout with no thermal response; noted on the system's brief, never counted as a stop</div>
-<div><b>OFF ENTIRE PERIOD</b> — off since before the period began, start unknown; magnet already warm, so listed but not urgent</div>
-<div><b>no signal · sensor suspect</b> — monitoring faults, not magnet faults; counted as DATA ISSUES with raw readings shown</div>
-<div><b>‡ ✕</b> — reading outside plausible physical bounds; shown greyed but excluded from all status judgments</div>
-<div><b>ᶜ</b> — concluded, not directly read: inferred (GE compressor from coldhead) or corroborated; unmarked = a reading or arithmetic on one</div>
-<div><b>HELIUM · COLDHD · CABINET</b> — judged against their own thresholds; red or amber marks a reading past them</div>
-<div><b>ENVIRONMENTAL (EDU)</b> — room/probe temperature and humidity from the site's EDU hardware; no alert limits are configured, so readings are stated, not judged; readings outside physical bounds (e.g. open-sensor defaults) are excluded; a dimmed value paired with a date is the sensor's last reading, from that day — the channel stopped reporting early; its range still covers the days it ran</div>
-<div><b>urgent</b> — wrong right now (unrecovered stop, live breach, quench); each system's full one-page brief is generated separately</div>
-<div><b>LIMITED COVERAGE</b> — identified systems with no magnet monitoring adapter (e.g. Canon, Hitachi); identity and environmental readings are stated, nothing is analyzed or judged, and no per-system brief exists</div>
+// Categorical legend (reformat reference, 2026-08-14): three captioned
+// columns — what a VALUE is, what a MARK on one adds, what a STATUS LABEL
+// claims — each entry a bold term over its description. Same closed term
+// set as before, redistributed: the stale value·date rule moved out of the
+// EDU entry into the marks column, and the own-limit bracket folded into
+// % OF LIMIT's description (its "(16.3)" stays the document's single
+// example — a check counts exactly one).
+const LEGEND = `<div class="legend pin"><div class="lg-title">Legend</div><div class="lg-sub">Cryogen monitoring report — how to read a page</div><div class="lg-cols">
+<div class="lg-col"><div class="lg-h">A value</div>
+<div class="lg-e"><b>period</b><br>the span of dates this report covers, shown beside every page number</div>
+<div class="lg-e"><b>HE PRESSURE · SHIELD TEMP</b><br>current reading of the section's metric; units and limit sit in the heading</div>
+<div class="lg-e"><b>% OF LIMIT</b><br>that reading as a share of the alert limit — comparable across mbar, PSI and Kelvin. A limit in parentheses <b>(16.3)</b> is this system's own, differing from the heading</div>
+<div class="lg-e"><b>WITHIN BAND</b> <span class="bg"><span class="t"></span><span class="d" style="left:62%;"></span></span><br>dot sits between the low and high alert edges (Siemens 4K); centered is healthy, an edge is an alert</div>
+<div class="lg-e"><b>HELIUM · COLDHD · CABINET</b><br>judged against their own thresholds; red or amber marks a reading past them</div>
+<div class="lg-e"><b>ENVIRONMENTAL (EDU)</b><br>room and probe temperature and humidity from the site's EDU hardware. No alert limits are configured, so readings are stated, not judged</div>
+<div class="lg-e"><b>LIMITED COVERAGE</b><br>identified systems with no magnet monitoring adapter (e.g. Canon, Hitachi); identity and environmental readings are stated, nothing is analyzed or judged, and no per-system brief exists</div>
+</div>
+<div class="lg-col"><div class="lg-h">A mark on a value</div>
+<div class="lg-e"><b>↑ ↓</b><br>rising · easing back from the period's peak</div>
+<div class="lg-e"><b>*</b><br>vendor-default limit</div>
+<div class="lg-e"><b>ᶜ</b><br>concluded, not directly read: inferred (GE compressor from coldhead) or corroborated. Unmarked = a reading, or arithmetic on one</div>
+<div class="lg-e"><b>‡ ✕</b><br>outside plausible physical bounds; greyed, and excluded from every status judgment</div>
+<div class="lg-e"><b>value · date</b><br>a dimmed value paired with a date is the sensor's last reading, from that day — it stopped reporting early</div>
+</div>
+<div class="lg-col"><div class="lg-h">A status label</div>
+<div class="lg-e"><b style="color:${COLORS.red};">urgent</b><br>wrong right now — unrecovered stop, live breach, quench. Each affected system also gets its own one-page brief</div>
+<div class="lg-e"><b>STOP, ONGOING · recovered</b><br>compressor stop observed this period; red while unrecovered</div>
+<div class="lg-e"><b>PEAK OVER LIMIT</b><br>the period's peak crossed the limit; the current reading may since have come back under it</div>
+<div class="lg-e"><b>2 evt · 12.5h</b><br>stop events this period · total observed downtime, in hours</div>
+<div class="lg-e"><b>OFF ENTIRE PERIOD</b><br>off since before the period began, start unknown; magnet already warm, so listed but not urgent</div>
+<div class="lg-e"><b>flicker</b><br>single-reading compressor dropout with no thermal response; noted on the system's brief, never counted as a stop</div>
+<div class="lg-e"><b>no signal · sensor suspect</b><br>monitoring faults, not magnet faults; counted as DATA ISSUES, with raw readings shown</div>
+</div>
 </div></div>`;
 
 // Monitoring problems, not magnet problems: dead compressor signals and
