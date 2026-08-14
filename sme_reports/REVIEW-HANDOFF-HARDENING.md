@@ -11,9 +11,17 @@ back verbatim to another assistant to fix — make each one self-contained
 and reproducible. "No change needed" is a valid finding.
 
 **Round 1 (Phases 0–1: `ea9352e`, `c74f616`, `4a727c9`) is complete — five
-findings, all fixed in `13bfb8b` / `171fe00` / `e64fd97`; see the addendum
-at the end of this file. The next round's scope will be stated here when
-Phase 2 lands.**
+findings, all fixed in `13bfb8b` / `171fe00` / `e64fd97`; see the round-1
+addendum near the end of this file.**
+
+**Current review round: Phases 2–5 — commits `ef4b87e` (fail-closed
+vendor/units/widths lookups), `c6937f1` (fail-closed plausibility-bounds
+dispatch), `88e7500` (runtime fleet partition assertion), `7439ff2`
+(executable checks for three comment-only invariants), `3ef210b` (four
+duplication collapses). All five phases are output-identical — the parity
+harness proved the test batch byte-identical after each commit — so the
+review question is whether the new guards/checks are RIGHT, complete, and
+cannot themselves misfire.**
 
 ## What this codebase does
 
@@ -219,3 +227,83 @@ units-mismatch tiles named in finding 1 (the finding's own fix); the
 scoped Piedmont run differs from its Phase-0 baseline by exactly the 38
 additive `he_thr_source` keys (one per record). The `*` legend wording
 question from Phase 1 remains parked with the user.
+
+## Phases 2–5 — fail-closed hardening (round 2 scope)
+
+All output-identical (parity-proven per commit). The architecture-review
+findings behind them are F1/F8 in `REVIEW-HANDOFF-ARCHITECTURE.md`.
+
+### Phase 2 — fail-closed routing and lookups (`ef4b87e`, `c6937f1`)
+
+- `data.js` `fetch_series`: the final else that routed ANY unmatched
+  vendor key to the Siemens tables is now an explicit `SIEMENS` branch
+  plus a named throw. `fetch_units` guards the `units_queries` lookup
+  (was: `db.any(undefined)` → unattributable "Invalid query format").
+- `render/fleet_page.js` `section_table` throws on a missing `SECTION_W`
+  entry (was: NaN widths into a fixed `overflow:hidden` page).
+- `compute/plausible.js` `primary_bounds`/`helium_bounds` throw on
+  unrecognized units instead of defaulting to PSI/LTRS bounds. The
+  recognized set is the complete LIVE vocabulary, surveyed 2026-08-14
+  across all four `mag.*_units` tables and `alert.models`
+  (K/PSI/mBar→mbar pressure; %/LTRS helium).
+- `check_config` pins `VENDORS` ≡ `units_queries` key sets.
+
+Look hardest at: (a) the bounds throw is reachable from `run_one` per
+system — confirm a novel unit string fails that one system's report and
+not the batch, on every call path (`model.js` screening, `last_raw_flags`,
+`summary_facts`); (b) whether any fixture or minor caller still passes
+unit strings outside the recognized set (suites pass, but you may find an
+unexercised path); (c) the raw-"mBar" stance — bounds treat it as a
+normalization bypass and throw; is every entry point actually normalizing?
+
+### Phase 3 — runtime fleet partition assertion (`88e7500`)
+
+`build_fleet_model` asserts sectioned === rows.length after sectioning and
+throws naming every stray system + vendor_key. Throwing soft-fails only
+the summary document (`build_fleet_summary` isolates it). Written over the
+section list so the future limited-coverage section extends it.
+check_fleet pins the thrown message. Look hardest at: the failure mode —
+soft-failing the WHOLE summary document on one stray row is deliberate
+(never-silent outranks partial delivery); argue if you disagree. Also:
+`condition_rollup` above the assertion still counts stray rows before the
+throw fires — confirm no partial artifact can escape.
+
+### Phase 4 — executable checks for comment-only invariants (`7439ff2`)
+
+- `narrative.js` exports `STORY_KEYS`; check_compute asserts every
+  `SEVERITY_ORDER` condition has a story and (via a shape matrix) that
+  `classify` only produces `SEVERITY_ORDER` members. The render-time
+  TypeError on an unregistered archetype is now check-gated; the lookup
+  itself stays unguarded by design (a guard would hide the bug the check
+  now catches loudly).
+- check_fleet renders all four {records, failures} permutations with
+  exclusions and pins rendered page count + footers to `vm.page_count`
+  (the exclusion-placement duplicate pair, previously comment-synced).
+- `dev/solve_widths.js` SETS now DERIVE from `fleet_model` SECTIONS +
+  the newly shared `EDU_COLUMNS` export; NEEDS stays hand-authored (it
+  is the measurement — deriving it would be tautological); check_fleet
+  pins NEEDS ↔ derived columns; `require.main` guard makes the module
+  requireable; CLI output byte-identical to the pasted SECTION_W.
+
+Look hardest at: the classify shape matrix — does it cover every return
+path (including the `event_window` no-OFF-readings shape)? And whether
+deriving SETS could mask a fleet_model mistake (the counter-argument: the
+measured NEEDS and the Chromium geometry pass are the independent halves,
+and both remain).
+
+### Phase 5 — duplication collapses (`3ef210b`)
+
+One `compute/staleness.js` STALE_MS (three sites; THERMAL_LAG_MS and
+DAY_MS deliberately NOT merged — same number, different meanings); one
+`compute/provenance.js` `is_inferred` for the ᶜ mark (five sites, 4-value
+vocabulary documented); GE's 10 K boundary down to one field
+(`coldhead.warm_k`, `cold_threshold_k` deleted, normalize.js reads the
+shared field, check_config pins the dependency); EDU channel stats
+computed into named locals before the facts literal (property-order
+hazard removed). RULES.md names the shared helpers.
+
+Look hardest at: require-cycle safety of the new compute modules
+(fleet_page → fleet_model → compute/staleness; tiles → both — all
+leaf-only, but verify); and whether any consumer of the OLD
+`vendor.compressor.cold_threshold_k` survives anywhere (grep says only
+the historical comment).
