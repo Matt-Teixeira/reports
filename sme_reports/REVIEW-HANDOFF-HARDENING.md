@@ -14,14 +14,11 @@ and reproducible. "No change needed" is a valid finding.
 findings, all fixed in `13bfb8b` / `171fe00` / `e64fd97`; see the round-1
 addendum near the end of this file.**
 
-**Current review round: Phases 2–5 — commits `ef4b87e` (fail-closed
-vendor/units/widths lookups), `c6937f1` (fail-closed plausibility-bounds
-dispatch), `88e7500` (runtime fleet partition assertion), `7439ff2`
-(executable checks for three comment-only invariants), `3ef210b` (four
-duplication collapses). All five phases are output-identical — the parity
-harness proved the test batch byte-identical after each commit — so the
-review question is whether the new guards/checks are RIGHT, complete, and
-cannot themselves misfire.**
+**Round 2 (Phases 2–5: `ef4b87e`, `c6937f1`, `88e7500`, `7439ff2`,
+`3ef210b`) is complete — four findings, all fixed in `57990d7` /
+`80cf9e0` / `24431e6` / `501c8ba`; see the round-2 addendum at the end of
+this file. The next round's scope will be stated here when the
+analyze_system extraction (Phases 6–8) lands.**
 
 ## What this codebase does
 
@@ -307,3 +304,49 @@ Look hardest at: require-cycle safety of the new compute modules
 leaf-only, but verify); and whether any consumer of the OLD
 `vendor.compressor.cold_threshold_k` survives anywhere (grep says only
 the historical comment).
+
+## Review round 2 (codex) — outcome
+
+Four findings, all verified and fixed; all five suites green; parity
+byte-identical on the test batch after the fixes.
+
+1. **P1 — a partition violation could still resolve into a successful,
+   silent delivery.** `build_fleet_summary` caught every error into a bare
+   null; a normal batch then sent the summary email (attachment quietly
+   absent), delivered briefs, and exited 0. Fixed in `57990d7`:
+   `build_fleet_summary` returns `{pdf_path, error}`; the summary email
+   opens with a red statement that the requested document could not be
+   generated (`fleet_failure_note` in `email_theme.js` — scoped/customer
+   wording carries no raw error, the whitelist stance; the internal
+   variant carries the escaped message); file-mode `run_sme_report` throws
+   AFTER all authorized deliverables have gone out, so cron sees nonzero.
+   summary_only's hard failure and run_scheduled's per-unit
+   `fleet_pdf_path` check are unchanged. check_fleet pins the note's
+   statement, escaping, and scoped no-raw-error stance.
+2. **P2 — the classify matrix did not guard future return paths.** Fixed
+   in `80cf9e0`: `ARCHETYPES` is now a closed, priority-ordered registry
+   in `compute/archetype.js`; `classify` validates its own output at
+   runtime (named error at the source, even on unexercised paths);
+   check_compute asserts `SEVERITY_ORDER` equals the registry exactly
+   (keys AND order — the "MUST match" comment made executable);
+   `build_narrative` throws a named error instead of a bare TypeError —
+   deliberately still a throw, not a fallback.
+3. **P2 — unknown compressor provenance failed open as "measured".**
+   Fixed in `24431e6`: `compute/provenance.js` is a closed registry
+   (reported / measured / inferred); `source_kind` throws on anything
+   unregistered and `is_inferred` resolves through it; check_config
+   validates every vendor source through the registry before the
+   inferred→warm_k dependency check.
+4. **P2 — empty unit strings bypassed the bounds guards.** Fixed in
+   `501c8ba`: `fetch_units` distinguishes absent (NULL → vendor default)
+   from blank (fails closed, naming system and channel);
+   `resolve_thresholds` trims row-supplied units (whitespace variants of
+   one unit are one unit) while a blank stays "absent" there —
+   deliberately, since a unitless threshold row is meaningful. Live
+   survey 2026-08-14: no blank or padded units exist anywhere, so no
+   live system is affected.
+
+Codex additionally confirmed: the mBar path normalizes before bounds
+dispatch, unknown-unit throws stay isolated per system, the partition
+assertion emits no partial artifact, the Phase 5 modules introduce no
+require cycle, and no `cold_threshold_k` consumer survives.
