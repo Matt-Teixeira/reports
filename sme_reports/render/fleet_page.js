@@ -765,7 +765,11 @@ const build_fleet_page = (vm) => {
           ? ` <span class="n">— ${vm.limited_section.count} system${vm.limited_section.count === 1 ? "" : "s"}</span>`
           : "";
       pages.push(
-        `<h2>${esc(vm.limited_section.title).toUpperCase()}${count} <span class="n">· environmental readings only — no magnet monitoring adapter</span>${cont}</h2>` +
+        // The note names the content only ("environmental readings only");
+        // the WHY — no magnet monitoring adapter — lives in the legend's
+        // LIMITED COVERAGE entry, same split the EDU heading uses. The
+        // long form wrapped the heading to two lines.
+        `<h2>${esc(vm.limited_section.title).toUpperCase()}${count} <span class="n">· environmental readings only</span>${cont}</h2>` +
           section_table(vm.limited_section, rows)
       );
     });
