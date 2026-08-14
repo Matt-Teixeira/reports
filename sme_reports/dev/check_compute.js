@@ -698,4 +698,45 @@ const row = (h, over = {}) => ({
   assert.strictEqual(helium_bounds("LTRS").max, 5000);
 }
 
+// ---- condition registration coverage (phase 4) -----------------------------
+// build_narrative's story lookup is unguarded — STORIES[facts.archetype]
+// throws a TypeError AT RENDER TIME on an unregistered key — and
+// conditions.js's ordering coupling to archetype.js was comment-only. Both
+// invariants become executable here: every severity-ordered condition has a
+// story, and classify can only produce severity-ordered conditions.
+{
+  const { SEVERITY_ORDER } = require("../conditions");
+  const { STORY_KEYS } = require("../render/narrative");
+  for (const key of SEVERITY_ORDER)
+    assert.ok(
+      STORY_KEYS.includes(key),
+      `every condition in SEVERITY_ORDER needs a narrative story: "${key}"`
+    );
+
+  const thr0 = { high_gt: 100, high_lt: null, med_gt: null, med_lt: null };
+  const p = (over = {}) => ({
+    peak: { v: 30 },
+    all: { min: { v: 29 } },
+    last: { v: 30 },
+    rate_per_hr: null,
+    ...over
+  });
+  const matrix = [
+    { compressor_event: { off_count: 2, end: null }, pressure: p(), thr: thr0 },
+    { compressor_event: { off_count: 2, end: 1 }, pressure: p(), thr: thr0 },
+    { compressor_event: { off_count: 0, end: null }, pressure: p(), thr: thr0 },
+    { compressor_event: null, pressure: p({ peak: { v: 120 } }), thr: thr0 },
+    { compressor_event: null, pressure: p({ rate_per_hr: 0.01, last: { v: 70 } }), thr: thr0 },
+    { compressor_event: null, pressure: null, thr: thr0 },
+    { compressor_event: null, pressure: p({ all: { min: { v: 10 } } }), thr: { ...thr0, high_gt: null, high_lt: 14 } }
+  ];
+  for (const facts of matrix) {
+    const a = classify(facts);
+    assert.ok(
+      SEVERITY_ORDER.includes(a),
+      `classify produced "${a}", which SEVERITY_ORDER does not carry`
+    );
+  }
+}
+
 console.log("check_compute: all assertions passed");

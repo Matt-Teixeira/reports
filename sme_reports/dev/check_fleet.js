@@ -1164,6 +1164,58 @@ const rec = (over = {}) => ({
   assert.ok(!html.includes("undefined") && !html.includes("NaN"), "no artifacts with zero systems");
 }
 
+// --- exclusion placement parity across all four layouts (phase 4) -----------
+// fleet_model's exclusion_pages count and fleet_page's placement branch are
+// deliberate duplicates in OPPOSITE polarity (the block rides the last
+// failures page only when vendor sections follow; it takes its own page
+// otherwise), synced by reciprocal comment alone until now. Render all four
+// {records, failures} permutations with exclusions present and pin the
+// rendered page count to the modeled one — the drift the comments warn
+// about ("the footer paging lies") is what this catches.
+{
+  const excluded = { ids: ["SME10844"], note: "service station" };
+  const cases = [
+    [[], []],
+    [[], [{ system_id: "SME00001", message: "no data" }]],
+    [[rec({})], []],
+    [[rec({})], [{ system_id: "SME00001", message: "no data" }]]
+  ];
+  for (const [records, failures] of cases) {
+    const vm = build_fleet_model(records, failures, { excluded });
+    const html = build_fleet_page(vm);
+    assert.strictEqual(
+      (html.match(/<div class="page">/g) || []).length,
+      vm.page_count,
+      `rendered pages match modeled count (records=${records.length}, failures=${failures.length})`
+    );
+    assert.ok(
+      html.includes(`page ${vm.page_count} of ${vm.page_count}`),
+      `footers agree (records=${records.length}, failures=${failures.length})`
+    );
+    assert.ok(html.includes("EXCLUDED BY REQUEST"), "exclusion stated in every layout");
+  }
+}
+
+// --- solver inputs derive from the model (phase 4) --------------------------
+// dev/solve_widths.js used to restate the column lists verbatim under a
+// keep-in-sync comment; its SETS now derive from SECTIONS/EDU_COLUMNS. The
+// remaining hand-authored half is NEEDS — the measurement — and this pins
+// it to measure exactly the non-site columns of every section, so a column
+// added to SECTIONS without a measured need fails here instead of the
+// solver silently emitting a stale width table.
+{
+  const { NEEDS, SETS } = require("./solve_widths");
+  for (const [key, cols] of Object.entries(SETS)) {
+    const measured = Object.keys(NEEDS[key] || {}).sort();
+    const expected = cols.filter((c) => c !== "site").sort();
+    assert.deepStrictEqual(
+      measured,
+      expected,
+      `NEEDS.${key} must measure exactly the non-site columns of its section`
+    );
+  }
+}
+
 // --- fatal run errors exit nonzero ------------------------------------------
 {
   // Codex F5: the orchestrator's outer catch swallowed fatal errors (bad

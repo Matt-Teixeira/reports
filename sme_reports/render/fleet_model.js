@@ -99,6 +99,12 @@ const SECTIONS = [
   }
 ];
 
+// The EDU section's column set, beside SECTIONS so every consumer of "the
+// column lists" (fleet_page's widths, dev/solve_widths' derivation, the
+// check fixtures) reads ONE source. The section itself is built inline in
+// build_fleet_model because its membership is cross-vendor.
+const EDU_COLUMNS = ["system", "site", "edu_room", "edu_humidity", "edu_probe_0", "edu_probe_1"];
+
 // The alert limit a section's percentages are measured against. Thresholds
 // come from alert.models per system, but in practice they are near-uniform
 // within a vendor — every GE system on the fleet shares >5.2 PSI — so the
@@ -419,7 +425,7 @@ const build_fleet_model = (records, failures, meta = {}) => {
     ? {
         vendor_key: "EDU",
         title: "Environmental (EDU)",
-        columns: ["system", "site", "edu_room", "edu_humidity", "edu_probe_0", "edu_probe_1"],
+        columns: EDU_COLUMNS,
         count: edu_members.length,
         pages: chunk_rows(edu_members, ROWS_FIRST_PAGE, ROWS_PER_PAGE)
       }
@@ -539,6 +545,7 @@ module.exports = {
   chunk_rows,
   reserve_tail,
   SECTIONS,
+  EDU_COLUMNS,
   ROWS_PER_PAGE,
   ROWS_FIRST_PAGE,
   ATTENTION_FIRST_PAGE,

@@ -47,16 +47,21 @@ const NEEDS = {
   EDU: { system: 100, edu_room: 94, edu_humidity: 94, edu_probe_0: 94, edu_probe_1: 94 }
 };
 
-// Column order per section must match fleet_model.js SECTIONS (EDU's is
-// built inline in build_fleet_model).
-const SETS = {
-  PHILIPS: ["system", "site", "condition", "primary", "line", "helium", "compressor", "temp_alarm"],
-  GE: ["system", "site", "condition", "primary", "line", "helium", "coldhead", "shield", "compressor"],
-  SIEMENS: ["system", "site", "condition", "primary", "line", "helium", "coldhead", "compressor"],
-  SIEMENS_NON_TIM: ["system", "site", "condition", "primary", "line", "helium", "cabinet", "compressor"],
-  EDU: ["system", "site", "edu_room", "edu_humidity", "edu_probe_0", "edu_probe_1"]
-};
+// Column sets are DERIVED from fleet_model.js (SECTIONS + EDU_COLUMNS), the
+// single source of the column lists — this file used to restate them
+// verbatim with a keep-in-sync comment, which nothing checked. NEEDS above
+// stays hand-authored: it is the MEASUREMENT (dev/colbudget.js against live
+// renders), not a restatement, and deriving it would make the width gate
+// tautological. check_fleet asserts NEEDS covers exactly the derived
+// columns, so a column added to SECTIONS without a measured need fails at
+// check time.
+const { SECTIONS, EDU_COLUMNS } = require("../render/fleet_model");
+const SETS = Object.fromEntries([
+  ...SECTIONS.map((s) => [s.vendor_key, s.columns]),
+  ["EDU", EDU_COLUMNS]
+]);
 
+const solve = () => {
 console.log("SECTION_W (paste into fleet_page.js):");
 for (const key of Object.keys(SETS)) {
   const w = {};
@@ -80,3 +85,10 @@ for (const key of Object.keys(SETS)) {
     );
   }
 }
+};
+
+if (require.main === module) solve();
+
+// NEEDS/SETS are exported for check_fleet's coverage assertion; requiring
+// this module runs nothing.
+module.exports = { NEEDS, SETS };

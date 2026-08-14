@@ -396,4 +396,9 @@ const build_narrative = (facts) => ({
   rx_cards: build_cards(facts)
 });
 
-module.exports = { build_narrative };
+// STORY_KEYS: the archetypes this module can narrate. Exported for the
+// check-time coverage assertion — build_narrative's lookup is unguarded
+// (STORIES[facts.archetype](facts) throws a TypeError at render time on an
+// unregistered key), so the guarantee that every classifiable archetype has
+// a story lives in check_compute, not here.
+module.exports = { build_narrative, STORY_KEYS: Object.keys(STORIES) };
