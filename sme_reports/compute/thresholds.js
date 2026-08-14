@@ -31,11 +31,22 @@ const resolve_thresholds = (rows, vendor) => {
   const keep_min = (cur, v) => (cur === null ? v : Math.min(cur, v));
   const keep_max = (cur, v) => (cur === null ? v : Math.max(cur, v));
 
+  // Row-supplied units are trimmed; a present-but-blank string counts as
+  // absent here (a unitless threshold row is meaningful — helium limits
+  // with null units apply regardless of display units), unlike the display
+  // units in data.fetch_units where blank fails closed.
+  const unit_row = (raw) => {
+    if (raw === null || raw === undefined) return null;
+    const s = String(raw).trim();
+    return s || null;
+  };
+
   for (const r of rows) {
     const v = parseFloat(r.threshold);
     if (Number.isNaN(v)) continue;
+    const tu = unit_row(r.threshold_units);
     if (vendor.pressure.model_fields.includes(r.field_name)) {
-      if (r.threshold_units) p_units.add(r.threshold_units);
+      if (tu) p_units.add(tu);
       if (r.operator === "greater_than") {
         if (r.severity === "high") p.high_gt = keep_min(p.high_gt, v);
         else p.med_gt = keep_min(p.med_gt, v);
@@ -44,7 +55,7 @@ const resolve_thresholds = (rows, vendor) => {
         else p.med_lt = keep_max(p.med_lt, v);
       }
     } else if (r.operator === "less_than") {
-      if (r.threshold_units) he_units.add(r.threshold_units);
+      if (tu) he_units.add(tu);
       if (r.severity === "high") he.low_high = keep_max(he.low_high, v);
       else he.low_med = keep_max(he.low_med, v);
       he_configured = true;

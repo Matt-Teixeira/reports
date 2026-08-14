@@ -124,7 +124,20 @@ const fetch_thresholds = async (system_id, vendor) => {
 };
 
 // Display units from the vendor's mag.*_units row (e.g. Siemens helium can be
-// LTRS instead of %). Missing rows fall back to the vendor defaults.
+// LTRS instead of %). ABSENT (null/undefined) values fall back to the vendor
+// defaults; a PRESENT-but-empty string is a configuration error and fails
+// closed — `||` treated "" as missing and silently substituted the default,
+// so a blanked units row never reached the fail-closed bounds dispatch.
+const unit_of = (raw, fallback, system_id, what) => {
+  if (raw === null || raw === undefined) return fallback;
+  const s = String(raw).trim();
+  if (!s)
+    throw new Error(
+      `empty ${what} units configured for ${system_id} — set the units row or clear it to NULL`
+    );
+  return s;
+};
+
 const fetch_units = async (system_id, vendor) => {
   const q = units_queries[vendor.key];
   // Fail closed with a named cause — db.any(undefined) rejects with an
@@ -132,9 +145,9 @@ const fetch_units = async (system_id, vendor) => {
   if (!q) throw new Error(`no units query registered for vendor "${vendor.key}"`);
   const rows = await db.any(q, [system_id]);
   const row = rows[0] || {};
-  const pressure = row.pressure_units || vendor.pressure.units;
+  const pressure = unit_of(row.pressure_units, vendor.pressure.units, system_id, "pressure");
   return {
-    helium: row.helium_units || vendor.helium.units,
+    helium: unit_of(row.helium_units, vendor.helium.units, system_id, "helium"),
     // Normalize display casing ("mBar" -> "mbar") to match the report style.
     pressure: pressure === "mBar" ? "mbar" : pressure
   };
