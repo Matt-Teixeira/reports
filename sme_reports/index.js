@@ -14,7 +14,7 @@ const {
 const { build_render_model } = require("./render/model");
 const { analyze_system } = require("./compute/analyze");
 const { build_page } = require("./render/page");
-const { build_summary_facts } = require("./compute/summary_facts");
+const { build_summary_facts, build_limited_record } = require("./compute/summary_facts");
 const write_html = require("./output/write_html");
 
 const [addLogEvent] = require("../utils/logger/log");
@@ -36,7 +36,50 @@ const run_one = async (run_log, job_id, request, on_facts = null) => {
   await addLogEvent(I, run_log, "run_sme_report", cal, note, null);
 
   const identity = await fetch_identity(request.system_id);
-  const { vendor, routing } = await resolve_system_vendor(identity);
+  const resolution = await resolve_system_vendor(identity);
+
+  // LIMITED coverage (classify_manufacturer allowlist): identity + EDU
+  // statements only — no analysis, no judgments. Product decision
+  // (phase 9): no per-system brief exists for these, so a brief-producing
+  // request fails LOUDLY as a named failure row (the scoped document words
+  // it via the customer whitelist); summary-only shapes carry the limited
+  // record into the fleet document's LIMITED section instead. Note this is
+  // per-run-shape: the same system is a stated row in a summary sweep and
+  // a named failure in a briefs batch — never silent in either.
+  if (resolution.limited) {
+    if (request.output.html || request.output.pdf || request.output.email)
+      throw new Error(
+        `${request.system_id} is limited coverage (${resolution.label}): no Magnet Health Brief — included in summary documents only`
+      );
+    const { edu_source, edu } = await fetch_edu_series(
+      request.system_id,
+      request.window
+    );
+    const { build_edu_facts } = require("./compute/analyze");
+    const summary = build_limited_record({
+      identity,
+      label: resolution.label,
+      window: request.window,
+      edu_facts: build_edu_facts(edu, edu_source)
+    });
+    note = {
+      job_id,
+      system_id: request.system_id,
+      limited: resolution.label,
+      edu_source,
+      edu_captures: edu.length
+    };
+    await addLogEvent(I, run_log, "run_sme_report", det, note, null);
+    return {
+      system_id: identity.system_id,
+      site_name: identity.site_name,
+      manufacturer: identity.manufacturer,
+      modality: identity.modality,
+      summary
+    };
+  }
+
+  const { vendor, routing } = resolution;
   // The four remaining pulls are independent once the vendor is known.
   const [{ source, series }, { edu_source, edu }, thresholds, units] =
     await Promise.all([

@@ -31,6 +31,49 @@ const {
 const { fallback_thresholds } = require("../vendors");
 const { is_inferred } = require("./provenance");
 
+// EDU environmental telemetry (vendor-independent, °F / %); supplemental.
+// Screened against the EDU plausibility bounds first: an open probe input
+// emits its scale floor (−196.6 °F on a live unit), and without the screen
+// that default becomes the channel's period minimum and last reading. A
+// channel with no plausible points at all reads as absent, and the drops
+// are counted so the exclusion is stated, never silent.
+// Drops are counted PER CHANNEL: "which probe is emitting garbage" is the
+// diagnosis the brief's DATA NOTES states, and one aggregate number can't
+// name the probe.
+// Channel stats are computed BEFORE the facts literal: the rejected totals
+// read the accumulator the four calls mutate, and having those calls
+// inside the literal made correctness hang on property evaluation order.
+// Exported: the limited-coverage path (identity + EDU only, no magnet
+// channels) builds its environmental block through this SAME screen, so a
+// limited row and an assessed row can never disagree about what an open
+// probe input means.
+const build_edu_facts = (edu, edu_source) => {
+  if (!edu.length) return null;
+  const edu_rejected = { room_temp: 0, humidity: 0, probe_0: 0, probe_1: 0 };
+  const edu_channel_stats = (name, key, bounds) => {
+    const points = metric_points(edu, key);
+    const kept = points.filter((p) => !outside(p.v, bounds));
+    edu_rejected[name] = points.length - kept.length;
+    return stats_for(kept);
+  };
+  const edu_room_temp = edu_channel_stats("room_temp", "room_temp_f", PLAUSIBLE.edu_temp_f);
+  const edu_humidity = edu_channel_stats("humidity", "humidity_pct", PLAUSIBLE.edu_humidity_pct);
+  const edu_probe_0 = edu_channel_stats("probe_0", "probe_0_f", PLAUSIBLE.edu_temp_f);
+  const edu_probe_1 = edu_channel_stats("probe_1", "probe_1_f", PLAUSIBLE.edu_temp_f);
+  return {
+    source: edu_source,
+    count: edu.length,
+    room_temp: edu_room_temp,
+    humidity: edu_humidity,
+    probe_0: edu_probe_0,
+    probe_1: edu_probe_1,
+    rejected: {
+      ...edu_rejected,
+      total: Object.values(edu_rejected).reduce((n, c) => n + c, 0)
+    }
+  };
+};
+
 // The ANALYSIS of one system: normalized series + thresholds + units ->
 // serializable facts. Moved verbatim out of render/model.js
 // build_render_model (its lines 58-376) so analysis can run without
@@ -241,53 +284,7 @@ const analyze_system = ({
   );
   const room_temp = stats_for(metric_points(rows, "room_temp_c"));
 
-  // EDU environmental telemetry (vendor-independent, °F / %); supplemental.
-  // Screened against the EDU plausibility bounds first: an open probe input
-  // emits its scale floor (−196.6 °F on a live unit), and without the screen
-  // that default becomes the channel's period minimum and last reading. A
-  // channel with no plausible points at all reads as absent, and the drops
-  // are counted so the exclusion is stated, never silent.
-  // Drops are counted PER CHANNEL: "which probe is emitting garbage" is the
-  // diagnosis the brief's DATA NOTES states, and one aggregate number can't
-  // name the probe.
-  const edu_rejected = { room_temp: 0, humidity: 0, probe_0: 0, probe_1: 0 };
-  const edu_channel_stats = (name, key, bounds) => {
-    const points = metric_points(edu, key);
-    const kept = points.filter((p) => !outside(p.v, bounds));
-    edu_rejected[name] = points.length - kept.length;
-    return stats_for(kept);
-  };
-  // Channel stats are computed BEFORE the facts literal: the rejected
-  // totals read the accumulator the four calls mutate, and having those
-  // calls inside the literal made correctness hang on property evaluation
-  // order — a cosmetic reorder (alphabetizing, destructuring) would have
-  // silently zeroed the counts.
-  const edu_room_temp = edu.length
-    ? edu_channel_stats("room_temp", "room_temp_f", PLAUSIBLE.edu_temp_f)
-    : null;
-  const edu_humidity = edu.length
-    ? edu_channel_stats("humidity", "humidity_pct", PLAUSIBLE.edu_humidity_pct)
-    : null;
-  const edu_probe_0 = edu.length
-    ? edu_channel_stats("probe_0", "probe_0_f", PLAUSIBLE.edu_temp_f)
-    : null;
-  const edu_probe_1 = edu.length
-    ? edu_channel_stats("probe_1", "probe_1_f", PLAUSIBLE.edu_temp_f)
-    : null;
-  const edu_facts = edu.length
-    ? {
-        source: edu_source,
-        count: edu.length,
-        room_temp: edu_room_temp,
-        humidity: edu_humidity,
-        probe_0: edu_probe_0,
-        probe_1: edu_probe_1,
-        rejected: {
-          ...edu_rejected,
-          total: Object.values(edu_rejected).reduce((n, c) => n + c, 0)
-        }
-      }
-    : null;
+  const edu_facts = build_edu_facts(edu, edu_source);
   if (edu_facts && temp_alarm) {
     edu_facts.alarm_room_temp = stats_for(
       metric_points(
@@ -382,4 +379,4 @@ const analyze_system = ({
   return { facts, views: { mode, p_points, he_points } };
 };
 
-module.exports = { analyze_system };
+module.exports = { analyze_system, build_edu_facts };

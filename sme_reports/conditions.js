@@ -77,14 +77,23 @@ const CONDITION_COLOR = {
 // own headline tier. A recorded quench overrides: missing a real quench is
 // worse than trusting a suspect chain.
 const is_data_issue = (r) =>
+  !is_limited(r) &&
   r.quenched !== true &&
   (r.sensor_suspect === true || r.offline_kind === "no_signal");
+
+// A LIMITED-COVERAGE record (identity + EDU only, no analysis) is stated,
+// never judged: it can never be attention, urgent, or a data issue —
+// explicitly, not by undefined fields happening to fall through the
+// predicates below.
+const is_limited = (r) => r.assessment_status === "limited_coverage";
 
 // A quench is recorded independently of the primary metric — a quenched
 // magnet can read normal pressure and classify `stable_healthy` — so it has
 // to be an overlay, or it vanishes from the fleet view.
 const is_attention = (r) =>
-  !is_data_issue(r) && (ATTENTION.has(r.archetype) || r.quenched === true);
+  !is_limited(r) &&
+  !is_data_issue(r) &&
+  (ATTENTION.has(r.archetype) || r.quenched === true);
 
 // Urgency is about NOW. `threshold_exceeded` fires on the window's PEAK, so a
 // system that spiked last week and has since settled is worth listing but is
@@ -95,6 +104,7 @@ const is_attention = (r) =>
 // finished state, listed as WARM / OFFLINE — or the signal is lying. The
 // window where paging someone could still save helium has long passed.
 const is_urgent = (r) => {
+  if (is_limited(r)) return false;
   if (r.quenched === true) return true;
   if (is_data_issue(r) || r.offline_kind === "warm") return false;
   return (
@@ -149,6 +159,11 @@ const STATUS_COLOR = (key) =>
 
 // Record-aware variant of condition_cell for the emails.
 const condition_cell_record = (r) => {
+  // Limited coverage first: the record carries NO archetype, and without
+  // this branch the cell would render the literal string "undefined".
+  // Grey and unmarked — "limited coverage" is a statement about our data
+  // adapter, not a conclusion about the magnet.
+  if (is_limited(r)) return `<span style="color:${COLORS.grey};">limited coverage</span>`;
   // A quench overrides every label. It is already counted as attention and
   // urgent by the functions above — if the cell then says "stable / healthy"
   // the email calls a quenched magnet healthy while its own headline counts
@@ -189,6 +204,7 @@ module.exports = {
   is_attention,
   is_urgent,
   is_data_issue,
+  is_limited,
   effective_status,
   STATUS_LABELS,
   STATUS_COLOR,

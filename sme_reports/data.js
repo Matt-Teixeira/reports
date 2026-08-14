@@ -12,7 +12,7 @@ const {
   edu_config,
   edu_series
 } = require("./sql/sql");
-const { VENDORS, resolve_vendor } = require("./vendors");
+const { VENDORS, classify_manufacturer } = require("./vendors");
 const { resolve_thresholds } = require("./compute/thresholds");
 const {
   num,
@@ -45,12 +45,20 @@ const fetch_mag_routing = async (system_id) => {
 // Resolves the concrete vendor for a system: manufacturer string first, then
 // config.mag routing to split Siemens TIM vs non-TIM. Returned routing is
 // reused by fetch_series to pick GE tables.
+// A LIMITED manufacturer (classify_manufacturer allowlist) returns
+// { limited: true, label } instead of a vendor — the caller takes the
+// identity+EDU path. Unknown manufacturers keep the hard throw: unknown is
+// never downgraded to limited, and a supported vendor whose data pulls
+// fail later stays a failure, never limited either.
 const resolve_system_vendor = async (identity) => {
-  const base = resolve_vendor(identity.manufacturer);
-  if (!base)
+  const c = classify_manufacturer(identity.manufacturer);
+  if (c.kind === "unknown")
     throw new Error(
       `unsupported manufacturer "${identity.manufacturer}" for ${identity.system_id} (PHILIPS, GE, SIEMENS)`
     );
+  if (c.kind === "limited")
+    return { limited: true, label: c.label, vendor: null, routing: [] };
+  const base = c.vendor;
   if (base.key === "GE" || base.key === "SIEMENS") {
     const routing = await fetch_mag_routing(identity.system_id);
     if (

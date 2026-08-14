@@ -176,6 +176,25 @@ const edu_channel = (stats) =>
     ? { last: stats.last.v, last_t: stats.last.t, min: stats.min.v, max: stats.max.v }
     : null;
 
+// facts.edu (compute/analyze build_edu_facts) -> the record's edu block.
+// Shared by assessed records and limited-coverage records so the fleet's
+// environmental cells render one shape. Readings outside the EDU
+// plausibility bounds were dropped before these stats — `rejected` is how
+// many; the per-channel split stays on the brief, the record keeps the
+// clean total.
+const distill_edu = (edu_facts) =>
+  edu_facts
+    ? {
+        source: edu_facts.source,
+        captures: edu_facts.count,
+        rejected: edu_facts.rejected ? edu_facts.rejected.total : 0,
+        room_temp: edu_channel(edu_facts.room_temp),
+        humidity: edu_channel(edu_facts.humidity),
+        probe_0: edu_channel(edu_facts.probe_0),
+        probe_1: edu_channel(edu_facts.probe_1)
+      }
+    : null;
+
 const build_summary_facts = (facts, identity) => {
   const { vendor, thr, he_thr, units, pressure, helium } = facts;
 
@@ -244,6 +263,10 @@ const build_summary_facts = (facts, identity) => {
     manufacturer: identity.manufacturer,
     modality: identity.modality,
     vendor_key: vendor.key,
+    // Fully analyzed through the magnet channels — vs "limited_coverage"
+    // (build_limited_record: identity + EDU, no analysis, no judgments).
+    // Additive field; older archived sidecars lack it.
+    assessment_status: "assessed",
 
     // --- condition ----------------------------------------------------
     archetype: facts.archetype,
@@ -335,21 +358,7 @@ const build_summary_facts = (facts, identity) => {
     // this period. Last reading plus the period range per channel — the
     // summary's EDU section renders exactly these numbers, so a system
     // "has an edu" for the document iff this block is present.
-    edu: facts.edu
-      ? {
-          source: facts.edu.source,
-          captures: facts.edu.count,
-          // Readings outside the EDU plausibility bounds (open-sensor scale
-          // defaults) were dropped before these stats — this is how many.
-          // The per-channel split stays on the brief (its DATA NOTES names
-          // the probe); the fleet record keeps the clean total.
-          rejected: facts.edu.rejected ? facts.edu.rejected.total : 0,
-          room_temp: edu_channel(facts.edu.room_temp),
-          humidity: edu_channel(facts.edu.humidity),
-          probe_0: edu_channel(facts.edu.probe_0),
-          probe_1: edu_channel(facts.edu.probe_1)
-        }
-      : null,
+    edu: distill_edu(facts.edu),
 
     // --- data quality -------------------------------------------------
     captures: facts.counts.captures,
@@ -362,8 +371,36 @@ const build_summary_facts = (facts, identity) => {
   };
 };
 
+// The LIMITED-COVERAGE record: identity plus an honest environmental
+// statement, and nothing else — no archetype, no thresholds, no condition,
+// no urgency. A limited system is stated, never judged (stated-vs-judged),
+// and its record must not be able to impersonate an assessed one: no
+// archetype key exists to grade, vendor_key is the LIMITED section's, and
+// every grading path (conditions.js, fleet_model) branches on
+// assessment_status explicitly. `edu_facts` comes from
+// compute/analyze.build_edu_facts — the same screen assessed systems use.
+const build_limited_record = ({ identity, label, window, edu_facts }) => ({
+  assessment_status: "limited_coverage",
+  system_id: identity.system_id,
+  cus_sys_id: identity.cus_sys_id || null,
+  site_name: identity.site_name,
+  customer_name: identity.customer_name,
+  city: identity.city,
+  state: identity.state,
+  manufacturer: identity.manufacturer,
+  modality: identity.modality,
+  // The display manufacturer for the LIMITED section's cell (trimmed).
+  limited_label: label,
+  vendor_key: "LIMITED",
+  edu: distill_edu(edu_facts),
+  window_start: window.start.toMillis(),
+  window_end: window.end.toMillis(),
+  window_hours: (window.end.toMillis() - window.start.toMillis()) / HOUR_MS
+});
+
 module.exports = {
   build_summary_facts,
+  build_limited_record,
   offline_state,
   PLAUSIBLE,
   pct_of_line,

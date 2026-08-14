@@ -205,6 +205,10 @@ const main = async () => {
     // gap means the observer channel broke, and that fails parity loudly.
     if (facts_by_id) {
       for (const r of results) {
+        // Limited-coverage systems produce a record but no analysis facts
+        // (identity + EDU only) — their witness is records.json alone.
+        if (r.summary && r.summary.assessment_status === "limited_coverage")
+          continue;
         const facts = facts_by_id.get(r.system_id);
         if (!facts)
           throw new Error(`parity --facts: no facts observed for ${r.system_id}`);

@@ -158,4 +158,31 @@ const resolve_vendor = (manufacturer) => {
   return null;
 };
 
-module.exports = { VENDORS, resolve_vendor, fallback_thresholds };
+// Manufacturers with LIMITED coverage: real hardware we can identify (and
+// read environmental EDU data from, where configured) but carry no magnet
+// data adapter for. A limited system is assessed nothing and judged
+// nothing — identity plus EDU statements only. The list is a CLOSED
+// allowlist: anything matching neither this nor the supported vendors is
+// UNKNOWN and stays a hard failure — the live systems table carries "TBD"
+// rows, and unknown ≠ limited.
+const LIMITED_MANUFACTURERS = ["HITACHI", "CANON", "TOSHIBA", "AMERICOMP"];
+
+// The single manufacturer gate: supported (full analysis via `vendor`),
+// limited (identity + EDU, `label` is the display manufacturer), or
+// unknown (callers fail loudly).
+const classify_manufacturer = (manufacturer) => {
+  const vendor = resolve_vendor(manufacturer);
+  if (vendor) return { kind: "supported", vendor };
+  const m = String(manufacturer || "").toUpperCase();
+  if (LIMITED_MANUFACTURERS.some((x) => m.includes(x)))
+    return { kind: "limited", label: String(manufacturer).trim() };
+  return { kind: "unknown" };
+};
+
+module.exports = {
+  VENDORS,
+  resolve_vendor,
+  classify_manufacturer,
+  LIMITED_MANUFACTURERS,
+  fallback_thresholds
+};

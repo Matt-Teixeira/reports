@@ -486,6 +486,24 @@ const { parse_sme_args } = require("../cli_args");
       "VENDORS and units_queries must register the same vendor keys"
     );
 
+    // The manufacturer gate: supported resolves a vendor, the limited
+    // allowlist matches loosely but CLOSED, and anything else — including
+    // the live table's junk strings — is unknown, never limited.
+    const { classify_manufacturer } = require("../vendors");
+    assert.strictEqual(classify_manufacturer("GE Medical").kind, "supported");
+    assert.strictEqual(classify_manufacturer("Philips").vendor.key, "PHILIPS");
+    assert.strictEqual(classify_manufacturer("Hitachi Medical").kind, "limited");
+    assert.strictEqual(
+      classify_manufacturer(" Canon ").label,
+      "Canon",
+      "limited label is the trimmed display manufacturer"
+    );
+    assert.strictEqual(classify_manufacturer("TOSHIBA").kind, "limited");
+    assert.strictEqual(classify_manufacturer("Americomp").kind, "limited");
+    assert.strictEqual(classify_manufacturer("TBD").kind, "unknown");
+    assert.strictEqual(classify_manufacturer("Artshu").kind, "unknown");
+    assert.strictEqual(classify_manufacturer(null).kind, "unknown");
+
     // Every vendor's compressor source must resolve through the CLOSED
     // provenance registry (source_kind throws on anything unregistered —
     // round-2 F3: a typoed source must not fail open as "measured"), and a
