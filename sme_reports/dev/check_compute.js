@@ -632,6 +632,47 @@ const row = (h, over = {}) => ({
   // Fully configured: both channels carry default_models provenance.
   assert.strictEqual(p.helium.source, "default_models");
   assert.strictEqual(p.pressure.source, "default_models");
+
+  // Units resolve from the SET of row-supplied units, so database row order
+  // can never change the result (the query is unordered; last-row-wins let
+  // the same limit apply or suppress per run).
+  const perm_rows = [
+    trow("he_psi_avg_value", "greater_than", "80", "high", "PSI"),
+    trow("helium_level_value", "less_than", "40", "high", "%"),
+    trow("helium_level_value", "less_than", "55", "medium", "%")
+  ];
+  assert.deepStrictEqual(
+    resolve_thresholds(perm_rows, VENDORS.PHILIPS),
+    resolve_thresholds([...perm_rows].reverse(), VENDORS.PHILIPS),
+    "row order never changes resolution"
+  );
+
+  // Rows that DISAGREE on units are a configuration error and fail closed —
+  // in either order. (Live alert.models carries zero conflicts, surveyed
+  // 2026-08-14, so the throw can only fire on new misconfiguration.)
+  const he_conflict = [
+    trow("he_level_1_value", "less_than", "40", "high", "%"),
+    trow("he_level_1_value", "less_than", "300", "medium", "LTRS")
+  ];
+  assert.throws(
+    () => resolve_thresholds(he_conflict, VENDORS.SIEMENS),
+    /conflicting helium threshold units/
+  );
+  assert.throws(
+    () => resolve_thresholds([...he_conflict].reverse(), VENDORS.SIEMENS),
+    /conflicting helium threshold units/
+  );
+  assert.throws(
+    () =>
+      resolve_thresholds(
+        [
+          trow("he_psi_avg_value", "greater_than", "80", "high", "PSI"),
+          trow("monitor_magnet_pressure_value", "greater_than", "90", "high", "mbar")
+        ],
+        VENDORS.PHILIPS
+      ),
+    /conflicting pressure threshold units/
+  );
 }
 
 console.log("check_compute: all assertions passed");

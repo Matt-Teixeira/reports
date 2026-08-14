@@ -25,6 +25,8 @@ const resolve_thresholds = (rows, vendor) => {
   };
   const he = { low_high: null, low_med: null, units: null, source: "default_models" };
   let he_configured = false;
+  const p_units = new Set();
+  const he_units = new Set();
 
   const keep_min = (cur, v) => (cur === null ? v : Math.min(cur, v));
   const keep_max = (cur, v) => (cur === null ? v : Math.max(cur, v));
@@ -33,7 +35,7 @@ const resolve_thresholds = (rows, vendor) => {
     const v = parseFloat(r.threshold);
     if (Number.isNaN(v)) continue;
     if (vendor.pressure.model_fields.includes(r.field_name)) {
-      if (r.threshold_units) p.units = r.threshold_units;
+      if (r.threshold_units) p_units.add(r.threshold_units);
       if (r.operator === "greater_than") {
         if (r.severity === "high") p.high_gt = keep_min(p.high_gt, v);
         else p.med_gt = keep_min(p.med_gt, v);
@@ -42,12 +44,31 @@ const resolve_thresholds = (rows, vendor) => {
         else p.med_lt = keep_max(p.med_lt, v);
       }
     } else if (r.operator === "less_than") {
-      if (r.threshold_units) he.units = r.threshold_units;
+      if (r.threshold_units) he_units.add(r.threshold_units);
       if (r.severity === "high") he.low_high = keep_max(he.low_high, v);
       else he.low_med = keep_max(he.low_med, v);
       he_configured = true;
     }
   }
+
+  // One unit per channel, resolved from the SET of row-supplied units so
+  // the result cannot depend on database row order (the query is unordered;
+  // last-row-wins made the same limit apply or suppress per run). Rows that
+  // DISAGREE are a configuration error and fail closed — a coin-flip
+  // between "% limit applies" and "% limit silently suppressed against an
+  // LTRS reading" must never ship. Live alert.models carries zero conflicts
+  // (surveyed 2026-08-14); the throw fails one system's report, loudly,
+  // never the batch.
+  const one_unit = (set, channel) => {
+    if (set.size > 1)
+      throw new Error(
+        `conflicting ${channel} threshold units in alert.models: ${[...set].join(", ")} — fix the configuration`
+      );
+    return set.size ? [...set][0] : null;
+  };
+  const p_unit = one_unit(p_units, "pressure");
+  if (p_unit !== null) p.units = p_unit;
+  he.units = one_unit(he_units, "helium");
 
   // Normalize display casing ("mBar" -> "mbar") to match the report style.
   p.units = p.units === "mBar" ? "mbar" : p.units;
