@@ -10,9 +10,10 @@ the commits in scope for the current round. Your findings will be handed
 back verbatim to another assistant to fix — make each one self-contained
 and reproducible. "No change needed" is a valid finding.
 
-**Current review round: Phases 0–1 — commits `ea9352e` (parity harness),
-`c74f616` (threshold extraction, byte-identical), `4a727c9` (per-channel
-threshold fix — the only behavior change).**
+**Round 1 (Phases 0–1: `ea9352e`, `c74f616`, `4a727c9`) is complete — five
+findings, all fixed in `13bfb8b` / `171fe00` / `e64fd97`; see the addendum
+at the end of this file. The next round's scope will be stated here when
+Phase 2 lands.**
 
 ## What this codebase does
 
@@ -171,3 +172,50 @@ with only the additive `he_thr_source` key in records.json.
 - Parity: test batch HTML byte-identical; records.json diff is exactly
   one additive `he_thr_source` per record. SME15805 old-vs-new diff is
   exactly the helium tile + two record fields (shown above).
+
+## Review round 1 (codex) — outcome
+
+Five findings, all verified and fixed; all five suites green after each
+fix; parity re-run on both standing requests.
+
+1. **P1 — unconfigured helium was still colored and judged**
+   (`tiles.js`). Fixed in `13bfb8b`: the tile derives `judged` from the
+   same two gates the fleet uses (limits resolved AND units matching the
+   display) and renders neutral **ink** otherwise, keeping the measured
+   wording verbatim; a recorded quench keeps its red (recorded event, not
+   a threshold judgment). Deliberate choice, open to round 2: the WORDING
+   ("no loss · no quench", "level falling") stays — both are measured
+   statements (delta arithmetic, quench state); only the color was the
+   judgment. Measured blast radius: 5 reporting systems with no helium
+   config (SME10231/11247/12083/15166/15809) plus units-mismatched
+   systems — the standing test batch caught SME18635/SME20004 (LTRS under
+   % limits) flipping good/warn → ink, matching the fleet's existing
+   "LTRS systems are not judged against % thresholds" rule. Fleet HTML
+   and records byte-identical. check_chart pins every arm. RULES.md §4
+   states the gate.
+2. **P1 — threshold units depended on unordered row order**
+   (`compute/thresholds.js`). Fixed in `171fe00`: units resolve from the
+   SET of row-supplied units per channel; conflicting units THROW (fail
+   closed — one system's report fails loudly, the batch survives). Live
+   alert.models surveyed 2026-08-14: zero conflicts, so the throw can
+   only fire on new misconfiguration. check_compute pins
+   permutation-identity and both conflict throws in both orders.
+3. **P1 — reused parity out-dir could hide a soft fleet-render failure**
+   (`dev/parity.js`). Fixed in `e64fd97`: non-empty out-dir refused;
+   witness manifest asserted after the run (brief HTML per successful
+   result, fleet HTML whenever the request builds the summary document).
+   Guard verified live: rerunning into a used directory aborts.
+4. **P2 — documented worktree command was incomplete** (`dev/parity.js`
+   header). Fixed in `e64fd97`: provisioning documented (cp `.env`,
+   symlink `node_modules` + `utils`, run both sides from the main repo
+   root — `PG_SSL_PATH` is cwd-relative).
+5. **P2 — parity probe left zero-byte logger files** (`dev/parity.js`).
+   Fixed in `e64fd97`: `run_log` is built locally as
+   `{run_id, log_events: []}` — `addLogEvent` only pushes onto the array,
+   so that shape is the whole contract; no stream is ever opened.
+
+Post-fix parity: the 11-system batch is byte-identical except the two
+units-mismatch tiles named in finding 1 (the finding's own fix); the
+scoped Piedmont run differs from its Phase-0 baseline by exactly the 38
+additive `he_thr_source` keys (one per record). The `*` legend wording
+question from Phase 1 remains parked with the user.
