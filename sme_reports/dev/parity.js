@@ -10,7 +10,9 @@
 //        [--end YYYY-MM-DD] [--lookback N] [--facts]
 //
 // --facts additionally writes facts-<id>.json per system — the direct
-// analysis witness (compute/analyze), finer-grained than records.json.
+// analysis witness, captured from the PRODUCTION pass via run_one's
+// dev-only observer (never a second fetch), finer-grained than
+// records.json.
 //
 // Baseline-vs-candidate workflow. A bare worktree is NOT runnable: .env,
 // node_modules/, and utils/ (the whole DB/logger layer) are gitignored, so
@@ -159,11 +161,17 @@ const main = async () => {
     }
     loaded = { ...loaded, out_dir };
 
+    // --facts: collect the EXACT facts objects the production pass computes
+    // (run_one's dev-only observer) — a second fetch against the same
+    // pinned window is not a database snapshot, and a re-derived witness
+    // could disagree with the artifacts of its own run.
+    const facts_by_id = args.facts ? new Map() : null;
     const { results, failures, fleet_pdf_path } = await run_batch(
       run_log,
       job_id,
       loaded,
-      scope_resolution
+      scope_resolution,
+      facts_by_id ? { on_facts: (id, facts) => facts_by_id.set(id, facts) } : {}
     );
 
     // Witness manifest: every artifact this run OWES must exist before the
@@ -189,53 +197,23 @@ const main = async () => {
     if (missing.length)
       throw new Error(`parity witnesses missing: ${missing.join("; ")}`);
 
-    // --facts: the DIRECT analysis witness — one facts-<id>.json per
-    // system, from a fresh fetch + analyze_system pass (compute/analyze,
-    // extracted in phase 7). Strictly finer-grained than records.json
-    // (which is facts distilled through build_summary_facts): a fact that
-    // reaches neither a record field nor the brief HTML still diffs here.
-    // Fetches repeat run_one's pulls against the same pinned window —
-    // read-only, deterministic same-day. Systems that failed above are
-    // already witnessed as failures and are skipped here.
-    if (args.facts) {
-      const {
-        fetch_identity,
-        resolve_system_vendor,
-        fetch_series,
-        fetch_edu_series,
-        fetch_thresholds,
-        fetch_units
-      } = require("../data");
-      const { analyze_system } = require("../compute/analyze");
-      const failed = new Set(failures.map((f) => f.system_id));
-      for (const r of loaded.requests) {
-        if (failed.has(r.system_id)) continue;
-        const identity = await fetch_identity(r.system_id);
-        const { vendor, routing } = await resolve_system_vendor(identity);
-        const [{ series }, { edu_source, edu }, thresholds, units] =
-          await Promise.all([
-            fetch_series(identity, r.window, vendor, routing),
-            fetch_edu_series(r.system_id, r.window),
-            fetch_thresholds(r.system_id, vendor),
-            fetch_units(r.system_id, vendor)
-          ]);
-        const { facts } = analyze_system({
-          system_id: r.system_id,
-          vendor,
-          series,
-          window: r.window,
-          event_window: r.event_window,
-          edu,
-          edu_source,
-          thresholds,
-          units
-        });
+    // --facts: one facts-<id>.json per successful system — the direct
+    // analysis witness, strictly finer-grained than records.json (which is
+    // facts distilled through build_summary_facts): a fact that reaches
+    // neither a record field nor the brief HTML still diffs here. Every
+    // successful result must have produced facts through the observer; a
+    // gap means the observer channel broke, and that fails parity loudly.
+    if (facts_by_id) {
+      for (const r of results) {
+        const facts = facts_by_id.get(r.system_id);
+        if (!facts)
+          throw new Error(`parity --facts: no facts observed for ${r.system_id}`);
         fs.writeFileSync(
           path.join(out_dir, `facts-${r.system_id}.json`),
           JSON.stringify(facts, null, 1)
         );
       }
-      console.log(`facts witnesses written for ${loaded.requests.length - failed.size} systems`);
+      console.log(`facts witnesses written for ${results.length} systems`);
     }
 
     // records.json: the distilled per-system records in request order, plus

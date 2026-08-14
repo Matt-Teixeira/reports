@@ -409,8 +409,8 @@ const build_narrative = (facts) => {
 };
 
 // STORY_KEYS: the archetypes this module can narrate. Exported for the
-// check-time coverage assertion — build_narrative's lookup is unguarded
-// (STORIES[facts.archetype](facts) throws a TypeError at render time on an
-// unregistered key), so the guarantee that every classifiable archetype has
-// a story lives in check_compute, not here.
+// check-time coverage assertion (check_compute: every registered archetype
+// has a story). The lookup above throws a NAMED error on an unregistered
+// key — still a render-time failure by design, so the check is what keeps
+// it from ever firing.
 module.exports = { build_narrative, STORY_KEYS: Object.keys(STORIES) };

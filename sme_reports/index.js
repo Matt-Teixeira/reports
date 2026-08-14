@@ -27,7 +27,11 @@ const {
 // Phase 1: request file -> data -> compute -> HTML on disk.
 // Phase 2 adds PDF rendering + email; the output flags already gate them.
 
-const run_one = async (run_log, job_id, request) => {
+// on_facts: dev-only observation channel (parity --facts) — called with the
+// EXACT facts object this run computed, so a witness can never disagree
+// with the artifacts of its own run (a re-fetch against the same window is
+// not a database snapshot). Production callers never pass it.
+const run_one = async (run_log, job_id, request, on_facts = null) => {
   let note = { job_id, system_id: request.system_id };
   await addLogEvent(I, run_log, "run_sme_report", cal, note, null);
 
@@ -95,6 +99,8 @@ const run_one = async (run_log, job_id, request) => {
       units
     }));
   }
+
+  if (on_facts) on_facts(request.system_id, facts);
 
   const outputs = { archetype: facts.archetype };
   if (request.output.html) {
@@ -260,7 +266,10 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
     // across scheduled scope-units — the same system in the same window
     // computes once however many customer documents contain it; failures
     // cache too (the same dead system must not re-fetch per document).
-    const { concurrency = 1, cache = null } = opts;
+    // opts.on_facts: dev-only facts observer threaded to run_one (parity
+    // --facts). Cache HITS skip run_one and therefore the observer — fine
+    // for the harness, which never passes a cache.
+    const { concurrency = 1, cache = null, on_facts = null } = opts;
     // Null = explicit-date windows: no chosen period, no tag (F3).
     const period_tag =
       lookback_days && lookback_days !== 30 ? `-${lookback_days}d` : "";
@@ -281,7 +290,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
         let out;
         // Per-report try/catch so one failure doesn't kill a bulk batch.
         try {
-          out = { ok: true, result: await run_one(run_log, job_id, request) };
+          out = { ok: true, result: await run_one(run_log, job_id, request, on_facts) };
         } catch (error) {
           out = { ok: false, message: error.message };
           const note = { job_id, system_id: request.system_id };

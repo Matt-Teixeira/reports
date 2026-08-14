@@ -75,13 +75,13 @@ const metric_value = (metric) => (metric ? metric.last.v : null);
 
 // --- plausibility ------------------------------------------------------
 // Bounds live in compute/plausible.js and are applied PER POINT by
-// render/model.js BEFORE any metric is computed — peaks, minima, trends,
+// compute/analyze.js BEFORE any metric is computed — peaks, minima, trends,
 // severity, and the archetype are already clean by the time facts arrive
 // here. What remains at this layer is display and conviction: a channel
 // whose LAST RAW reading is impossible shows that raw value greyed and
 // judges nothing about "now", and a system whose LATEST capture carries the
 // impossible combination (two channels at once, or one alongside bone-dry
-// helium, in the SAME row — model.js `last_suspect`) is a monitoring
+// helium, in the SAME row — analyze's `last_suspect`) is a monitoring
 // problem, not a magnet problem. Two impossible readings weeks apart prove
 // nothing about each other. Documented in RULES.md §5.
 const { PLAUSIBLE, last_raw_flags } = require("./plausible");

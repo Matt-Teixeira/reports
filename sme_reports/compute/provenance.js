@@ -1,6 +1,6 @@
 // Compressor-state provenance vocabulary (RULES.md §6) — a CLOSED registry.
 // The source strings originate in vendors.js `compressor.source` plus the
-// per-system EDU override in render/model.js. Every lookup resolves through
+// per-system EDU override in compute/analyze.js. Every lookup resolves through
 // source_kind, which throws on anything unregistered: a new or typoed
 // source must never fail open as "measured" — that would skip the
 // derived-reading screening and drop every ᶜ mark, silently presenting a
