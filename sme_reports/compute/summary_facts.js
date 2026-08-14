@@ -285,6 +285,10 @@ const build_summary_facts = (facts, identity) => {
       !data_flags.helium && (he_thr.units === null || he_thr.units === units.helium)
         ? he_thr.low_high
         : null,
+    // Where the helium limit came from — resolution provenance, independent
+    // of thr_source (pressure's) and of whether the units gate above let the
+    // limit apply. "default_models" or "none"; older sidecars lack the key.
+    he_thr_source: he_thr.source || null,
 
     // --- vendor-specific channels (null where the sensor doesn't exist) --
     coldhead_k,

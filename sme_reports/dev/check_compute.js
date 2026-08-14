@@ -585,6 +585,53 @@ const row = (h, over = {}) => ({
     VENDORS.PHILIPS
   );
   assert.strictEqual(he_gt.helium.low_high, null, "helium greater_than ignored");
+  assert.strictEqual(he_gt.helium.source, "none", "an ignored row configures nothing");
+
+  // PER-CHANNEL resolution: helium-only configs keep their helium limits
+  // (the old all-or-nothing gate discarded them with the missing pressure
+  // rows — live systems SME15805/11/16, SME20487); pressure independently
+  // falls back to its OEM constant.
+  const he_only = resolve_thresholds(
+    [
+      trow("helium_level_value", "less_than", "40", "high"),
+      trow("helium_level_value", "less_than", "55", "medium")
+    ],
+    VENDORS.PHILIPS
+  );
+  assert.strictEqual(he_only.helium.low_high, 40, "configured helium limit kept");
+  assert.strictEqual(he_only.helium.low_med, 55);
+  assert.strictEqual(he_only.helium.source, "default_models");
+  assert.strictEqual(he_only.pressure.source, "oem_constant", "pressure independently falls back");
+  assert.strictEqual(he_only.pressure.high_gt, 100);
+
+  // Pressure-only configs: helium falls back to "nothing configured" —
+  // no limits, judged nowhere — never to an invented constant.
+  const p_only = resolve_thresholds(
+    [trow("he_psi_avg_value", "greater_than", "80", "high")],
+    VENDORS.PHILIPS
+  );
+  assert.strictEqual(p_only.pressure.source, "default_models");
+  assert.strictEqual(p_only.helium.source, "none");
+  assert.strictEqual(p_only.helium.low_high, null);
+
+  // Med-only pressure rows still fall back (deliberately unchanged
+  // behavior — a domain decision, not this change), but no longer drag a
+  // configured helium limit down with them.
+  const med_only = resolve_thresholds(
+    [
+      trow("he_psi_avg_value", "greater_than", "70", "medium"),
+      trow("helium_level_value", "less_than", "40", "high")
+    ],
+    VENDORS.PHILIPS
+  );
+  assert.strictEqual(med_only.pressure.source, "oem_constant", "med-only pressure falls back");
+  assert.strictEqual(med_only.pressure.med_gt, null, "med row discarded with the fallback");
+  assert.strictEqual(med_only.helium.low_high, 40, "helium survives pressure's fallback");
+  assert.strictEqual(med_only.helium.source, "default_models");
+
+  // Fully configured: both channels carry default_models provenance.
+  assert.strictEqual(p.helium.source, "default_models");
+  assert.strictEqual(p.pressure.source, "default_models");
 }
 
 console.log("check_compute: all assertions passed");

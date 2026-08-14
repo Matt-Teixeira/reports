@@ -98,7 +98,15 @@ Not hardcoded — pulled per system from `alert.models`
   **medium** only softens a tile to amber.
 - Where multiple rows exist, the most conservative wins (lowest
   `greater_than`, highest `less_than`).
-- OEM constants are used only when a system has no default models.
+- Fallback is **per channel** (`compute/thresholds.js`), each carrying its
+  own provenance: pressure with no configured **high** row falls back to the
+  vendor OEM constant (`oem_constant`; med-only configs also fall back —
+  deliberately unchanged, pending domain review); helium with no configured
+  row falls back to **nothing** (`none` — no OEM helium constant exists, so
+  an unconfigured helium is stated, never judged). One channel's fallback
+  never discards the other channel's configured rows — the pre-fix
+  all-or-nothing gate silently dropped configured helium limits on systems
+  without pressure models (live: SME15805/11/16, SME20487).
 - Display units come from `mag.*_units` per system.
 
 ## 4. Per-field rules

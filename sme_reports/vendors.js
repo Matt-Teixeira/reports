@@ -129,7 +129,10 @@ const VENDORS = {
 
 // Threshold shape used everywhere downstream. high_* drive the red chart
 // line(s), tile "bad" status, and the threshold_exceeded archetype; med_*
-// only soften tile colors (warn).
+// only soften tile colors (warn). Provenance is PER CHANNEL: pressure's
+// fallback is a real OEM service-line constant ("oem_constant"); no OEM
+// helium constant exists, so helium's fallback is "nothing configured"
+// ("none") — a channel without limits is stated, never judged.
 const fallback_thresholds = (vendor) => ({
   pressure: {
     units: vendor.pressure.units,
@@ -139,7 +142,7 @@ const fallback_thresholds = (vendor) => ({
     med_lt: null,
     source: "oem_constant"
   },
-  helium: { low_high: null, low_med: null, units: null }
+  helium: { low_high: null, low_med: null, units: null, source: "none" }
 });
 
 // systems.manufacturer is free text ("Philips", "GE Medical", ...); match loosely.
