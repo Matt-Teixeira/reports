@@ -265,14 +265,22 @@ const BUILDERS = {
     // meaningless against an LTRS reading).
     const he_thr_applies =
       f.he_thr.units === null || f.he_thr.units === f.units.helium;
-    if (he_thr_applies && f.he_thr.low_high !== null && he.last.v < f.he_thr.low_high)
+    // Stated vs judged: this tile carries a status color only where an
+    // applied limit exists. A channel with no configured limit (or a
+    // units-mismatched one) keeps its measured statements — level, delta,
+    // quench absence — in neutral ink, matching the fleet cell, which stays
+    // uncolored when helium_low_high is null. The recorded quench above
+    // keeps its color: it is a recorded event, not a threshold judgment.
+    const judged =
+      he_thr_applies && (f.he_thr.low_high !== null || f.he_thr.low_med !== null);
+    if (judged && f.he_thr.low_high !== null && he.last.v < f.he_thr.low_high)
       return {
         cls: "bad",
         k: "HELIUM",
         v: value,
         s: `below the ${f.he_thr.low_high}${he_suffix(f.units.helium)} alert level`
       };
-    if (he_thr_applies && f.he_thr.low_med !== null && he.last.v < f.he_thr.low_med)
+    if (judged && f.he_thr.low_med !== null && he.last.v < f.he_thr.low_med)
       return {
         cls: "warn",
         k: "HELIUM",
@@ -282,10 +290,15 @@ const BUILDERS = {
     // A null delta means no clean baseline survived event exclusion — report
     // the level without a comparison rather than implying it held steady.
     if (delta === null)
-      return { cls: "good", k: "HELIUM", v: value, s: "no clean baseline this period" };
+      return {
+        cls: judged ? "good" : "ink",
+        k: "HELIUM",
+        v: value,
+        s: "no clean baseline this period"
+      };
     const lost = delta < -0.2;
     return {
-      cls: lost ? "warn" : "good",
+      cls: judged ? (lost ? "warn" : "good") : "ink",
       k: "HELIUM",
       v: value,
       s: `${fmt.signed(delta, 2)} ${f.units.helium === "%" ? "pts" : f.units.helium} · ${lost ? "level falling" : "no loss · no quench"}`

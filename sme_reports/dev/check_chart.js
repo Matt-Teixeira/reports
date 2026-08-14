@@ -1625,6 +1625,48 @@ const philips_series = [];
       assert.strictEqual(t.v, "—", `${k} with no data reads — (suspect=${suspect})`);
     }
   }
+
+  // Stated vs judged on the helium tile: a status color exists only where
+  // a configured limit APPLIES. Unconfigured (or units-mismatched) helium
+  // keeps its measured statements — level, delta, quench absence — in
+  // neutral ink, matching the fleet cell's neutrality on a null limit.
+  const he_tile = (f) => build_tiles(f).find((t) => t.k === "HELIUM");
+  const NO_THR = { low_high: null, low_med: null, units: null, source: "none" };
+  const unconf = he_tile(stub({ he_thr: NO_THR }));
+  assert.strictEqual(unconf.cls, "ink", "unconfigured helium is stated, never colored");
+  assert.ok(unconf.s.includes("no loss"), `measured wording stays: ${unconf.s}`);
+  const falling = he_tile(
+    stub({ he_thr: NO_THR, helium: { last: { t: end, v: 60 }, delta_vs_baseline: -2 } })
+  );
+  assert.strictEqual(falling.cls, "ink", "a falling level without a limit states, never ambers");
+  assert.ok(falling.s.includes("level falling"), falling.s);
+  const no_base = he_tile(
+    stub({ he_thr: NO_THR, helium: { last: { t: end, v: 60 }, delta_vs_baseline: null } })
+  );
+  assert.strictEqual(no_base.cls, "ink", "no-baseline without a limit is ink too");
+  const mismatch = he_tile(
+    stub({ he_thr: { low_high: 50, low_med: null, units: "LTRS", source: "default_models" } })
+  );
+  assert.strictEqual(mismatch.cls, "ink", "units-mismatched limit judges nothing");
+  // Configured systems keep the full judgment set.
+  assert.strictEqual(he_tile(stub({})).cls, "good", "configured + above limit stays good");
+  assert.strictEqual(
+    he_tile(stub({ helium: { last: { t: end, v: 40 }, delta_vs_baseline: -1 } })).cls,
+    "bad",
+    "configured breach stays red"
+  );
+  assert.strictEqual(
+    he_tile(stub({ helium: { last: { t: end, v: 60 }, delta_vs_baseline: -2 } })).cls,
+    "warn",
+    "configured falling level keeps its amber"
+  );
+  // A recorded quench keeps its color even without limits — it is a
+  // recorded event, not a threshold judgment.
+  assert.strictEqual(
+    he_tile(stub({ he_thr: NO_THR, quenched: true })).cls,
+    "bad",
+    "quench outranks stated-only"
+  );
 }
 
 // --- one-page geometry, measured in Chromium (review F1) --------------------
