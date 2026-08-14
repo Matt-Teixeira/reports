@@ -500,9 +500,17 @@ const { parse_sme_args } = require("../cli_args");
     );
     assert.strictEqual(classify_manufacturer("TOSHIBA").kind, "limited");
     assert.strictEqual(classify_manufacturer("Americomp").kind, "limited");
+    assert.strictEqual(classify_manufacturer("Canon Medical Systems").kind, "limited");
     assert.strictEqual(classify_manufacturer("TBD").kind, "unknown");
     assert.strictEqual(classify_manufacturer("Artshu").kind, "unknown");
     assert.strictEqual(classify_manufacturer(null).kind, "unknown");
+    // Token-boundary, never substring (round-4 F1): a name CONTAINING an
+    // allowlist word is not that manufacturer, and fail-open here would
+    // downgrade an unknown's hard failure into a stated row.
+    assert.strictEqual(classify_manufacturer("Canonical Imaging").kind, "unknown");
+    assert.strictEqual(classify_manufacturer("Canonical").kind, "unknown");
+    assert.strictEqual(classify_manufacturer("Americomputer").kind, "unknown");
+    assert.strictEqual(classify_manufacturer("Toshibapro").kind, "unknown");
 
     // Every vendor's compressor source must resolve through the CLOSED
     // provenance registry (source_kind throws on anything unregistered —

@@ -543,8 +543,16 @@ const build_fleet_model = (records, failures, meta = {}) => {
     (edu_section ? edu_section.pages.length : 0) +
     (limited_section ? limited_section.pages.length : 0);
 
-  const window_start = rows.length ? Math.min(...rows.map((r) => r.window_start)) : null;
-  const window_end = rows.length ? Math.max(...rows.map((r) => r.window_end)) : null;
+  // The document's period comes from EVERY successful record — limited
+  // rows included (round-4 F2): a limited-only summary carries a real
+  // analysis window and possibly EDU readings, and "no data this period"
+  // on its cover and footers would be false.
+  const window_start = all_rows.length
+    ? Math.min(...all_rows.map((r) => r.window_start))
+    : null;
+  const window_end = all_rows.length
+    ? Math.max(...all_rows.map((r) => r.window_end))
+    : null;
 
   return {
     title: scope

@@ -1250,6 +1250,21 @@ const rec = (over = {}) => ({
   // Sorting beside assessed records must not float limited rows upward.
   const stable = { archetype: "stable_healthy" };
   assert.ok(attention_sort(stable, r) < 0, "limited sorts after even a stable system");
+
+  // A LIMITED-ONLY document keeps its real period (round-4 F2): the
+  // window comes from every successful record, so the cover and footers
+  // never claim "no data this period" over a record that carries one.
+  const lonely = build_fleet_model([r], []);
+  assert.notStrictEqual(lonely.window_span, "no data this period");
+  assert.ok(/–/.test(lonely.window_span), `limited-only span is real dates: ${lonely.window_span}`);
+  assert.strictEqual(lonely.total, 0);
+  assert.strictEqual(lonely.limited_count, 1);
+  const lonely_html = build_fleet_page(lonely);
+  assert.ok(
+    lonely_html.includes("No systems analyzed") && lonely_html.includes("1 limited coverage"),
+    "limited-only cover states the split, not an empty fleet"
+  );
+  assert.ok(!lonely_html.includes("no data this period"), "no false empty-period claim anywhere");
 }
 
 // --- a failed summary document is stated, never a quiet absence (round-2 F1)

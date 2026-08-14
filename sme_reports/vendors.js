@@ -169,12 +169,18 @@ const LIMITED_MANUFACTURERS = ["HITACHI", "CANON", "TOSHIBA", "AMERICOMP"];
 
 // The single manufacturer gate: supported (full analysis via `vendor`),
 // limited (identity + EDU, `label` is the display manufacturer), or
-// unknown (callers fail loudly).
+// unknown (callers fail loudly). The limited match is TOKEN-BOUNDARY, not
+// substring (round-4 F1): "Canonical Imaging" contains CANON but is not a
+// Canon, and a fail-open here converts an unknown manufacturer's hard
+// failure into a stated row — the exact downgrade unknown ≠ limited
+// forbids. "Canon Medical Systems" still matches on its own token.
 const classify_manufacturer = (manufacturer) => {
   const vendor = resolve_vendor(manufacturer);
   if (vendor) return { kind: "supported", vendor };
-  const m = String(manufacturer || "").toUpperCase();
-  if (LIMITED_MANUFACTURERS.some((x) => m.includes(x)))
+  const tokens = String(manufacturer || "")
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/);
+  if (LIMITED_MANUFACTURERS.some((x) => tokens.includes(x)))
     return { kind: "limited", label: String(manufacturer).trim() };
   return { kind: "unknown" };
 };
