@@ -10,7 +10,9 @@ the commits in scope for the current round. Your findings will be handed
 back verbatim to another assistant to fix — make each one self-contained
 and reproducible. "No change needed" is a valid finding.
 
-**Current review round: Phase 0 — commit `ea9352e` (one new dev file).**
+**Current review round: Phases 0–1 — commits `ea9352e` (parity harness),
+`c74f616` (threshold extraction, byte-identical), `4a727c9` (per-channel
+threshold fix — the only behavior change).**
 
 ## What this codebase does
 
@@ -92,3 +94,80 @@ failures — the sidecar shape minus `generated_at` and filesystem paths).
 - No PDF diffing (timestamps), no log-event persistence (`writeLogEvents`
   is not called — parity runs are dev probes, not deliverable runs).
 - The harness is dev-only: no production module changed in this phase.
+
+## Phase 1 — per-channel threshold resolution (commits `c74f616`, `4a727c9`)
+
+The architecture review's verification surfaced a live bug: `data.js`'s
+`fetch_thresholds` decided DB-vs-fallback on **pressure high rows alone**
+(`if (p.high_gt === null && p.high_lt === null) return thr;`) and returned
+the whole OEM fallback — silently discarding a system's configured helium
+limits — and helium carried no `source` in either path while pressure's
+`thr_source` was rendered as if it covered the row.
+
+Commit `c74f616` moves the resolution logic VERBATIM into
+`compute/thresholds.js` (`resolve_thresholds(rows, vendor)`), because the
+pure core cannot live in `data.js` — requiring it loads the pg pool, which
+reads env + SSL cert at module load, and the check suite is DB-free.
+`fetch_thresholds` now queries and delegates. Byte-identical by parity.
+
+Commit `4a727c9` is the fix: each channel resolves independently, each with
+its own `source`. Pressure with no high row → OEM fallback
+(`oem_constant`); helium with no configured row → nothing
+(`{low_high:null, low_med:null, units:null, source:"none"}` — no OEM
+helium constant exists; stated-vs-judged says an unconfigured channel is
+stated, never judged). Summary records gain additive `he_thr_source`.
+RULES.md §3 states the per-channel rule.
+
+### Blast radius (measured before the change, live alert.models)
+
+9 systems carry rows the old gate discarded: SME01867, SME10239, SME15805,
+SME15811, SME15816, SME16414, SME16421, SME16422, SME20487. Four actively
+report (SME15805/11/16, SME20487 — Philips, helium-only configs). Verified
+old-vs-new on SME15805 via the parity harness (baseline worktree at
+`c74f616`): its helium reads 40.0%, below its configured-but-discarded 50%
+alert — the brief tile flips amber "level falling" → red "below the 50%
+alert level", and `helium_low_high` goes null → 50 in the record. That is
+the entire diff for that system. The 11-system test batch is HTML-identical
+with only the additive `he_thr_source` key in records.json.
+
+### Where to look hardest
+
+1. **The preserved pressure predicate.** Med-only pressure configs still
+   fall back to OEM (med rows discarded) — deliberately unchanged, flagged
+   in RULES.md as pending domain review. Three non-reporting systems
+   (SME16414/21/22) carry such rows. If you think preserving that is wrong
+   NOW (rather than as a separate domain decision), argue it.
+2. **`he_thr_source` semantics.** It reports RESOLUTION provenance,
+   deliberately independent of the units-match gate that can still null
+   `helium_low_high` (a %-limit against an LTRS reading). So a record can
+   say `he_thr_source: "default_models"` while carrying no applied limit.
+   Is that the right contract, or should application-provenance be a third
+   state (`configured_units_mismatch`)?
+3. **`he_configured` scope.** It flips on any non-pressure-field
+   `less_than` row that parses — the same predicate that folds a row into
+   `he`. Confirm no row shape can set it without contributing values (or
+   vice versa).
+4. **Consumers of the helium shape.** `render/tiles.js` (`he_thr_applies`),
+   `compute/summary_facts.js:284`, `render/model.js` — all read
+   `low_high/low_med/units`; the new `source` key is additive. Confirm
+   nothing iterates the helium object's keys or deep-equals it (sidecar
+   diffing tools included).
+5. **The `*` mark stayed pressure-only** (`fleet_page.js` `thr_source ===
+   "oem_constant"`). Open wording decision for the user, deliberately NOT
+   taken in this phase: whether the legend should say "no configured
+   pressure alert model", and whether helium-fallback rows deserve a mark.
+   Flag if you think shipping the fix without the legend rewording
+   misleads.
+
+### What I verified, and how
+
+- All five check suites green after each commit.
+- check_compute pins: OEM fallback on no rows, conservative merge,
+  unparseable rows skipped, band configs, mBar casing, helium
+  `greater_than` ignored (configures nothing), helium-only kept +
+  pressure independent fallback, pressure-only → helium `none`, med-only
+  pressure falls back WITHOUT dragging helium down, both-configured
+  provenance.
+- Parity: test batch HTML byte-identical; records.json diff is exactly
+  one additive `he_thr_source` per record. SME15805 old-vs-new diff is
+  exactly the helium tile + two record fields (shown above).
