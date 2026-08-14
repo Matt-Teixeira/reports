@@ -673,6 +673,39 @@ const row = (h, over = {}) => ({
       ),
     /conflicting pressure threshold units/
   );
+
+  // Row-supplied units are trimmed; whitespace variants of one unit are
+  // one unit, and a present-but-blank string counts as absent (a unitless
+  // threshold row is meaningful — it applies regardless of display units).
+  const padded = resolve_thresholds(
+    [
+      trow("helium_level_value", "less_than", "40", "high", " % "),
+      trow("helium_level_value", "less_than", "55", "medium", "%")
+    ],
+    VENDORS.PHILIPS
+  );
+  assert.strictEqual(padded.helium.units, "%", "padded units trim to one unit");
+  const blank = resolve_thresholds(
+    [trow("helium_level_value", "less_than", "40", "high", "   ")],
+    VENDORS.PHILIPS
+  );
+  assert.strictEqual(blank.helium.units, null, "blank units count as absent");
+  assert.strictEqual(blank.helium.low_high, 40, "the limit itself still resolves");
+}
+
+// ---- compressor provenance is a closed registry (round-2 F3) ---------------
+{
+  const { source_kind, is_inferred } = require("../compute/provenance");
+  assert.strictEqual(source_kind("cryo_comp_malf_value"), "reported");
+  assert.strictEqual(source_kind("compressor_status"), "reported");
+  assert.strictEqual(source_kind("edu_comp_vib"), "measured");
+  assert.strictEqual(source_kind("coldhead_ruo_value"), "inferred");
+  assert.strictEqual(is_inferred("coldhead_ruo_value"), true);
+  assert.strictEqual(is_inferred("edu_comp_vib"), false);
+  // Unknown or typoed sources throw — they must never fail open as
+  // "measured" and silently drop the ᶜ mark.
+  assert.throws(() => is_inferred("coldhead_rou_value"), /unknown compressor source/);
+  assert.throws(() => source_kind(undefined), /unknown compressor source/);
 }
 
 // ---- plausibility-bounds dispatch fails closed (phase 2) -------------------
@@ -706,12 +739,29 @@ const row = (h, over = {}) => ({
 // story, and classify can only produce severity-ordered conditions.
 {
   const { SEVERITY_ORDER } = require("../conditions");
-  const { STORY_KEYS } = require("../render/narrative");
-  for (const key of SEVERITY_ORDER)
+  const { ARCHETYPES } = require("../compute/archetype");
+  const { STORY_KEYS, build_narrative } = require("../render/narrative");
+  // The registry IS the coupling (round-2 F2): SEVERITY_ORDER must equal
+  // the classifier's closed output set exactly — same keys, same priority
+  // order (the "MUST match" comment, now executable) — and every archetype
+  // needs a story. classify additionally validates its own output against
+  // ARCHETYPES at runtime, so a future branch returning an unregistered
+  // key fails with a named error even where this matrix never exercised it.
+  assert.deepStrictEqual(
+    SEVERITY_ORDER,
+    ARCHETYPES,
+    "SEVERITY_ORDER must equal the classifier's registry, in priority order"
+  );
+  for (const key of ARCHETYPES)
     assert.ok(
       STORY_KEYS.includes(key),
-      `every condition in SEVERITY_ORDER needs a narrative story: "${key}"`
+      `every registered archetype needs a narrative story: "${key}"`
     );
+  // The story lookup fails NAMED, not with a bare TypeError.
+  assert.throws(
+    () => build_narrative({ archetype: "probe_stuck" }),
+    /no narrative story registered for archetype "probe_stuck"/
+  );
 
   const thr0 = { high_gt: 100, high_lt: null, med_gt: null, med_lt: null };
   const p = (over = {}) => ({

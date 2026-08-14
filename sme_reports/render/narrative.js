@@ -393,10 +393,20 @@ const suspect_lead = (f) => {
   );
 };
 
-const build_narrative = (facts) => ({
-  story_html: suspect_lead(facts) + STORIES[facts.archetype](facts),
-  rx_cards: build_cards(facts)
-});
+const build_narrative = (facts) => {
+  const story = STORIES[facts.archetype];
+  // A named error, not a fallback: an unregistered archetype is a bug the
+  // checks should have caught (STORY_KEYS coverage), and generating some
+  // generic story here would hide it from the one person who can fix it.
+  if (!story)
+    throw new Error(
+      `no narrative story registered for archetype "${facts.archetype}"`
+    );
+  return {
+    story_html: suspect_lead(facts) + story(facts),
+    rx_cards: build_cards(facts)
+  };
+};
 
 // STORY_KEYS: the archetypes this module can narrate. Exported for the
 // check-time coverage assertion — build_narrative's lookup is unguarded
