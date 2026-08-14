@@ -21,9 +21,17 @@ this file.**
 
 **Round 3 (Phases 6–8: `ae085fd`, `9a41190`, `0fe79c2`, `f386c3e`) is
 complete — one substantive finding plus documentation cleanups, fixed in
-`d11d4d3`; see the round-3 addendum at the end of this file. The next
-round's scope will be stated here when the limited-coverage track
-(Phases 10–13) lands.**
+`d11d4d3`; see the round-3 addendum at the end of this file.**
+
+**Current review round: Phases 10–13, limited coverage — commits
+`05e758e` (the data path: classify_manufacturer, build_limited_record,
+brief refusal, explicit grading guards) and `29ef8db` (the document
+surface: LIMITED section, measured geometry, counts, email wording).
+This is the series' only BEHAVIOR-ADDING round: exactly one live system
+qualifies today (SME16940, Canon, EDU-equipped), converting its standing
+per-run failure into a stated row. Batch and scoped parity show only
+whitelisted additive diffs (`assessment_status` keys + the new legend
+line). See the round-4 section below for the invariants to attack.**
 
 ## What this codebase does
 
@@ -267,6 +275,66 @@ archive-without-pdf was already a no-op — confirm.)
   (two --facts runs byte-identical).
 - check_compute pins the extracted surface directly: facts shape smoke,
   views shape, resolved defaults, and the anchored no-data message.
+
+## Phases 10–13 — limited coverage (round 4 scope)
+
+Product decisions signed off by the user (phase 9): limited systems run
+wherever scope resolves them; the allowlist is Hitachi/Canon/Toshiba/
+Americomp; no per-system brief exists (loud named refusal). Survey
+2026-08-14: SME16940 (Canon, EDU, process_mag=true) is the only live
+qualifier; Toshiba×10/Hitachi/Americomp are process_mag=false; "TBD" and
+"Artshu" rows exist and MUST stay unknown.
+
+### Where to look hardest
+
+1. **Stated-vs-judged, adversarially.** A limited record must not be able
+   to acquire a color, condition, count, or urgency ANYWHERE: the fleet
+   attention list/rollup/urgent counts, the summary email tiers and cell,
+   the scheduled-runner grading (`run_scheduled` imports
+   `is_attention`/`is_urgent` — limited records flow through scheduled
+   summary units now). `conditions.js` gates explicitly via `is_limited`;
+   find a consumer that grades by archetype without the gate.
+2. **The three-way manufacturer gate.** unknown ≠ limited must hold under
+   adversarial strings ("Canonical Imaging"? — `includes("CANON")`
+   matches! Is loose substring matching over the allowlist acceptable, or
+   a finding?). A supported vendor whose pulls fail must stay a failure.
+3. **The partition.** Limited rows: exactly one place (LIMITED section);
+   never in vendor sections, EDU section, attention, data issues,
+   rollups, or `total`. The EDU reserve-ladder claim ("EDU members ⊆
+   vendor-sectioned rows") must survive limited rows carrying `edu`.
+4. **The per-run-shape split.** The same system is a stated row in a
+   summary-only run and a named failure in a briefs batch (deliberate,
+   RULES.md §5). Argue if you think that inconsistency is a trap — e.g.
+   scheduled `include_briefs` configs would flip SME16940 between row and
+   failure across config rows.
+5. **Geometry.** MANUFACTURER need measured at 81px (colbudget; the
+   first guess truncated and check_fleet's Chromium pass caught it —
+   the gate works). The limited fixtures ride the 163-system fixture
+   (now 15 pages) through the full geometry pass. Check the heading
+   wrap: the section title + note wraps to two lines on the live render
+   — acceptable or a finding?
+6. **Wording (user sign-off pending).** Section title "LIMITED COVERAGE —
+   OTHER MANUFACTURERS", heading note "environmental readings only — no
+   magnet monitoring adapter", legend entry, cover clause "N limited
+   coverage", email clause "carry environmental readings only", refusal
+   error and its whitelist wording. Flag anything misleading.
+
+### What I verified, and how
+
+- All five suites green; the extended 163+3 fixture (full EDU / no EDU /
+  stale room channel) passes the Chromium geometry pass at 15 pages.
+- check_fleet pins: stated-never-judged end to end (grading, cell,
+  sort), the manufacturer-then-id sort, exactly-once appearance of
+  limited ids in the document, the stale-EDU dim rule in the limited
+  table, and SECTION_W coverage for LIMITED.
+- check_config pins the classify matrix including the live junk strings.
+- Parity: batch = 11 additive `assessment_status` keys + one legend
+  line; scoped Piedmont = additive keys only (SME16940 is not in that
+  scope).
+- Live render: a 3-system summary containing SME16940 produces a 4-page
+  document — cover "2 systems analyzed — 2 need attention, 1 limited
+  coverage", the limited row stated with its real EDU readings
+  (MacNeal Hospital, Berwyn IL), zero failures.
 
 ## Review round 1 (codex) — outcome
 
