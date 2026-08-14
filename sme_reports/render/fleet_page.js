@@ -481,6 +481,12 @@ const TD_PAD_PX = 0.035 * 96 * 2;
 // pure redundancy and the header flattened back to one row.
 const section_table = (section, rows) => {
   const W = SECTION_W[section.vendor_key];
+  // Fail closed: an unregistered section would otherwise render NaN-width
+  // columns into a fixed page with overflow:hidden — clipped silently.
+  if (!W)
+    throw new Error(
+      `no SECTION_W widths for section "${section.vendor_key}" — measure via dev/solve_widths.js and register them`
+    );
   const total = section.columns.reduce((n, key) => n + W[key], 0);
   const colgroup =
     `<colgroup>` +

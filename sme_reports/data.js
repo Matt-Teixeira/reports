@@ -99,10 +99,16 @@ const fetch_series = async (identity, window, vendor, routing = []) => {
     rows = await db.any(siemens_non_tim_series, params);
     source = "mag.siemens_non_tim";
     series = normalize_siemens_non_tim(rows);
-  } else {
+  } else if (vendor.key === "SIEMENS") {
     rows = await db.any(siemens_series, params);
     source = "mag.siemens";
     series = normalize_siemens(rows);
+  } else {
+    // Fail closed: a default branch here once routed ANY unmatched vendor
+    // to the Siemens tables — a half-registered vendor would silently
+    // report another data model's numbers. resolve_vendor gates entry, but
+    // this seam must hold on its own.
+    throw new Error(`no series adapter for vendor "${vendor.key}"`);
   }
 
   return { vendor, source, series: series.filter((r) => r.t !== null) };
@@ -120,7 +126,11 @@ const fetch_thresholds = async (system_id, vendor) => {
 // Display units from the vendor's mag.*_units row (e.g. Siemens helium can be
 // LTRS instead of %). Missing rows fall back to the vendor defaults.
 const fetch_units = async (system_id, vendor) => {
-  const rows = await db.any(units_queries[vendor.key], [system_id]);
+  const q = units_queries[vendor.key];
+  // Fail closed with a named cause — db.any(undefined) rejects with an
+  // unattributable "Invalid query format".
+  if (!q) throw new Error(`no units query registered for vendor "${vendor.key}"`);
+  const rows = await db.any(q, [system_id]);
   const row = rows[0] || {};
   const pressure = row.pressure_units || vendor.pressure.units;
   return {

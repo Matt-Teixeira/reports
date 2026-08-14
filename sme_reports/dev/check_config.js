@@ -473,6 +473,20 @@ const { parse_sme_args } = require("../cli_args");
     `previous recipient's files must NOT survive: ${listing}`
   );
   fs.rmSync(tmp, { recursive: true, force: true });
+  // --- vendor registration completeness (fail-closed routing, phase 2) -----
+  // Every vendor must carry a units query, and no orphan query may name a
+  // vendor that does not exist — the lookup in data.fetch_units throws on a
+  // miss, and this pins the registries to each other at check time.
+  {
+    const { VENDORS } = require("../vendors");
+    const { units_queries } = require("../sql/sql");
+    assert.deepStrictEqual(
+      Object.keys(units_queries).sort(),
+      Object.keys(VENDORS).sort(),
+      "VENDORS and units_queries must register the same vendor keys"
+    );
+  }
+
   console.log("check_config: all assertions passed");
 })().catch((e) => {
   console.error(e);
