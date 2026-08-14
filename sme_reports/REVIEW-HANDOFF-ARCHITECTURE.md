@@ -151,3 +151,68 @@ structure, the migration path (what moves first, what check guards it), and
 what it deliberately does NOT solve. Where you conclude the current
 structure is already right — e.g. if the duplication IS the safety
 mechanism — say so explicitly; "no change needed" is a valid finding here.
+
+---
+
+## Adoption outcome (recorded 2026-08-14, series complete)
+
+The findings above were verified claim-by-claim, triaged, and implemented
+as the check-gated series recorded in `REVIEW-HANDOFF-HARDENING.md` (four
+review rounds, sixteen commits `ea9352e`..`521c22d`, every round's
+findings fixed same-round). Summary of dispositions:
+
+**Adopted and landed:**
+- **Parity harness** (`dev/parity.js`): pinned-window byte-diff witnesses
+  (brief HTML, fleet HTML, records, and production-pass facts via a
+  dev-only run_one observer) — every refactor claim below was measured.
+- **Finding 1 (fail-open routing), narrowed then hardened:** the "silently
+  queries Siemens tables" scenario was blocked by two accidental
+  loud-failure seams; all lookups now fail closed BY DESIGN (series,
+  units, widths, plausibility bounds), the fleet vendor partition is a
+  runtime assertion, and VENDORS ≡ units_queries is check-pinned.
+- **Finding 7 (per-channel thresholds) — the one live bug:** configured
+  helium limits were silently discarded on systems without pressure
+  models (4 reporting systems; SME15805 was showing amber over a breached
+  50% helium alert). Per-channel resolution with per-channel provenance;
+  units resolve order-independently and conflicting units fail closed.
+- **Finding 2 (analysis in rendering):** pure `compute/analyze.js`
+  extracted verbatim; the compute→render import cycle broken
+  (`compute/judgments.js`); summary-only runs never touch a renderer
+  (43-system scoped run ~15s). `{facts, views}` is the seam future report
+  types consume.
+- **Finding 4 (condition registration), partially:** ARCHETYPES is a
+  closed registry classify validates against at runtime; SEVERITY_ORDER ≡
+  ARCHETYPES and story coverage are executable checks; narrative fails
+  named. The full findings[]/definition-registry redesign stays
+  trigger-gated (below).
+- **Finding 8 (duplication register), corrected then landed:** one
+  STALE_MS, one is_inferred (a CLOSED provenance registry after round 2),
+  one GE warm_k, EDU accumulator order-safe, solver SETS derived from
+  SECTIONS while measured NEEDS stay independent. Codex's "fleet_page is
+  a fourth copy" was wrong (it consumes; SECTION_W was already
+  assertion-guarded); the real gap was the unimported solver.
+- **Finding 6 (limited coverage), implemented** per user decisions: closed
+  token-boundary allowlist (Hitachi/Canon/Toshiba/Americomp), identity +
+  EDU records that are stated and never judged (explicit is_limited gates
+  everywhere), a measured-geometry LIMITED section closing the document,
+  counts beside — never inside — the analyzed tally, loud brief refusal.
+  Live effect today: SME16940 (Canon) converts from a standing per-run
+  failure into a stated row.
+
+**Declined, as the review itself recommended:** geometry to config; a
+universal declarative engine for adapters/cell renderers; the
+duplications that ARE the safety mechanism (measured expectations vs CSS,
+RULES.md prose vs constants, curated copy).
+
+**Documented-only, with named triggers:**
+- **Channel registry** — trigger: the next new magnet channel, or a third
+  threshold metric (e.g. the deferred EDU detections' thresholds).
+- **Condition/finding definition registry + central reducer** — trigger:
+  the stuck-probe / probe-vs-room divergence detections.
+- **Vendor descriptors** (the data.js/normalize/SQL branches collapse
+  into registry entries) — trigger: vendor #5 graduating from limited to
+  full support; port the existing four and prove parity first.
+- **Report adapter / first-class report_type** (cache key, artifact
+  names, sidecar + sends columns via ADD COLUMN IF NOT EXISTS, and the
+  fanout coalition key codex round-0 missed) — trigger: a second report
+  type commissioned.

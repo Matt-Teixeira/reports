@@ -23,15 +23,11 @@ this file.**
 complete — one substantive finding plus documentation cleanups, fixed in
 `d11d4d3`; see the round-3 addendum at the end of this file.**
 
-**Current review round: Phases 10–13, limited coverage — commits
-`05e758e` (the data path: classify_manufacturer, build_limited_record,
-brief refusal, explicit grading guards) and `29ef8db` (the document
-surface: LIMITED section, measured geometry, counts, email wording).
-This is the series' only BEHAVIOR-ADDING round: exactly one live system
-qualifies today (SME16940, Canon, EDU-equipped), converting its standing
-per-run failure into a stated row. Batch and scoped parity show only
-whitelisted additive diffs (`assessment_status` keys + the new legend
-line). See the round-4 section below for the invariants to attack.**
+**Round 4 (Phases 10–13: `05e758e`, `29ef8db`) is complete — two P2
+findings, both fixed in `521c22d`; see the round-4 addendum at the end of
+this file. THIS SERIES IS COMPLETE: all four rounds closed, every finding
+fixed same-round. The adoption outcome and the trigger-gated roadmap are
+recorded in `REVIEW-HANDOFF-ARCHITECTURE.md`.**
 
 ## What this codebase does
 
@@ -535,3 +531,26 @@ Codex additionally verified: the extracted analysis body is
 line-for-line identical after the three documented renames, compute has
 no render dependency, and the summary-only output predicates preserve
 every existing combination.
+
+## Review round 4 (codex) — outcome
+
+Two P2 findings, both fixed in `521c22d`; all five suites green; batch
+parity byte-identical.
+
+1. **P2 — the limited allowlist was not actually closed.** Substring
+   matching classified "Canonical Imaging" as limited (contains CANON) —
+   the exact unknown→limited downgrade the gate forbids. Fixed:
+   token-boundary matching (uppercase, split on non-alphanumerics);
+   "Canon Medical Systems" still matches on its own token. check_config
+   pins the adversarial negatives ("Canonical", "Canonical Imaging",
+   "Americomputer", "Toshibapro" → unknown). `resolve_vendor`'s loose
+   matching for SUPPORTED vendors is deliberately untouched — changing it
+   could reclassify live systems and is a separate decision.
+2. **P2 — limited-only summaries claimed "no data this period".** The
+   document window derived from assessed rows only. Fixed: the period
+   comes from every successful record; check_fleet pins a limited-only
+   document showing real dates and the "No systems analyzed · 1 limited
+   coverage" cover split.
+
+Codex additionally confirmed the limited partition and grading guards
+sound, and the round-3 facts observer correct.
