@@ -9,11 +9,18 @@
 //   node sme_reports/dev/parity.js <request-file> <out-dir> \
 //        [--end YYYY-MM-DD] [--lookback N]
 //
-// Baseline-vs-candidate workflow:
+// Baseline-vs-candidate workflow. A bare worktree is NOT runnable: .env,
+// node_modules/, and utils/ (the whole DB/logger layer) are gitignored, so
+// they must be provisioned from the main checkout; and .env's PG_SSL_PATH
+// is cwd-relative, so run BOTH sides from the main repo root:
 //   git worktree add /tmp/parity-base <baseline-sha>
+//   cp .env /tmp/parity-base/.env
+//   ln -s "$PWD/node_modules" "$PWD/utils" /tmp/parity-base/
 //   node /tmp/parity-base/sme_reports/dev/parity.js requests/batch-test-6.json /tmp/parity/base
 //   node sme_reports/dev/parity.js requests/batch-test-6.json /tmp/parity/cand
 //   diff -r --exclude='*.pdf' /tmp/parity/base /tmp/parity/cand
+// Each side's <out-dir> must be new or empty — reusing a directory could
+// let a stale witness from an earlier run masquerade as this run's output.
 //
 // Determinism contract: the analysis window is pinned (default: 30 days
 // ending yesterday UTC; the pinned dates are PRINTED — pass them via --end /
@@ -40,7 +47,6 @@ const { v4: uuidv4 } = require("uuid");
 const { run_batch } = require("../index");
 const { load_requests, materialize_scoped_requests } = require("../request_loader");
 const { close_pdf_renderer } = require("../output/render_pdf");
-const [, , , makeAppRunLog] = require("../../utils/logger/log");
 
 const usage = () => {
   console.error(
@@ -105,13 +111,22 @@ const main = async () => {
   );
 
   const out_dir = path.resolve(args.out_dir);
+  // Fresh directory only: a reused directory could carry a stale witness
+  // (e.g. a prior run's fleet HTML surviving a soft render failure this
+  // run) and diff clean against a baseline it was never produced from.
+  if (fs.existsSync(out_dir) && fs.readdirSync(out_dir).length)
+    throw new Error(`out-dir ${out_dir} is not empty — parity witnesses must land in a fresh directory`);
   fs.mkdirSync(out_dir, { recursive: true });
 
   const raw = JSON.parse(fs.readFileSync(path.resolve(args.request_path), "utf8"));
   const transformed_path = path.join(out_dir, "request.parity.json");
   fs.writeFileSync(transformed_path, JSON.stringify(transform(raw, pin), null, 2));
 
-  const run_log = await makeAppRunLog();
+  // Local run_log: makeAppRunLog() opens a persistent write stream under
+  // utils/logger/ as a side effect; a parity probe must not leave files
+  // behind. addLogEvent only pushes onto log_events, so this shape is the
+  // whole contract.
+  const run_log = { run_id: uuidv4(), log_events: [] };
   const job_id = uuidv4();
   try {
     let loaded = load_requests(transformed_path);
@@ -140,12 +155,35 @@ const main = async () => {
     }
     loaded = { ...loaded, out_dir };
 
-    const { results, failures } = await run_batch(
+    const { results, failures, fleet_pdf_path } = await run_batch(
       run_log,
       job_id,
       loaded,
       scope_resolution
     );
+
+    // Witness manifest: every artifact this run OWES must exist before the
+    // directory can be diffed — a soft fleet-render failure (run_batch
+    // tolerates it for normal batches) must fail parity loudly, never
+    // present an absent witness as "no change".
+    const missing = [];
+    if (!loaded.summary_only)
+      for (const r of results)
+        if (!r.html_path || !fs.existsSync(r.html_path))
+          missing.push(`brief HTML for ${r.system_id}`);
+    const owes_fleet =
+      loaded.batch_email &&
+      loaded.batch_email.summary_pdf &&
+      (results.length ||
+        failures.length ||
+        (loaded.excluded && loaded.excluded.ids.length > 0));
+    if (owes_fleet) {
+      if (!fleet_pdf_path) missing.push("fleet summary (render failed soft — see run output)");
+      else if (!fs.existsSync(fleet_pdf_path.replace(/\.pdf$/, ".html")))
+        missing.push("fleet summary HTML beside the PDF");
+    }
+    if (missing.length)
+      throw new Error(`parity witnesses missing: ${missing.join("; ")}`);
 
     // records.json: the distilled per-system records in request order, plus
     // failures — the sidecar shape minus generated_at and any filesystem
