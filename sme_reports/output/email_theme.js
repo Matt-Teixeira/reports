@@ -107,4 +107,28 @@ const esc = (s) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-module.exports = { COLORS, FONT, logo_attachment, wrap_email, themed_table, esc };
+// The statement the summary email carries when the run's fleet document was
+// requested but failed to build (review round-2 F1): an absent attachment
+// alone reads as "nothing was supposed to be here", which hides the failure
+// from the one audience that expected the document. Lives here rather than
+// send_summary_email.js so the DB-free check suite can pin both variants
+// (requiring the sender pulls in the logger's pg pool). Customer-facing
+// (scoped) wording carries no raw error — the same whitelist stance as
+// customer_failure_reason; the raw message stays in the run log and the
+// internal variant.
+const fleet_failure_note = (scope_label, fleet_error) =>
+  `<p style="${FONT}font-size:13px;color:${COLORS.red};margin:0 0 12px 0;">` +
+  `<b>The ${scope_label ? "Magnet Health Summary document" : "fleet summary document"} for this run could not be generated and is not attached.</b> ` +
+  `The condition list below is complete and unaffected.` +
+  (scope_label ? "" : ` Error: ${esc(fleet_error)}. The run is recorded as failed.`) +
+  `</p>`;
+
+module.exports = {
+  COLORS,
+  FONT,
+  logo_attachment,
+  wrap_email,
+  themed_table,
+  esc,
+  fleet_failure_note
+};

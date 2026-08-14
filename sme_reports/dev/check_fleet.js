@@ -1216,6 +1216,22 @@ const rec = (over = {}) => ({
   }
 }
 
+// --- a failed summary document is stated, never a quiet absence (round-2 F1)
+{
+  const { fleet_failure_note } = require("../output/email_theme");
+  const internal = fleet_failure_note(null, `boom <script>alert(1)</script>`);
+  assert.ok(internal.includes("could not be generated"), "failure is stated");
+  assert.ok(internal.includes("recorded as failed"), "run outcome is stated");
+  assert.ok(!internal.includes("<script>"), "raw error is HTML-escaped");
+  assert.ok(internal.includes("&lt;script&gt;"), "escaped, not stripped");
+  const scoped = fleet_failure_note("Piedmont HealthCare", "raw internals");
+  assert.ok(scoped.includes("could not be generated"), "scoped failure is stated");
+  assert.ok(
+    !scoped.includes("raw internals"),
+    "customer-facing wording carries no raw error (whitelist stance)"
+  );
+}
+
 // --- fatal run errors exit nonzero ------------------------------------------
 {
   // Codex F5: the orchestrator's outer catch swallowed fatal errors (bad

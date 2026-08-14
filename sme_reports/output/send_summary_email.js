@@ -8,7 +8,8 @@ const {
   logo_attachment,
   wrap_email,
   themed_table,
-  esc
+  esc,
+  fleet_failure_note
 } = require("./email_theme");
 
 const {
@@ -38,7 +39,7 @@ const send_summary_email = async (
   results,
   failures,
   fleet_pdf_path,
-  { scope_label = null, lookback_days = null } = {}
+  { scope_label = null, lookback_days = null, fleet_error = null } = {}
 ) => {
   const date = new Date().toISOString().slice(0, 10);
   // Scoped runs lead with WHO the summary covers; non-default periods say
@@ -110,6 +111,8 @@ const send_summary_email = async (
       `<p style="${FONT}font-size:13px;color:${COLORS.navy};margin:0 0 12px 0;">` +
       `The attached <b>${doc_name}</b> carries current helium, primary metric, and compressor state for every system below.</p>` +
       body_html;
+  } else if (fleet_error) {
+    body_html = fleet_failure_note(scope_label, fleet_error) + body_html;
   }
 
   const message = {

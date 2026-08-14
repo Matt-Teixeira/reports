@@ -159,7 +159,11 @@ const write_records_sidecar = ({ scope, period_tag, records, failures }) => {
 
 // Builds the multi-page fleet summary from the distilled per-system records.
 // A failure here must not sink the batch — the per-system PDFs are already
-// on disk and the summary email can still go out without an attachment.
+// on disk and the summary email can still go out without an attachment —
+// but it must never be SILENT either: the error is returned so the summary
+// email states the missing document and the run is recorded as failed
+// (review round-2 F1: a partition violation soft-failed into a successful,
+// quiet delivery, visible only in logs). Returns { pdf_path, error }.
 const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, excluded, scope, period_tag = "", opts = {}) => {
   const { build_fleet_model } = require("./render/fleet_model");
   const { build_fleet_page } = require("./render/fleet_page");
@@ -210,11 +214,11 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
       pdf_path
     };
     await addLogEvent(I, run_log, "build_fleet_summary", det, note, null);
-    return pdf_path;
+    return { pdf_path, error: null };
   } catch (error) {
     await addLogEvent(E, run_log, "build_fleet_summary", cat, { job_id }, error);
     console.error(`fleet summary failed: ${error.message}`);
-    return null;
+    return { pdf_path: null, error: error.message };
   }
 };
 
@@ -276,6 +280,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
     }
 
     let fleet_pdf_path = null;
+    let fleet_error = null;
     if (batch_email) {
       // The summary covers every system that produced facts. Only the
       // attachment email needs a PDF on disk, so that filter belongs to it
@@ -290,7 +295,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
         (excluded && excluded.ids.length > 0);
 
       if (batch_email.summary_pdf && has_content) {
-        fleet_pdf_path = await build_fleet_summary(
+        const fleet = await build_fleet_summary(
           run_log,
           job_id,
           results,
@@ -301,6 +306,8 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
           period_tag,
           { archive_records: batch_email.archive_records }
         );
+        fleet_pdf_path = fleet.pdf_path;
+        fleet_error = fleet.error;
         // A soft failure is right for a normal batch — the per-system briefs
         // are still valid deliverables. In summary-only mode there are none,
         // so sending the thin email would report success having produced
@@ -322,7 +329,10 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
           fleet_pdf_path,
           {
             scope_label: scope_resolution ? scope_resolution.label : null,
-            lookback_days
+            lookback_days,
+            // A requested-but-failed summary document must be STATED in the
+            // email, never just an absent attachment (round-2 F1).
+            fleet_error
           }
         );
       }
@@ -346,7 +356,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
         );
       }
     }
-    return { results, failures, fleet_pdf_path, lookback_days };
+    return { results, failures, fleet_pdf_path, fleet_error, lookback_days };
 };
 
 const run_sme_report = async (run_log, request_path) => {
@@ -376,8 +386,19 @@ const run_sme_report = async (run_log, request_path) => {
       );
       loaded = materialize_scoped_requests(loaded.raw, scope_resolution.system_ids);
     }
-    const { results } = await run_batch(run_log, job_id, loaded, scope_resolution);
-    return results;
+    const batch = await run_batch(run_log, job_id, loaded, scope_resolution);
+    // A requested summary document that failed to build is a RUN failure,
+    // recorded after every authorized deliverable has gone out: the briefs
+    // are on disk, the emails (which state the missing document) are sent,
+    // and only then does the process report nonzero so a scheduler can see
+    // it — a partition violation or render error must never resolve into a
+    // quiet exit 0 (review round-2 F1). Scheduled runs make this decision
+    // per unit in run_scheduled instead.
+    if (batch.fleet_error)
+      throw new Error(
+        `fleet summary document failed after per-system delivery: ${batch.fleet_error}`
+      );
+    return batch.results;
   } catch (error) {
     await addLogEvent(E, run_log, "run_sme_report", cat, { job_id }, error);
     console.error(`sme_report failed: ${error.message}`);
