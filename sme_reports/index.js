@@ -12,6 +12,7 @@ const {
   fetch_units
 } = require("./data");
 const { build_render_model } = require("./render/model");
+const { analyze_system } = require("./compute/analyze");
 const { build_page } = require("./render/page");
 const { build_summary_facts } = require("./compute/summary_facts");
 const write_html = require("./output/write_html");
@@ -54,24 +55,48 @@ const run_one = async (run_log, job_id, request) => {
   };
   await addLogEvent(I, run_log, "run_sme_report", det, note, null);
 
-  const vm = build_render_model({
-    identity,
-    vendor,
-    series,
-    source,
-    request,
-    edu,
-    edu_source,
-    thresholds,
-    units
-  });
+  // Summary-only runs (html/pdf/email all off) skip the RENDERER entirely:
+  // the fleet document needs only the analysis facts, and the render model
+  // built tiles, narrative, and both chart SVGs even when nothing would be
+  // delivered. The no-data throw lives in compute/analyze either way, so
+  // failure messages and the batch's failure records are identical on both
+  // paths. email-without-pdf still goes through the render path so its
+  // "output.email requires output.pdf" error is preserved. Deliberate
+  // narrowing: a presentation-side failure can no longer fail a
+  // summary-only record — story coverage is check-gated instead.
+  const renders =
+    request.output.html || request.output.pdf || request.output.email;
+  let facts;
+  let html = null;
+  if (renders) {
+    const vm = build_render_model({
+      identity,
+      vendor,
+      series,
+      source,
+      request,
+      edu,
+      edu_source,
+      thresholds,
+      units
+    });
+    facts = vm.facts;
+    if (request.output.html || request.output.pdf) html = build_page(vm);
+  } else {
+    ({ facts } = analyze_system({
+      system_id: request.system_id,
+      vendor,
+      series,
+      window: request.window,
+      event_window: request.event_window,
+      edu,
+      edu_source,
+      thresholds,
+      units
+    }));
+  }
 
-  // Summary-only runs skip every rendering step; the facts above are all the
-  // fleet document needs, and rendering is what makes a report cost seconds.
-  const renders = request.output.html || request.output.pdf;
-  const html = renders ? build_page(vm) : null;
-
-  const outputs = { archetype: vm.facts.archetype };
+  const outputs = { archetype: facts.archetype };
   if (request.output.html) {
     outputs.html_path = write_html(
       request.output.out_dir,
@@ -120,7 +145,7 @@ const run_one = async (run_log, job_id, request) => {
     modality: identity.modality,
     // The distilled per-system state. Without this every metric computed
     // above dies here and the fleet summary has nothing but an archetype.
-    summary: build_summary_facts(vm.facts, identity)
+    summary: build_summary_facts(facts, identity)
   };
 };
 
