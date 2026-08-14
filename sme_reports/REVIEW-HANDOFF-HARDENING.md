@@ -17,8 +17,17 @@ addendum near the end of this file.**
 **Round 2 (Phases 2–5: `ef4b87e`, `c6937f1`, `88e7500`, `7439ff2`,
 `3ef210b`) is complete — four findings, all fixed in `57990d7` /
 `80cf9e0` / `24431e6` / `501c8ba`; see the round-2 addendum at the end of
-this file. The next round's scope will be stated here when the
-analyze_system extraction (Phases 6–8) lands.**
+this file.**
+
+**Current review round: Phases 6–8, the pure-analysis extraction —
+commits `ae085fd` (judgments move), `9a41190` (analyze_system
+extraction), `0fe79c2` (parity --facts witness), `f386c3e` (summary-only
+skips rendering). All four are output-identical: batch AND scoped parity
+byte-identical per commit, plus the new facts-level witness from
+`0fe79c2` onward. This round is a REFACTOR review: the code moved is
+deliberately verbatim, so the questions are boundary correctness, what
+each seam now promises, and whether the parity evidence actually covers
+the claim.**
 
 ## What this codebase does
 
@@ -177,6 +186,91 @@ with only the additive `he_thr_source` key in records.json.
 - Parity: test batch HTML byte-identical; records.json diff is exactly
   one additive `he_thr_source` per record. SME15805 old-vs-new diff is
   exactly the helium tile + two record fields (shown above).
+
+## Phases 6–8 — the pure-analysis extraction (round 3 scope)
+
+Architecture-review finding 2: analysis was embedded in rendering
+(`build_render_model` did screening→facts AND svg/copy/layout in one
+function), `index.js` built tiles/narrative/charts even for summary-only
+runs, and `compute/summary_facts` imported judgments from `render/tiles`
+— the one compute→render cycle. These four commits unwind that, moving
+code VERBATIM wherever possible.
+
+### Phase 6 — `ae085fd`: judgments move
+
+`p_severity` / `trend_of` moved verbatim to `compute/judgments.js`;
+`tiles.js` re-exports both for compatibility; `summary_facts` imports
+from compute. `he_suffix` deliberately stays in tiles (display
+formatting, render-only consumers). The compute package now imports
+NOTHING from render — grep `require("../render` under `compute/` to
+confirm.
+
+### Phase 7 — `9a41190`: analyze_system extraction
+
+`build_render_model`'s analysis half (its old lines 58–376: plausibility
+screen, suspect conviction, compressor-source arbitration, events,
+metric facts, EDU stats, the facts literal, archetype, offline overlays)
+moved to `compute/analyze.js` with THREE renames only:
+`request.window`→`window`, `request.event_window`→`event_window`,
+`identity.system_id`→`system_id`. Threshold/units fallback defaulting
+moved in with it (analysis owns threshold semantics). Returns
+`{ facts, views: { mode, p_points, he_points } }` — views carries the
+screened chart-point arrays privately; `facts.chart_mode` deliberately
+STAYS a fact (archived sidecars serialize facts-derived records; the
+shape must not change). `build_render_model` is now a wrapper:
+analyze → destructure locals → presentation half (unchanged).
+
+Where to look hardest:
+1. **The verbatim claim.** Diff `compute/analyze.js` against the old
+   model.js body (git show `9a41190^:sme_reports/render/model.js`). Any
+   drift beyond the three renames is a finding.
+2. **The views boundary.** The presentation half now reads
+   `mode/p_points/he_points` from views and everything else from facts.
+   Confirm nothing in the presentation half re-derives an analysis fact
+   locally (it would silently fork from analyze's version), and that
+   views never leaks into anything serialized.
+3. **The no-data error.** Its message must be byte-exact
+   (`fleet_model` failure grouping and `customer_failure_reason`
+   pattern-match it) — check_compute pins it with an anchored regex;
+   confirm the pin actually matches the grouping regexes.
+4. **`analyze_system`'s contract.** `window` must expose
+   `.start.toMillis()` / `.end.toMillis()` (luxon DateTimes from the
+   loader). Is that contract stated clearly enough for the next caller
+   (the future report-adapter work)?
+
+### Phase 7b — `0fe79c2`: parity --facts witness
+
+`--facts` writes `facts-<id>.json` per system from a fresh
+fetch + `analyze_system` pass — the direct analysis witness the Phase 0
+handoff section promised. Two --facts runs verified byte-identical; the
+mode changes no other witness. Look at: the fetch block repeats
+`run_one`'s pulls — acceptable dev-only duplication, or worth a shared
+helper? (Deliberate choice: production `run_one` stays untouched by the
+witness path.)
+
+### Phase 8 — `f386c3e`: summary-only skips rendering
+
+`run_one` calls `analyze_system` directly when html/pdf/email are all
+off; render-producing paths unchanged; email-without-pdf still routes
+through the render path so its validation error survives. Deliberate
+narrowing, stated in RULES.md §5: presentation-side failures can no
+longer fail a summary-only record (story coverage is check-gated
+instead — round-2 F2's registry). The 43-system scoped run drops to
+~15s. Look at: the `renders` predicate
+(`html || pdf || email`) — is there any output combination where the
+analysis-only path would skip a validation or side effect the render
+path performs? (`archive` is gated inside the pdf block, so
+archive-without-pdf was already a no-op — confirm.)
+
+### Verification (this round)
+
+- All five suites green after each commit.
+- Parity per commit: `requests/batch-test-6.json` AND
+  `requests/scoped-test-piedmont.json` byte-identical (HTML, fleet HTML,
+  records.json), plus facts-level witnesses from `0fe79c2` onward
+  (two --facts runs byte-identical).
+- check_compute pins the extracted surface directly: facts shape smoke,
+  views shape, resolved defaults, and the anchored no-data message.
 
 ## Review round 1 (codex) — outcome
 
