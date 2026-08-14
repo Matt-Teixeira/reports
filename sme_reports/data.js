@@ -12,7 +12,8 @@ const {
   edu_config,
   edu_series
 } = require("./sql/sql");
-const { VENDORS, resolve_vendor, fallback_thresholds } = require("./vendors");
+const { VENDORS, resolve_vendor } = require("./vendors");
+const { resolve_thresholds } = require("./compute/thresholds");
 const {
   num,
   ms,
@@ -108,51 +109,12 @@ const fetch_series = async (identity, window, vendor, routing = []) => {
 };
 
 // Per-system alert thresholds from alert.models defaults (user_id='default',
-// enabled). Falls back to the vendor's OEM constants when no rows exist.
-// Multiple rows for the same operator/severity keep the most conservative
-// value (lowest greater_than, highest less_than).
+// enabled). Resolution semantics live in compute/thresholds.js (pure, so the
+// check suite exercises them without a database).
 const fetch_thresholds = async (system_id, vendor) => {
   const fields = vendor.pressure.model_fields.concat(vendor.helium.model_fields);
   const rows = await db.any(get_default_thresholds, [system_id, fields]);
-
-  const thr = fallback_thresholds(vendor);
-  const p = {
-    units: vendor.pressure.units,
-    high_gt: null,
-    high_lt: null,
-    med_gt: null,
-    med_lt: null,
-    source: "default_models"
-  };
-  const he = { low_high: null, low_med: null, units: null };
-
-  const keep_min = (cur, v) => (cur === null ? v : Math.min(cur, v));
-  const keep_max = (cur, v) => (cur === null ? v : Math.max(cur, v));
-
-  for (const r of rows) {
-    const v = parseFloat(r.threshold);
-    if (Number.isNaN(v)) continue;
-    if (vendor.pressure.model_fields.includes(r.field_name)) {
-      if (r.threshold_units) p.units = r.threshold_units;
-      if (r.operator === "greater_than") {
-        if (r.severity === "high") p.high_gt = keep_min(p.high_gt, v);
-        else p.med_gt = keep_min(p.med_gt, v);
-      } else {
-        if (r.severity === "high") p.high_lt = keep_max(p.high_lt, v);
-        else p.med_lt = keep_max(p.med_lt, v);
-      }
-    } else if (r.operator === "less_than") {
-      if (r.threshold_units) he.units = r.threshold_units;
-      if (r.severity === "high") he.low_high = keep_max(he.low_high, v);
-      else he.low_med = keep_max(he.low_med, v);
-    }
-  }
-
-  // Normalize display casing ("mBar" -> "mbar") to match the report style.
-  p.units = p.units === "mBar" ? "mbar" : p.units;
-
-  if (p.high_gt === null && p.high_lt === null) return thr;
-  return { pressure: p, helium: he };
+  return resolve_thresholds(rows, vendor);
 };
 
 // Display units from the vendor's mag.*_units row (e.g. Siemens helium can be

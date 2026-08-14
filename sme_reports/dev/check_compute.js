@@ -518,4 +518,73 @@ const row = (h, over = {}) => ({
   fs.unlinkSync(tmp);
 }
 
+// ---- threshold resolution (compute/thresholds.js) -------------------------
+// Pure core of data.fetch_thresholds; row shape mirrors
+// get-default-thresholds.sql's SELECT. These cases pin the resolution
+// semantics the reports rest on.
+{
+  const { resolve_thresholds } = require("../compute/thresholds");
+  const { VENDORS } = require("../vendors");
+  const trow = (field_name, operator, threshold, severity, threshold_units = null) => ({
+    field_name,
+    operator,
+    threshold,
+    threshold_units,
+    severity
+  });
+
+  // No rows at all -> the vendor OEM fallback, marked as such.
+  const none = resolve_thresholds([], VENDORS.PHILIPS);
+  assert.strictEqual(none.pressure.source, "oem_constant");
+  assert.strictEqual(none.pressure.high_gt, 100, "Philips OEM line");
+
+  // Configured pressure rows -> default_models, most conservative kept
+  // (lowest greater_than, highest less_than), unparseable rows skipped.
+  const p = resolve_thresholds(
+    [
+      trow("he_psi_avg_value", "greater_than", "90", "high"),
+      trow("he_psi_avg_value", "greater_than", "80", "high"),
+      trow("he_psi_avg_value", "greater_than", "garbage", "high"),
+      trow("he_psi_avg_value", "greater_than", "70", "medium"),
+      trow("helium_level_value", "less_than", "40", "high"),
+      trow("helium_level_value", "less_than", "55", "medium")
+    ],
+    VENDORS.PHILIPS
+  );
+  assert.strictEqual(p.pressure.source, "default_models");
+  assert.strictEqual(p.pressure.high_gt, 80, "most conservative high wins");
+  assert.strictEqual(p.pressure.med_gt, 70);
+  assert.strictEqual(p.helium.low_high, 40);
+  assert.strictEqual(p.helium.low_med, 55);
+
+  // Band config (Siemens): both sides resolve, highest less_than wins.
+  const band = resolve_thresholds(
+    [
+      trow("mag_psia_value", "greater_than", "16.4", "high"),
+      trow("mag_psia_value", "less_than", "14.4", "high"),
+      trow("mag_psia_value", "less_than", "14.0", "high")
+    ],
+    VENDORS.SIEMENS
+  );
+  assert.strictEqual(band.pressure.high_gt, 16.4);
+  assert.strictEqual(band.pressure.high_lt, 14.4, "highest less_than wins");
+
+  // Units ride the rows ("mBar" display-normalized to "mbar").
+  const units = resolve_thresholds(
+    [trow("he_psi_avg_value", "greater_than", "100", "high", "mBar")],
+    VENDORS.PHILIPS
+  );
+  assert.strictEqual(units.pressure.units, "mbar");
+
+  // A helium greater_than row carries no meaning here and is ignored.
+  const he_gt = resolve_thresholds(
+    [
+      trow("he_psi_avg_value", "greater_than", "100", "high"),
+      trow("helium_level_value", "greater_than", "90", "high")
+    ],
+    VENDORS.PHILIPS
+  );
+  assert.strictEqual(he_gt.helium.low_high, null, "helium greater_than ignored");
+}
+
 console.log("check_compute: all assertions passed");
