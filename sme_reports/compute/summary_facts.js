@@ -1,4 +1,4 @@
-const { p_severity, trend_of } = require("../render/tiles");
+const { p_severity, trend_of } = require("./judgments");
 
 // Distills the full per-system view-model facts into one flat, serializable
 // record for the fleet summary. This is the whole contract the fleet document

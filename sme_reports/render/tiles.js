@@ -8,15 +8,10 @@ const { is_inferred } = require("../compute/provenance");
 // facts.thr / facts.he_thr are the per-system thresholds from alert.models
 // defaults; facts.units carries the per-system display units.
 
-// Severity of a pressure value against the threshold object.
-const p_severity = (v, thr) => {
-  if (v === null) return "none";
-  if (thr.high_gt !== null && v >= thr.high_gt) return "high";
-  if (thr.high_lt !== null && v <= thr.high_lt) return "high";
-  if (thr.med_gt !== null && v >= thr.med_gt) return "med";
-  if (thr.med_lt !== null && v <= thr.med_lt) return "med";
-  return "ok";
-};
+// p_severity / trend_of live in compute/judgments (they feed non-visual
+// judgments too — offline-state corroboration, the distilled records) and
+// are re-exported below for compatibility.
+const { p_severity, trend_of } = require("../compute/judgments");
 
 // "Now" reads one notch softer than the peak (exemplar convention): over the
 // line but easing shows warn, not bad.
@@ -38,13 +33,6 @@ const vs_line = (v, thr, units) => {
   if (v >= thr.high_gt * 1.5)
     return `~${(v / thr.high_gt).toFixed(1)}× the ${thr.high_gt} ${units} line`;
   return `${Math.round((v / thr.high_gt) * 100)}% of the ${thr.high_gt} ${units} line`;
-};
-
-const trend_of = (pressure) => {
-  if (!pressure) return null;
-  if (pressure.last.v < pressure.peak.v * 0.995) return "easing";
-  if (pressure.rate_per_hr !== null && pressure.rate_per_hr > 0) return "rising";
-  return null;
 };
 
 const trend_word = (pressure) => {
