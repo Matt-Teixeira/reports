@@ -19,15 +19,11 @@ addendum near the end of this file.**
 `80cf9e0` / `24431e6` / `501c8ba`; see the round-2 addendum at the end of
 this file.**
 
-**Current review round: Phases 6–8, the pure-analysis extraction —
-commits `ae085fd` (judgments move), `9a41190` (analyze_system
-extraction), `0fe79c2` (parity --facts witness), `f386c3e` (summary-only
-skips rendering). All four are output-identical: batch AND scoped parity
-byte-identical per commit, plus the new facts-level witness from
-`0fe79c2` onward. This round is a REFACTOR review: the code moved is
-deliberately verbatim, so the questions are boundary correctness, what
-each seam now promises, and whether the parity evidence actually covers
-the claim.**
+**Round 3 (Phases 6–8: `ae085fd`, `9a41190`, `0fe79c2`, `f386c3e`) is
+complete — one substantive finding plus documentation cleanups, fixed in
+`d11d4d3`; see the round-3 addendum at the end of this file. The next
+round's scope will be stated here when the limited-coverage track
+(Phases 10–13) lands.**
 
 ## What this codebase does
 
@@ -444,3 +440,30 @@ Codex additionally confirmed: the mBar path normalizes before bounds
 dispatch, unknown-unit throws stay isolated per system, the partition
 assertion emits no partial artifact, the Phase 5 modules introduce no
 require cycle, and no `cold_threshold_k` consumer survives.
+
+## Review round 3 (codex) — outcome
+
+One substantive finding plus documentation cleanups, fixed in `d11d4d3`;
+all five suites green; parity verified on both request shapes.
+
+1. **P2 — `--facts` did not capture the facts of the production pass.**
+   The harness re-fetched and re-analyzed after `run_batch`; a pinned
+   window is not a database snapshot, so the facts witness could disagree
+   with the artifacts of its own run, and the duplicated fetch block could
+   drift from `run_one`. Fixed: `run_one` gains a dev-only `on_facts`
+   observer (threaded through `run_batch`'s opts; production callers never
+   pass it; cache hits skip it and the harness never uses a cache). The
+   harness now writes the EXACT facts objects the run computed, and fails
+   loudly if any successful result produced none. Verified: the batch's
+   observer-captured facts are byte-identical to the re-fetch era's
+   (same-day), and the scoped summary-only shape emits facts through the
+   analysis-only branch (38 files).
+2. **Documentation cleanups (non-blocking):** `summary_facts` and
+   `provenance` comments now attribute the plausibility screen and the
+   EDU override to `compute/analyze`; `narrative`'s STORY_KEYS comment no
+   longer describes the (now named-error) lookup as unguarded.
+
+Codex additionally verified: the extracted analysis body is
+line-for-line identical after the three documented renames, compute has
+no render dependency, and the summary-only output predicates preserve
+every existing combination.
