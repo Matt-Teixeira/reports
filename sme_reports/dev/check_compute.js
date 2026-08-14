@@ -693,6 +693,40 @@ const row = (h, over = {}) => ({
   assert.strictEqual(blank.helium.low_high, 40, "the limit itself still resolves");
 }
 
+// ---- analyze_system public surface (phase 7) -------------------------------
+// The analysis half of the old build_render_model, extracted verbatim. The
+// render model now wraps it; this pins the extracted surface directly: the
+// facts shape, the views (chart-point) shape, and the BYTE-EXACT no-data
+// error message that fleet_model's failure grouping pattern-matches.
+{
+  const { analyze_system } = require("../compute/analyze");
+  const { VENDORS } = require("../vendors");
+  const { DateTime } = require("luxon");
+  const window = {
+    start: DateTime.fromMillis(T0, { zone: "utc" }),
+    end: DateTime.fromMillis(T0 + 48 * HOUR, { zone: "utc" })
+  };
+  const series = Array.from({ length: 48 }, (_, h) => row(h));
+  const { facts, views } = analyze_system({
+    system_id: "SME99999",
+    vendor: VENDORS.PHILIPS,
+    series,
+    window
+  });
+  assert.strictEqual(facts.archetype, "stable_healthy");
+  assert.strictEqual(facts.compressor_source, "cryo_comp_malf_value");
+  assert.strictEqual(facts.thr.source, "oem_constant", "null thresholds default to the OEM fallback");
+  assert.strictEqual(facts.units.pressure, "mbar", "null units default to vendor units");
+  assert.strictEqual(facts.window_start, T0);
+  assert.strictEqual(views.p_points.length, 48, "screened chart points ride views");
+  assert.strictEqual(facts.chart_mode, views.mode, "mode is a fact AND a view");
+  assert.throws(
+    () => analyze_system({ system_id: "SME99999", vendor: VENDORS.PHILIPS, series: [], window }),
+    /^Error: no PHILIPS monitor data for SME99999 in the requested period$/,
+    "the no-data message is byte-exact — fleet failure grouping matches it"
+  );
+}
+
 // ---- compressor provenance is a closed registry (round-2 F3) ---------------
 {
   const { source_kind, is_inferred } = require("../compute/provenance");
