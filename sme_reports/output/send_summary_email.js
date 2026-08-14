@@ -17,6 +17,7 @@ const {
   is_attention,
   is_urgent,
   is_data_issue,
+  is_limited,
   condition_cell_record
 } = require("../conditions");
 
@@ -56,15 +57,23 @@ const send_summary_email = async (
   const attention = sorted.filter((r) => is_attention(facts_of(r)));
   const urgent = attention.filter((r) => is_urgent(facts_of(r)));
   const data_issues = sorted.filter((r) => is_data_issue(facts_of(r)));
+  // Limited-coverage systems (identity + EDU, no analysis) are counted
+  // BESIDE the analyzed tally, never in it — same stance as the fleet
+  // document's cover.
+  const limited = sorted.filter((r) => is_limited(facts_of(r)));
+  const analyzed_count = results.length - limited.length;
 
   const tiers =
     `<b style="color:${COLORS.amber};">${attention.length} need${attention.length === 1 ? "s" : ""} attention</b>` +
     (urgent.length ? `, <b style="color:${COLORS.red};">${urgent.length} urgent</b>` : "") +
     (data_issues.length ? `, <b style="color:${COLORS.grey};">${data_issues.length} data issue${data_issues.length === 1 ? "" : "s"}</b>` : "");
+  const limited_clause = limited.length
+    ? `, <b style="color:${COLORS.grey};">${limited.length} limited coverage</b>`
+    : "";
   const headline =
     attention.length || data_issues.length
-      ? `<b>${results.length}</b> systems analyzed — ${tiers}.`
-      : `<b>${results.length}</b> systems analyzed — no systems need attention.`;
+      ? `<b>${analyzed_count}</b> systems analyzed — ${tiers}${limited_clause}.`
+      : `<b>${analyzed_count}</b> systems analyzed — no systems need attention${limited_clause}.`;
 
   const columns = [
     { label: "SYSTEM", width: "90" },
@@ -107,9 +116,14 @@ const send_summary_email = async (
     const doc_name = scope_label
       ? `Magnet Health Summary — ${esc(scope_label)}`
       : "Fleet Magnet Health Summary";
+    // "every system below" is a per-channel claim the limited rows cannot
+    // carry — with any present, the sentence names the split instead.
+    const coverage = limited.length
+      ? `carries current helium, primary metric, and compressor state for every analyzed system below; ${limited.length} limited-coverage system${limited.length === 1 ? "" : "s"} carr${limited.length === 1 ? "ies" : "y"} environmental readings only.`
+      : `carries current helium, primary metric, and compressor state for every system below.`;
     body_html =
       `<p style="${FONT}font-size:13px;color:${COLORS.navy};margin:0 0 12px 0;">` +
-      `The attached <b>${doc_name}</b> carries current helium, primary metric, and compressor state for every system below.</p>` +
+      `The attached <b>${doc_name}</b> ${coverage}</p>` +
       body_html;
   } else if (fleet_error) {
     body_html = fleet_failure_note(scope_label, fleet_error) + body_html;

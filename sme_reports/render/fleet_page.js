@@ -409,10 +409,18 @@ const edu_cell = (r, ch, sfx, decimals) => {
     `<div class="m">${fmt.num(ch.min, decimals)}–${fmt.num(ch.max, decimals)}</div></td>`
   );
 };
-const cell_edu_room = (r) => edu_cell(r, r.edu.room_temp, " °F", 1);
-const cell_edu_humidity = (r) => edu_cell(r, r.edu.humidity, "%", 0);
-const cell_edu_probe_0 = (r) => edu_cell(r, r.edu.probe_0, " °F", 1);
-const cell_edu_probe_1 = (r) => edu_cell(r, r.edu.probe_1, " °F", 1);
+// r.edu can be null in the LIMITED section (a limited system without an
+// EDU still gets a row — its identity is the content); every EDU-section
+// member has the block by construction.
+const cell_edu_room = (r) => edu_cell(r, r.edu && r.edu.room_temp, " °F", 1);
+const cell_edu_humidity = (r) => edu_cell(r, r.edu && r.edu.humidity, "%", 0);
+const cell_edu_probe_0 = (r) => edu_cell(r, r.edu && r.edu.probe_0, " °F", 1);
+const cell_edu_probe_1 = (r) => edu_cell(r, r.edu && r.edu.probe_1, " °F", 1);
+
+// LIMITED-COVERAGE section only: the manufacturer we identified the system
+// as (the classify_manufacturer allowlist label). A statement of identity,
+// never a judgment — plain ink, no color.
+const cell_manufacturer = (r) => `<td>${esc(r.limited_label || r.manufacturer)}</td>`;
 
 const CELLS = {
   // The SME id (and the customer-id line, up to its font floor — see
@@ -436,7 +444,8 @@ const CELLS = {
   edu_room: { label: "ROOM TEMP", render: cell_edu_room, numeric: true },
   edu_humidity: { label: "HUMIDITY", render: cell_edu_humidity, numeric: true },
   edu_probe_0: { label: "PROBE 0", render: cell_edu_probe_0, numeric: true },
-  edu_probe_1: { label: "PROBE 1", render: cell_edu_probe_1, numeric: true }
+  edu_probe_1: { label: "PROBE 1", render: cell_edu_probe_1, numeric: true },
+  manufacturer: { label: "MANUFACTURER", render: cell_manufacturer }
 };
 
 // Column widths, PER SECTION, in px of the 7.5in (720px) content column —
@@ -467,7 +476,12 @@ const SECTION_W = {
   // room than any vendor section even after the channel columns were sized
   // for their widest STALE line ("118.2 \u00b0F \u00b7 Aug 26", 93.3px measured) —
   // the dimmed date rides beside the value so the range line survives.
-  EDU: { system: 111, site: 189, edu_room: 105, edu_humidity: 105, edu_probe_0: 105, edu_probe_1: 105 }
+  EDU: { system: 111, site: 189, edu_room: 105, edu_humidity: 105, edu_probe_0: 105, edu_probe_1: 105 },
+  // The EDU layout plus a MANUFACTURER column, paid for out of SITE. The
+  // manufacturer need is its 7pt header ("MANUFACTURER", 81px measured via
+  // dev/colbudget.js against a rendered limited section — wider than any
+  // allowlist name's 8pt cell; "Americomp" is the widest content).
+  LIMITED: { system: 111, site: 97, manufacturer: 92, edu_room: 105, edu_humidity: 105, edu_probe_0: 105, edu_probe_1: 105 }
 };
 
 // td horizontal padding both sides, matching the tbody td CSS above.
@@ -568,9 +582,17 @@ const failures_table = (rows) =>
   `\n</tbody></table>`;
 
 const overview_body = (vm, rows, first) => {
+  // Limited-coverage systems are counted BESIDE the analyzed tally, never
+  // inside it — "analyzed" is a claim the limited path deliberately does
+  // not make.
+  const limited_clause = vm.limited_count
+    ? `${vm.total ? ", " : " — "}<b style="color:${COLORS.grey};">${vm.limited_count} limited coverage</b>`
+    : "";
   const lead = vm.total
-    ? `<b>${vm.total}</b> systems analyzed — <b style="color:${vm.attention_count ? COLORS.amber : COLORS.teal};">${vm.attention_count} need${vm.attention_count === 1 ? "s" : ""} attention</b>${vm.urgent_count ? `, <b style="color:${COLORS.red};">${vm.urgent_count} urgent</b>` : ""}${vm.data_issue_count ? `, <b style="color:${COLORS.grey};">${vm.data_issue_count} data issue${vm.data_issue_count === 1 ? "" : "s"}</b>` : ""}.`
-    : `<b>No systems produced data</b> in this period.`;
+    ? `<b>${vm.total}</b> systems analyzed — <b style="color:${vm.attention_count ? COLORS.amber : COLORS.teal};">${vm.attention_count} need${vm.attention_count === 1 ? "s" : ""} attention</b>${vm.urgent_count ? `, <b style="color:${COLORS.red};">${vm.urgent_count} urgent</b>` : ""}${vm.data_issue_count ? `, <b style="color:${COLORS.grey};">${vm.data_issue_count} data issue${vm.data_issue_count === 1 ? "" : "s"}</b>` : ""}${limited_clause}.`
+    : vm.limited_count
+      ? `<b>No systems analyzed</b> in this period${limited_clause}.`
+      : `<b>No systems produced data</b> in this period.`;
 
   const rollup = vm.condition_rollup
     .map(
@@ -597,6 +619,7 @@ const overview_body = (vm, rows, first) => {
         esc(vm.window_span),
         `${vm.scope.detail.systems} system${vm.scope.detail.systems === 1 ? "" : "s"} in scope`,
         `${vm.total} analyzed`,
+        vm.limited_count ? `${vm.limited_count} limited coverage` : null,
         vm.failure_count ? `${vm.failure_count} failed` : null,
         vm.excluded ? `${vm.excluded.ids.length} excluded` : null,
         `${vm.scope.detail.sites} site${vm.scope.detail.sites === 1 ? "" : "s"}`,
@@ -604,7 +627,7 @@ const overview_body = (vm, rows, first) => {
       ]
         .filter(Boolean)
         .join(" · ")
-    : `${esc(vm.window_span)} · ${vm.total} systems · ${esc(vendors || "no vendor sections")}${vm.excluded ? ` · ${vm.excluded.ids.length} excluded` : ""}`;
+    : `${esc(vm.window_span)} · ${vm.total} systems${vm.limited_count ? ` · ${vm.limited_count} limited coverage` : ""} · ${esc(vendors || "no vendor sections")}${vm.excluded ? ` · ${vm.excluded.ids.length} excluded` : ""}`;
   let body = first
     ? `<h1>${esc(vm.title)}</h1>` +
       `<div class="sub">${sub}</div>` +
@@ -639,6 +662,7 @@ const LEGEND = `<div class="legend pin"><div class="lg-cap">LEGEND</div><div cla
 <div><b>HELIUM · COLDHD · CABINET</b> — judged against their own thresholds; red or amber marks a reading past them</div>
 <div><b>ENVIRONMENTAL (EDU)</b> — room/probe temperature and humidity from the site's EDU hardware; no alert limits are configured, so readings are stated, not judged; readings outside physical bounds (e.g. open-sensor defaults) are excluded; a dimmed value paired with a date is the sensor's last reading, from that day — the channel stopped reporting early; its range still covers the days it ran</div>
 <div><b>urgent</b> — wrong right now (unrecovered stop, live breach, quench); each system's full one-page brief is generated separately</div>
+<div><b>LIMITED COVERAGE</b> — identified systems with no magnet monitoring adapter (e.g. Canon, Hitachi); identity and environmental readings are stated, nothing is analyzed or judged, and no per-system brief exists</div>
 </div></div>`;
 
 // Monitoring problems, not magnet problems: dead compressor signals and
@@ -725,6 +749,24 @@ const build_fleet_page = (vm) => {
       pages.push(
         `<h2>${esc(vm.edu_section.title).toUpperCase()}${count} <span class="n">· °F / Relative Humidity</span>${cont}</h2>` +
           section_table(vm.edu_section, rows)
+      );
+    });
+  }
+
+  // Limited coverage closes the data after EDU: identified systems with no
+  // magnet data adapter — identity, manufacturer, and environmental
+  // readings, stated and never judged (no condition or limit column
+  // exists in this table).
+  if (vm.limited_section) {
+    vm.limited_section.pages.forEach((rows, i) => {
+      const cont = i > 0 ? ` <span class="n">(cont.)</span>` : "";
+      const count =
+        i === 0
+          ? ` <span class="n">— ${vm.limited_section.count} system${vm.limited_section.count === 1 ? "" : "s"}</span>`
+          : "";
+      pages.push(
+        `<h2>${esc(vm.limited_section.title).toUpperCase()}${count} <span class="n">· environmental readings only — no magnet monitoring adapter</span>${cont}</h2>` +
+          section_table(vm.limited_section, rows)
       );
     });
   }

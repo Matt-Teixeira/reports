@@ -44,7 +44,12 @@ const NEEDS = {
   GE: { system: 70, condition: 110, primary: 65, line: 74, helium: 77, coldhead: 40, shield: 41, compressor: 78 },
   SIEMENS: { system: 100, condition: 110, primary: 65, line: 74, helium: 70, coldhead: 40, compressor: 78 },
   SIEMENS_NON_TIM: { system: 100, condition: 110, primary: 65, line: 74, helium: 70, cabinet: 41, compressor: 78 },
-  EDU: { system: 100, edu_room: 94, edu_humidity: 94, edu_probe_0: 94, edu_probe_1: 94 }
+  EDU: { system: 100, edu_room: 94, edu_humidity: 94, edu_probe_0: 94, edu_probe_1: 94 },
+  // manufacturer is sized for its HEADER ("MANUFACTURER" at the 7pt header
+  // face, 81px measured via colbudget against a rendered limited section) —
+  // wider than any allowlist name's 8pt cell ("Americomp" is the widest
+  // content at ~45px).
+  LIMITED: { system: 100, manufacturer: 81, edu_room: 94, edu_humidity: 94, edu_probe_0: 94, edu_probe_1: 94 }
 };
 
 // Column sets are DERIVED from fleet_model.js (SECTIONS + EDU_COLUMNS), the
@@ -55,10 +60,11 @@ const NEEDS = {
 // tautological. check_fleet asserts NEEDS covers exactly the derived
 // columns, so a column added to SECTIONS without a measured need fails at
 // check time.
-const { SECTIONS, EDU_COLUMNS } = require("../render/fleet_model");
+const { SECTIONS, EDU_COLUMNS, LIMITED_COLUMNS } = require("../render/fleet_model");
 const SETS = Object.fromEntries([
   ...SECTIONS.map((s) => [s.vendor_key, s.columns]),
-  ["EDU", EDU_COLUMNS]
+  ["EDU", EDU_COLUMNS],
+  ["LIMITED", LIMITED_COLUMNS]
 ]);
 
 const solve = () => {

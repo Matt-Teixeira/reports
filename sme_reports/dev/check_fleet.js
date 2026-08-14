@@ -1216,6 +1216,42 @@ const rec = (over = {}) => ({
   }
 }
 
+// --- limited-coverage records are stated, never judged (phases 10-13) -------
+{
+  const { build_limited_record } = require("../compute/summary_facts");
+  const { is_limited, is_attention, is_urgent, is_data_issue, condition_cell_record, attention_sort } = require("../conditions");
+  const { DateTime } = require("luxon");
+  const win = {
+    start: DateTime.fromMillis(T0, { zone: "utc" }),
+    end: DateTime.fromMillis(W_END, { zone: "utc" })
+  };
+  const r = build_limited_record({
+    identity: {
+      system_id: "SME16940", cus_sys_id: "", site_name: "Site", customer_name: "Cust",
+      city: "X", state: "OK", manufacturer: "Canon", modality: "MRI"
+    },
+    label: "Canon",
+    window: win,
+    edu_facts: null
+  });
+  assert.strictEqual(r.assessment_status, "limited_coverage");
+  assert.strictEqual(r.vendor_key, "LIMITED");
+  assert.strictEqual(r.cus_sys_id, null, "empty customer id null-normalized like assessed records");
+  assert.ok(!("archetype" in r), "a limited record carries NO archetype key to grade");
+  assert.strictEqual(is_limited(r), true);
+  assert.strictEqual(is_attention(r), false, "limited is never attention");
+  assert.strictEqual(is_urgent(r), false, "limited is never urgent");
+  assert.strictEqual(is_data_issue(r), false, "limited is never a data issue");
+  assert.ok(
+    condition_cell_record(r).includes("limited coverage"),
+    "the email condition cell states limited coverage, not 'undefined'"
+  );
+  assert.ok(!condition_cell_record(r).includes("ᶜ"), "a statement carries no conclusion mark");
+  // Sorting beside assessed records must not float limited rows upward.
+  const stable = { archetype: "stable_healthy" };
+  assert.ok(attention_sort(stable, r) < 0, "limited sorts after even a stable system");
+}
+
 // --- a failed summary document is stated, never a quiet absence (round-2 F1)
 {
   const { fleet_failure_note } = require("../output/email_theme");
@@ -1350,15 +1386,20 @@ const rec = (over = {}) => ({
   // The EDU section's column set is built inline in build_fleet_model, so
   // its width row is asserted here by name rather than via SECTIONS.
   {
-    const edu_cols = ["system", "site", "edu_room", "edu_humidity", "edu_probe_0", "edu_probe_1"];
-    const w = SECTION_W.EDU;
-    for (const c of edu_cols)
-      assert.ok(Number.isFinite(w[c]), `EDU SECTION_W missing ${c}`);
-    assert.strictEqual(
-      edu_cols.reduce((n, c) => n + w[c], 0),
-      720,
-      "EDU SECTION_W must sum to the 720px content column"
-    );
+    const { EDU_COLUMNS, LIMITED_COLUMNS } = require("../render/fleet_model");
+    for (const [name, cols] of [
+      ["EDU", EDU_COLUMNS],
+      ["LIMITED", LIMITED_COLUMNS]
+    ]) {
+      const w = SECTION_W[name];
+      for (const c of cols)
+        assert.ok(Number.isFinite(w[c]), `${name} SECTION_W missing ${c}`);
+      assert.strictEqual(
+        cols.reduce((n, c) => n + w[c], 0),
+        720,
+        `${name} SECTION_W must sum to the 720px content column`
+      );
+    }
   }
 
   // The legend ties the pair together and the other columns to their own
@@ -1914,8 +1955,88 @@ const rec = (over = {}) => ({
     message: `no PHILIPS monitor data for SME${String(90000 + i)} in the requested window`
   }));
 
-  const vm = build_fleet_model(records, failures);
-  assert.strictEqual(vm.total, 163);
+  // Limited-coverage rows (build_limited_record's shape): identified
+  // manufacturers with no magnet data adapter — mirroring live shapes
+  // (SME16940 is a Canon with a live EDU). One with a full EDU, one with
+  // none at all (identity is the row's whole content — every EDU cell
+  // dashes), one whose room channel died early (stale — dimmed with its
+  // date, the EDU section's exact rule). They must land in the LIMITED
+  // section only, count BESIDE the analyzed tally, carry no judgments,
+  // and never join the EDU section.
+  const limited_record = (over) => ({
+    assessment_status: "limited_coverage",
+    system_id: "SME97001",
+    cus_sys_id: null,
+    site_name: "Limited Test Imaging Center",
+    customer_name: "TestCo",
+    city: "Tulsa",
+    state: "OK",
+    manufacturer: "Canon",
+    modality: "MRI",
+    limited_label: "Canon",
+    vendor_key: "LIMITED",
+    edu: null,
+    window_start: T0,
+    window_end: W_END,
+    window_hours: 720,
+    ...over
+  });
+  const limited_records = [
+    limited_record({
+      system_id: "SME97001",
+      cus_sys_id: "CT-MRI-7",
+      edu: {
+        source: "edu.v2",
+        captures: 512,
+        rejected: 3,
+        room_temp: { last: 71.6, last_t: FRESH_T, min: 66.2, max: 78.9 },
+        humidity: { last: 41, last_t: FRESH_T, min: 30, max: 55 },
+        probe_0: { last: 64.4, last_t: FRESH_T, min: 60.1, max: 70.3 },
+        probe_1: null
+      }
+    }),
+    limited_record({
+      system_id: "SME97002",
+      manufacturer: "Hitachi Medical",
+      limited_label: "Hitachi Medical",
+      site_name: "Hitachi Host Hospital"
+    }),
+    limited_record({
+      system_id: "SME97003",
+      manufacturer: "Americomp",
+      limited_label: "Americomp",
+      site_name: "Americomp Site",
+      edu: {
+        source: "edu.v3",
+        captures: 88,
+        rejected: 0,
+        room_temp: { last: 84.2, last_t: W_END - 6 * 24 * HOUR, min: 66.0, max: 84.2 },
+        humidity: null,
+        probe_0: null,
+        probe_1: null
+      }
+    })
+  ];
+
+  const vm = build_fleet_model([...records, ...limited_records], failures);
+  assert.strictEqual(vm.total, 163, "limited rows count BESIDE the analyzed tally, never in it");
+  assert.strictEqual(vm.limited_count, 3);
+  assert.strictEqual(vm.limited_section.count, 3);
+  assert.ok(
+    !vm.limited_section.pages.flat().some((r) => r.archetype),
+    "no limited row carries an archetype"
+  );
+  assert.ok(
+    !vm.attention.some((r) => r.assessment_status === "limited_coverage") &&
+      !vm.data_issues.some((r) => r.assessment_status === "limited_coverage"),
+    "limited rows never reach attention or data-issue lists"
+  );
+  // Sorted by manufacturer then id — no judgments exist to rank by.
+  assert.deepStrictEqual(
+    vm.limited_section.pages.flat().map((r) => r.system_id),
+    ["SME97003", "SME97001", "SME97002"],
+    "limited section sorts by manufacturer, then system id"
+  );
   assert.strictEqual(vm.failure_count, 17);
   assert.strictEqual(vm.failures.length, 1, "17 identical no-data failures collapse to one row");
 
@@ -1924,7 +2045,8 @@ const rec = (over = {}) => ({
     vm.data_issue_pages.length +
     vm.failure_pages.length +
     vm.sections.reduce((n, s) => n + s.pages.length, 0) +
-    (vm.edu_section ? vm.edu_section.pages.length : 0);
+    (vm.edu_section ? vm.edu_section.pages.length : 0) +
+    (vm.limited_section ? vm.limited_section.pages.length : 0);
   assert.strictEqual(vm.page_count, expected_pages);
   assert.strictEqual(
     vm.sections.reduce((n, s) => n + s.count, 0),
@@ -2006,6 +2128,32 @@ const rec = (over = {}) => ({
   // Continuation pages repeat their section heading.
   assert.ok(html.includes("(cont.)"), "multi-page sections mark continuations");
   assert.ok(html.includes("ENVIRONMENTAL (EDU)"), "EDU section heading present");
+  // Limited section: present, stated-only, after EDU, and never leaking
+  // its systems anywhere else in the document.
+  assert.ok(
+    html.includes("LIMITED COVERAGE — OTHER MANUFACTURERS"),
+    "limited section heading present"
+  );
+  assert.ok(
+    html.indexOf("LIMITED COVERAGE — OTHER MANUFACTURERS") >
+      html.indexOf("ENVIRONMENTAL (EDU)"),
+    "limited section renders after the EDU section"
+  );
+  for (const id of ["SME97001", "SME97002", "SME97003"])
+    assert.strictEqual(
+      html.split(id).length - 1,
+      1,
+      `${id} appears exactly once — the limited section and nowhere else`
+    );
+  assert.ok(
+    html.includes("3 limited coverage"),
+    "the cover lead counts limited systems beside the analyzed tally"
+  );
+  assert.ok(html.includes(">Hitachi Medical</td>"), "manufacturer cell renders in full");
+  assert.ok(
+    html.includes("84.2 °F · Aug 25"),
+    "a limited row's stale EDU channel dims with its date — the EDU section's exact rule"
+  );
   // The stale room cell pairs its date with the value AND keeps its range —
   // staleness changes the claim of currency, never hides the record.
   assert.ok(html.includes("118.2 °F · Aug 26"), "stale EDU channel carries its date beside the value");

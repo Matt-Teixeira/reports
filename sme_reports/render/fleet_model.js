@@ -7,6 +7,7 @@ const {
   is_attention,
   is_urgent,
   is_data_issue,
+  is_limited,
   effective_status,
   STATUS_LABELS,
   condition_label,
@@ -104,6 +105,11 @@ const SECTIONS = [
 // check fixtures) reads ONE source. The section itself is built inline in
 // build_fleet_model because its membership is cross-vendor.
 const EDU_COLUMNS = ["system", "site", "edu_room", "edu_humidity", "edu_probe_0", "edu_probe_1"];
+
+// The LIMITED-COVERAGE section's column set: identity, the manufacturer,
+// and the four stated EDU channels. Deliberately NO condition, limit, or
+// judgment column — a limited system is stated, never judged.
+const LIMITED_COLUMNS = ["system", "site", "manufacturer", "edu_room", "edu_humidity", "edu_probe_0", "edu_probe_1"];
 
 // The alert limit a section's percentages are measured against. Thresholds
 // come from alert.models per system, but in practice they are near-uniform
@@ -239,6 +245,10 @@ const customer_failure_reason = (message) => {
     return m.replace(/^no [A-Z_]+ monitor data\b/, "no monitor data received");
   if (/unsupported manufacturer/i.test(m))
     return "unsupported system configuration";
+  // The limited-coverage brief refusal (index.js run_one): a per-system
+  // brief was requested for a system that has none by design.
+  if (/limited coverage/i.test(m))
+    return "limited coverage — no per-system report exists; included in summary documents only";
   return "report could not be generated";
 };
 
@@ -322,7 +332,21 @@ const data_issue_readings = (r) => {
 };
 
 const build_fleet_model = (records, failures, meta = {}) => {
-  const rows = [...(records || [])];
+  const all_rows = [...(records || [])];
+  // LIMITED-COVERAGE partition (assessment_status): limited rows carry
+  // identity + EDU statements only — no archetype, no judgments — and
+  // belong to exactly one place, the LIMITED section at the document's
+  // tail. Everything below this split (attention, urgency, rollups,
+  // vendor sections, the EDU section and its members) is the ASSESSED
+  // universe, so a limited row can never leak into a judged surface.
+  const limited_rows = all_rows
+    .filter((r) => is_limited(r))
+    .sort(
+      (a, b) =>
+        String(a.manufacturer).localeCompare(String(b.manufacturer)) ||
+        String(a.system_id).localeCompare(String(b.system_id))
+    );
+  const rows = all_rows.filter((r) => !is_limited(r));
   const failed = failures || [];
   // A scoped document (meta.scope = {label, detail} from scope.js) is the
   // customer-facing variant: it titles itself by the scope, states the
@@ -432,6 +456,31 @@ const build_fleet_model = (records, failures, meta = {}) => {
       }
     : null;
 
+  // LIMITED-COVERAGE section: identified systems we carry no magnet data
+  // adapter for (classify_manufacturer allowlist). Stated, never judged —
+  // identity, manufacturer, and EDU environmental readings only; no
+  // condition, limit, or judgment column exists in this table. Its EDU
+  // readings live HERE, not in the EDU section: the EDU reserve ladder
+  // rests on "EDU members are a subset of the vendor-sectioned rows", and
+  // limited rows are in no vendor section. Sorted by manufacturer then
+  // system id (no judgments exist to rank by).
+  {
+    const stray = limited_rows.filter((r) => r.vendor_key !== "LIMITED");
+    if (stray.length)
+      throw new Error(
+        `limited-coverage rows must carry vendor_key LIMITED: ${stray.map((r) => `${r.system_id} ("${r.vendor_key}")`).join(", ")}`
+      );
+  }
+  const limited_section = limited_rows.length
+    ? {
+        vendor_key: "LIMITED",
+        title: "Limited coverage — other manufacturers",
+        columns: LIMITED_COLUMNS,
+        count: limited_rows.length,
+        pages: chunk_rows(limited_rows, ROWS_FIRST_PAGE, ROWS_PER_PAGE)
+      }
+    : null;
+
   const vendor_rollup = sections.map((s) => ({ title: s.title, count: s.count }));
 
   // The overview paginates too. The attention list is the actionable part of
@@ -464,14 +513,16 @@ const build_fleet_model = (records, failures, meta = {}) => {
 
   // Reserve the legend's room on whichever group ENDS the document. Page
   // order in fleet_page.js is overview → data issues → failures → exclusions
-  // → vendor sections → EDU section, so the EDU section claims the tail
-  // whenever it exists (and vendor sections otherwise — an EDU section can
-  // only exist when vendor sections do, since its members are a subset of
-  // the analyzed rows). The exclusion statement, when it takes its own page,
-  // is a heading plus a loader-bounded block (≤100 ids, note ≤240 chars —
-  // measured against the pinned legend in check_fleet), so it ends the
-  // document without needing the reservation.
-  if (edu_section) {
+  // → vendor sections → EDU section → LIMITED section, so the limited
+  // section claims the tail whenever it exists, then EDU (whose members are
+  // a subset of the vendor-sectioned rows, so it can only exist when vendor
+  // sections do), then the last vendor section. The exclusion statement,
+  // when it takes its own page, is a heading plus a loader-bounded block
+  // (≤100 ids, note ≤240 chars — measured against the pinned legend in
+  // check_fleet), so it ends the document without needing the reservation.
+  if (limited_section) {
+    limited_section.pages = reserve_tail(limited_section.pages, LEGEND_ROWS);
+  } else if (edu_section) {
     edu_section.pages = reserve_tail(edu_section.pages, LEGEND_ROWS);
   } else if (sections.length) {
     const last = sections[sections.length - 1];
@@ -489,7 +540,8 @@ const build_fleet_model = (records, failures, meta = {}) => {
     failure_pages.length +
     exclusion_pages +
     sections.reduce((n, s) => n + s.pages.length, 0) +
-    (edu_section ? edu_section.pages.length : 0);
+    (edu_section ? edu_section.pages.length : 0) +
+    (limited_section ? limited_section.pages.length : 0);
 
   const window_start = rows.length ? Math.min(...rows.map((r) => r.window_start)) : null;
   const window_end = rows.length ? Math.max(...rows.map((r) => r.window_end)) : null;
@@ -514,6 +566,8 @@ const build_fleet_model = (records, failures, meta = {}) => {
     vendor_rollup,
     sections,
     edu_section,
+    limited_section,
+    limited_count: limited_rows.length,
     overview_pages,
     data_issues,
     data_issue_count: data_issues.length,
@@ -547,6 +601,7 @@ module.exports = {
   reserve_tail,
   SECTIONS,
   EDU_COLUMNS,
+  LIMITED_COLUMNS,
   ROWS_PER_PAGE,
   ROWS_FIRST_PAGE,
   ATTENTION_FIRST_PAGE,
