@@ -26,14 +26,26 @@ const PLAUSIBLE = {
 
 const outside = (v, b) => v !== null && v !== undefined && (v < b.min || v > b.max);
 
+// Fail closed on unrecognized units: bounds are per-unit physics, and
+// defaulting (PSI for pressure, LTRS for helium, as this dispatch once did)
+// would screen a new unit's readings against another unit's physics —
+// silently rejecting good data or admitting garbage. The recognized sets
+// are the complete LIVE vocabulary (mag.*_units + alert.models, surveyed
+// 2026-08-14: K/PSI/mBar pressure, %/LTRS helium; "mBar" is display-
+// normalized to "mbar" before reaching here — a raw "mBar" indicates a
+// normalization bypass and fails too).
 const primary_bounds = (units) => {
   if (units === "mbar") return PLAUSIBLE.pressure_mbar;
   if (units === "K") return PLAUSIBLE.primary_k;
-  return PLAUSIBLE.pressure_psi;
+  if (units === "PSI") return PLAUSIBLE.pressure_psi;
+  throw new Error(`no plausibility bounds for primary-metric units "${units}" (known: mbar, PSI, K)`);
 };
 
-const helium_bounds = (units) =>
-  units === "%" ? PLAUSIBLE.helium_pct : PLAUSIBLE.helium_ltrs;
+const helium_bounds = (units) => {
+  if (units === "%") return PLAUSIBLE.helium_pct;
+  if (units === "LTRS") return PLAUSIBLE.helium_ltrs;
+  throw new Error(`no plausibility bounds for helium units "${units}" (known: %, LTRS)`);
+};
 
 // Which channels' LAST RAW (pre-screen) reading is outside its bounds — the
 // shared basis for the greyed-raw ‡ treatment on the fleet columns and the

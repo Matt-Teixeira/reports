@@ -675,4 +675,27 @@ const row = (h, over = {}) => ({
   );
 }
 
+// ---- plausibility-bounds dispatch fails closed (phase 2) -------------------
+// Bounds are per-unit physics; defaulting an unknown unit to another unit's
+// bounds silently rejects good data or admits garbage.
+{
+  const { primary_bounds, helium_bounds } = require("../compute/plausible");
+  assert.throws(() => primary_bounds("furlongs"), /no plausibility bounds/);
+  assert.throws(() => primary_bounds(null), /no plausibility bounds/);
+  assert.throws(
+    () => primary_bounds("mBar"),
+    /no plausibility bounds/,
+    "raw mBar reaching bounds means the display normalization was bypassed"
+  );
+  assert.throws(() => helium_bounds("kg"), /no plausibility bounds/);
+  assert.throws(() => helium_bounds(null), /no plausibility bounds/);
+  // The complete live vocabulary (mag.*_units + alert.models, surveyed
+  // 2026-08-14) still resolves.
+  assert.strictEqual(primary_bounds("mbar").max, 10000);
+  assert.strictEqual(primary_bounds("PSI").max, 100);
+  assert.strictEqual(primary_bounds("K").max, 320);
+  assert.strictEqual(helium_bounds("%").max, 100);
+  assert.strictEqual(helium_bounds("LTRS").max, 5000);
+}
+
 console.log("check_compute: all assertions passed");
