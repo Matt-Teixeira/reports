@@ -11,6 +11,7 @@ const {
 } = require("../conditions");
 const { he_suffix } = require("./tiles");
 const { limit_key, edu_channel_fresh } = require("./fleet_model");
+const { is_inferred } = require("../compute/provenance");
 
 // Renders the fleet summary view-model to a multi-page HTML document.
 // Interpolation only — all decisions live in fleet_model.js.
@@ -368,7 +369,7 @@ const cell_compressor = (r) => {
   // GE systems without an EDU have their state inferred from the coldhead —
   // per-row, since one GE section now mixes measured (EDU vibration) and
   // inferred systems.
-  const mark = r.compressor_source === "coldhead_ruo_value" ? "ᶜ" : "";
+  const mark = is_inferred(r.compressor_source) ? "ᶜ" : "";
   const color = r.compressor_on === false ? COLORS.red : COLORS.teal;
   // A left-censored stop was never observed starting; claiming hours would
   // overclaim, so the cell says what we know: off for the whole window.

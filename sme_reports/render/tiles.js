@@ -1,5 +1,7 @@
 const fmt = require("./fmt");
 const { STATUS_LABELS } = require("../conditions");
+const { STALE_MS } = require("../compute/staleness");
+const { is_inferred } = require("../compute/provenance");
 
 // Builds the 5 KPI tile view-models {cls, k, v, s} for the vendor's tile set.
 // Status classes: good (teal) / warn (amber) / bad (red) / ink (navy).
@@ -60,7 +62,7 @@ const BUILDERS = {
     // The ᶜ provenance mark (RULES.md §6): a coldhead-inferred state is a
     // conclusion, not a reading — every ON/OFF this tile prints from that
     // source carries the mark, exactly like the fleet's compressor cells.
-    const c = f.compressor_source === "coldhead_ruo_value" ? "ᶜ" : "";
+    const c = is_inferred(f.compressor_source) ? "ᶜ" : "";
     // Distinct clustered events beyond the primary; "other", not "earlier" —
     // they can fall on either side of it.
     const others = (f.compressor_events || []).length - 1;
@@ -326,7 +328,8 @@ const BUILDERS = {
 //    entirely; missing a real quench is the costlier error.
 const NOT_JUDGED = "sensor's claim — not judged";
 const OUT_OF_BOUNDS = "outside plausible bounds — not judged";
-const STALE_MS = 24 * 3600000;
+// STALE_MS comes from compute/staleness — one 24h line shared with the
+// narrative's "stopped <day>" clause and the fleet EDU section.
 
 // The channel behind each now-value tile: which last-raw flag greys it, how
 // its raw value renders, and where its newest plausible reading lives.

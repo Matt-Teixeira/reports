@@ -31,6 +31,7 @@ const {
 } = require("../compute/plausible");
 const { STATUS_LABELS } = require("../conditions");
 const { fallback_thresholds } = require("../vendors");
+const { is_inferred } = require("../compute/provenance");
 const {
   pressure_domain,
   padded_domain
@@ -155,8 +156,7 @@ const build_render_model = ({
     .filter((r) => r.comp_vib !== null)
     .map((r) => ({ t: r.t, compressor_on: r.comp_vib }));
   const vendor_is_edu = vendor.compressor.source === "edu_comp_vib";
-  const vendor_is_inference =
-    vendor.compressor.source === "coldhead_ruo_value";
+  const vendor_is_inference = is_inferred(vendor.compressor.source);
   // An inferred state is only as good as the reading it was inferred FROM.
   // The normalizer derives GE compressor_on from the RAW coldhead, so a
   // 382.8 K garbage reading — rejected from every metric by the screen —
@@ -253,14 +253,31 @@ const build_render_model = ({
     edu_rejected[name] = points.length - kept.length;
     return stats_for(kept);
   };
+  // Channel stats are computed BEFORE the facts literal: the rejected
+  // totals read the accumulator the four calls mutate, and having those
+  // calls inside the literal made correctness hang on property evaluation
+  // order — a cosmetic reorder (alphabetizing, destructuring) would have
+  // silently zeroed the counts.
+  const edu_room_temp = edu.length
+    ? edu_channel_stats("room_temp", "room_temp_f", PLAUSIBLE.edu_temp_f)
+    : null;
+  const edu_humidity = edu.length
+    ? edu_channel_stats("humidity", "humidity_pct", PLAUSIBLE.edu_humidity_pct)
+    : null;
+  const edu_probe_0 = edu.length
+    ? edu_channel_stats("probe_0", "probe_0_f", PLAUSIBLE.edu_temp_f)
+    : null;
+  const edu_probe_1 = edu.length
+    ? edu_channel_stats("probe_1", "probe_1_f", PLAUSIBLE.edu_temp_f)
+    : null;
   const edu_facts = edu.length
     ? {
         source: edu_source,
         count: edu.length,
-        room_temp: edu_channel_stats("room_temp", "room_temp_f", PLAUSIBLE.edu_temp_f),
-        humidity: edu_channel_stats("humidity", "humidity_pct", PLAUSIBLE.edu_humidity_pct),
-        probe_0: edu_channel_stats("probe_0", "probe_0_f", PLAUSIBLE.edu_temp_f),
-        probe_1: edu_channel_stats("probe_1", "probe_1_f", PLAUSIBLE.edu_temp_f),
+        room_temp: edu_room_temp,
+        humidity: edu_humidity,
+        probe_0: edu_probe_0,
+        probe_1: edu_probe_1,
         rejected: {
           ...edu_rejected,
           total: Object.values(edu_rejected).reduce((n, c) => n + c, 0)

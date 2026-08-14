@@ -1,4 +1,6 @@
 const fmt = require("./fmt");
+const { STALE_MS } = require("../compute/staleness");
+const { is_inferred } = require("../compute/provenance");
 
 // Rules-based narrative: one template-literal builder per event archetype,
 // producing the .story block and the three .rx footnote cards. Free-text
@@ -18,11 +20,10 @@ const he_sfx = (facts) =>
 const comp_via = (facts) =>
   facts.compressor_source === "edu_comp_vib"
     ? " (per EDU vibration sensor)"
-    : facts.compressor_source === "coldhead_ruo_value"
+    : is_inferred(facts.compressor_source)
       ? " (inferred from coldhead temperature)"
       : "";
-const comp_c = (facts) =>
-  facts.compressor_source === "coldhead_ruo_value" ? "ᶜ" : "";
+const comp_c = (facts) => (is_inferred(facts.compressor_source) ? "ᶜ" : "");
 
 // Single-reading dropouts with no thermal response are reported as probable
 // sensor flickers, not treated as true compressor stops.
@@ -308,9 +309,10 @@ const build_cards = (f) => {
     // the same bound and calling that "open-sensor" would misdiagnose it.
     // A channel whose last plausible reading predates the period end by
     // more than a day says WHEN it stopped — an old range must not read as
-    // the room's current state (same 24h line the tiles' "as of" uses).
+    // the room's current state (compute/staleness, the same 24h line the
+    // tiles' "as of" uses).
     const stopped = (stats) =>
-      f.window_end - stats.last.t > 24 * 3600000
+      f.window_end - stats.last.t > STALE_MS
         ? `stopped ${fmt.day(stats.last.t)}`
         : "";
     const channel = (label, stats, rejected, decimals, sfx) => {

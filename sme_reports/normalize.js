@@ -94,7 +94,7 @@ const normalize_ge = (rows, vendor) =>
       compressor_on:
         coldhead === null
           ? null
-          : coldhead < vendor.compressor.cold_threshold_k,
+          : coldhead < vendor.coldhead.warm_k,
       coldhead_k: coldhead,
       shield_k: num(r.shield_si410_value),
       temp_alarm: null,

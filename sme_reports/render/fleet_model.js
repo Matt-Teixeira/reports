@@ -286,11 +286,12 @@ const expand_failures = (groups) => {
 
 // An EDU channel is CURRENT when its last plausible reading falls within a
 // day of the period end — the same 24h staleness line the brief's tiles use
-// for their "as of <day>" prefix. Anything older renders dimmed with its
-// date and never drives the hottest-room sort.
-const EDU_STALE_MS = 24 * 3600000;
+// for their "as of <day>" prefix (compute/staleness, the one shared
+// constant). Anything older renders dimmed with its date and never drives
+// the hottest-room sort.
+const { STALE_MS } = require("../compute/staleness");
 const edu_channel_fresh = (r, ch) =>
-  !!ch && r.window_end - ch.last_t <= EDU_STALE_MS;
+  !!ch && r.window_end - ch.last_t <= STALE_MS;
 
 // One line saying WHY a system landed in DATA ISSUES, plus the raw readings
 // that put it there — raw values always stay visible, so someone can judge

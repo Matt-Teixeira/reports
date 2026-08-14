@@ -61,8 +61,12 @@ const VENDORS = {
     },
     // mag.ge_mm3 / ge_mm4 carry no direct compressor state column, so the
     // compressor is inferred from the coldhead: < warm_k means the coldhead
-    // is at base temperature (compressor running).
-    compressor: { source: "coldhead_ruo_value", cold_threshold_k: 10 },
+    // is at base temperature (compressor running). The inference and the
+    // "coldhead warm" tile deliberately share the ONE warm_k boundary —
+    // this used to be two fields (cold_threshold_k / warm_k) carrying the
+    // same 10 K with disjoint consumers, where raising one silently left
+    // the other behind.
+    compressor: { source: "coldhead_ruo_value" },
     coldhead: { warm_k: 10 },
     tiles: ["compressor", "coldhead", "pressure_now", "event_peak", "helium"]
   },

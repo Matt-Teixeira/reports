@@ -485,6 +485,18 @@ const { parse_sme_args } = require("../cli_args");
       Object.keys(VENDORS).sort(),
       "VENDORS and units_queries must register the same vendor keys"
     );
+
+    // A vendor whose compressor state is inferred from the coldhead must
+    // carry the warm_k boundary the inference divides at — it is the same
+    // physical line the coldhead tile judges against (one field since
+    // phase 5; this pins the dependency).
+    const { is_inferred } = require("../compute/provenance");
+    for (const v of Object.values(VENDORS))
+      if (is_inferred(v.compressor.source))
+        assert.ok(
+          v.coldhead && Number.isFinite(v.coldhead.warm_k),
+          `${v.key}: coldhead-inferred compressor needs coldhead.warm_k`
+        );
   }
 
   console.log("check_config: all assertions passed");

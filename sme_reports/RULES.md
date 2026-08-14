@@ -234,6 +234,14 @@ The legend defines the mark in one line. Marking everything "d" was
 considered and rejected: ~1,500 marks per document on cells nobody doubts
 would train readers to ignore the one mark that matters.
 
+Which sources count as inferred is ONE shared predicate
+(`compute/provenance.js` `is_inferred`) consumed by the brief tiles, the
+narrative's state words, and the fleet compressor cell — the surfaces
+cannot disagree about which states are concluded rather than read. The
+24h staleness line is likewise one shared constant
+(`compute/staleness.js` `STALE_MS`) behind the tiles' "as of" prefix, the
+EDU "stopped <day>" clause, and the fleet EDU section's dimmed cells.
+
 ### Provenance — what each constant rests on
 
 Three kinds of foundation, deliberately distinguished so future readers know
