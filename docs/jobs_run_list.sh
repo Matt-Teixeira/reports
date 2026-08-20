@@ -49,6 +49,22 @@ npm run report:sme -- --system SME19034 --out-dir ~/reports-out
 # loudly by design.
 
 # ---------------------------------------------------------------------------
+# Customer briefs — every SME brief for one customer, emailed as one zip
+# ---------------------------------------------------------------------------
+
+npm run report:customer-briefs -- --customer C0051 --period 7d
+npm run report:customer-briefs -- --customer C0051 --period 30d
+npm run report:customer-briefs -- --customer C0051 --period 6mo
+
+# The customer id resolves to every mag-processed system under that customer
+# (stated on the console before the run). The job config sets "email": true
+# and "zip": true, so one email arrives carrying one zip of every brief PDF,
+# at any batch size. Add --no-email to just build the PDFs in sme_reports/out/.
+#
+# Limited-coverage systems in the customer's fleet have no brief; each is
+# reported as a named failure and the zip carries every system that has one.
+
+# ---------------------------------------------------------------------------
 # Fleet summary — every mag-processed system, internal wording
 # ---------------------------------------------------------------------------
 
@@ -64,7 +80,7 @@ npm run report:fleet -- --period 30d --email
 # ---------------------------------------------------------------------------
 
 #   --period <spec>      7d | 30d | 90d | 6mo, or a plain day count (14, 45d)
-#   --customer <id>      customer_summary jobs only
+#   --customer <id>      customer_summary and sme_brief jobs (not fleet)
 #   --system <SME#####>  repeatable, comma lists fine
 #   --out-dir <path>     default sme_reports/out
 #   --email              send it (to defaults.recipients in the config)

@@ -17,6 +17,7 @@ sme_report`, and every file in `requests/` untouched.
 npm run report:list                                  # what jobs exist
 npm run report:customer -- --customer C0137 --period 6mo
 npm run report:sme      -- --system SME19034 --period 6mo
+npm run report:customer-briefs -- --customer C0137 --period 7d   # every brief, one zip email
 npm run report:fleet    -- --period 6mo
 npm run report -- customer                           # any job by name
 ```
@@ -29,8 +30,8 @@ to fire while you are deciding what it should say.
 | Flag | Effect |
 |---|---|
 | `--period <spec>` | `7d`, `30d`, `90d`, `6mo`, or a plain day count |
-| `--customer <id>` | customer_summary jobs only — overrides the scope |
-| `--system <SME#####>` | repeatable, comma lists accepted; narrows a brief job's systems (or a customer job to an explicit set) |
+| `--customer <id>` | customer_summary and sme_brief jobs — overrides the scope (for a brief job it replaces any explicit system list) |
+| `--system <SME#####>` | repeatable, comma lists accepted; narrows a brief job's systems (or a customer-scoped job to an explicit set) |
 | `--out-dir <path>` | where documents are written |
 | `--email` / `--no-email` | send, or don't (default) |
 | `--config <path>` | a different job config file |
@@ -56,6 +57,7 @@ misspelled setting fails loudly instead of silently keeping the default.
   "jobs": {
     "customer": { "kind": "customer_summary", "customer_id": "C0137", "period": "6mo" },
     "sme":      { "kind": "sme_brief", "system_ids": ["SME21824"], "period": "6mo" },
+    "customer-briefs": { "kind": "sme_brief", "customer_id": "C0137", "zip": true, "email": true },
     "fleet":    { "kind": "fleet_summary", "period": "6mo", "exclude": ["SME13604"] }
   }
 }
@@ -67,7 +69,7 @@ for instance — and run them by name.
 | Job kind | What it produces | Extra keys |
 |---|---|---|
 | `customer_summary` | one scoped Magnet Health Summary PDF (customer-facing wording, scope stated on the cover) | exactly one of `customer_id`, `site_ids`, `system_ids`; `exclude`, `exclude_note` |
-| `sme_brief` | one Magnet Health Brief PDF + HTML per system | `system_ids` |
+| `sme_brief` | one Magnet Health Brief PDF + HTML per system | exactly one of `customer_id` (every mag system under the customer), `system_ids`; `zip` (bundle an emailed batch into one archive at any size — batches over 4 PDFs zip regardless) |
 | `fleet_summary` | the internal fleet document over every mag-processed system | `exclude`, `exclude_note` |
 
 Common settings: `period`, `recipients`, `cc_list`, `email`, `out_dir`,

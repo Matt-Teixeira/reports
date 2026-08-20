@@ -44,7 +44,7 @@ const COMMON_KEYS = [
 ];
 const KIND_KEYS = {
   customer_summary: ["customer_id", "site_ids", "system_ids", "exclude", "exclude_note"],
-  sme_brief: ["system_ids"],
+  sme_brief: ["customer_id", "system_ids", "zip"],
   fleet_summary: ["exclude", "exclude_note"]
 };
 
@@ -175,7 +175,25 @@ const validate_job = (name, raw, defaults) => {
     }
   }
 
-  if (raw.kind === "sme_brief") job.system_ids = as_system_ids(raw.system_ids, `${at}.system_ids`);
+  if (raw.kind === "sme_brief") {
+    // Exactly one selector, same stance as customer_summary: an explicit
+    // system list, or a customer whose whole mag fleet gets a brief each
+    // (the customer is resolved to systems by the CLI, like the fleet
+    // kind's system list — this module stays database-free).
+    const given = ["customer_id", "system_ids"].filter((k) => raw[k] !== undefined);
+    if (given.length !== 1)
+      fail(`${at}: give exactly one of customer_id, system_ids (got ${given.join(", ") || "none"})`);
+    if (given[0] === "customer_id") {
+      if (typeof raw.customer_id !== "string" || !raw.customer_id.trim())
+        fail(`${at}.customer_id must be a non-empty string`);
+      job.customer_id = raw.customer_id.trim();
+    } else {
+      job.system_ids = as_system_ids(raw.system_ids, `${at}.system_ids`);
+    }
+    // zip: bundle an emailed batch's PDFs into one archive regardless of
+    // batch size (small batches otherwise attach PDFs individually).
+    job.zip = raw.zip !== undefined ? as_bool(raw.zip, `${at}.zip`) : false;
+  }
 
   if (raw.kind !== "sme_brief") {
     if (raw.exclude !== undefined) job.exclude = as_system_ids(raw.exclude, `${at}.exclude`);
@@ -202,16 +220,24 @@ const validate_job = (name, raw, defaults) => {
 const apply_overrides = (job, overrides = {}) => {
   const next = { ...job, ...resolve_settings(overrides, "command line") };
   if (overrides.customer_id !== undefined && overrides.customer_id !== null) {
-    if (job.kind !== "customer_summary")
-      fail(`--customer applies to customer_summary jobs; "${job.name}" is a ${job.kind} job`);
+    if (job.kind === "fleet_summary")
+      fail(`--customer does not apply to a ${job.kind} job (it covers the whole fleet)`);
     const id = String(overrides.customer_id).trim();
     if (!id) fail("--customer requires a customer id");
-    next.scope = { customer_id: id };
+    if (job.kind === "customer_summary") next.scope = { customer_id: id };
+    else {
+      // A brief job re-aimed at a customer: the customer replaces any
+      // explicit system list, preserving the exactly-one selector rule.
+      next.customer_id = id;
+      delete next.system_ids;
+    }
   }
   const ids = overrides.system_ids || [];
   if (ids.length) {
-    if (job.kind === "sme_brief") next.system_ids = as_system_ids(ids, "--system");
-    else if (job.kind === "customer_summary")
+    if (job.kind === "sme_brief") {
+      next.system_ids = as_system_ids(ids, "--system");
+      delete next.customer_id;
+    } else if (job.kind === "customer_summary")
       next.scope = { system_ids: as_system_ids(ids, "--system") };
     else fail(`--system does not apply to a ${job.kind} job (it covers the whole fleet)`);
   }
@@ -243,7 +269,7 @@ const batch_email_block = (job, { summary_pdf }) => ({
 // Job (+ resolved fleet system ids, for the fleet kind) -> the raw request
 // object `load_raw_request` validates. Every field here has the same
 // meaning it has in a request file; nothing is a one-off-only concept.
-const build_request = (job, { fleet_system_ids = null } = {}) => {
+const build_request = (job, { fleet_system_ids = null, brief_system_ids = null } = {}) => {
   const period = job.period.key;
   const exclusion = job.exclude
     ? { exclude: job.exclude, exclude_note: job.exclude_note || "excluded by report job config" }
@@ -281,6 +307,15 @@ const build_request = (job, { fleet_system_ids = null } = {}) => {
   // condition-list email rides along only when a summary DOCUMENT was
   // asked for and needs delivering — "email me these briefs" should put
   // one message in the inbox, not two.
+  //
+  // A customer-scoped brief job gets its system list from the caller (the
+  // CLI resolves the customer through scope.js), same shape as the fleet
+  // kind — this module never touches a database.
+  const system_ids = job.system_ids || brief_system_ids;
+  if (!Array.isArray(system_ids) || !system_ids.length)
+    fail(
+      `job "${job.name}": customer ${job.customer_id} was not resolved to a system list — nothing to brief`
+    );
   return {
     period,
     ...(job.email
@@ -288,11 +323,12 @@ const build_request = (job, { fleet_system_ids = null } = {}) => {
           batch_email: {
             ...batch_email_block(job, { summary_pdf: job.summary_pdf }),
             summary: job.summary_pdf,
-            attachments: true
+            attachments: true,
+            zip: job.zip === true
           }
         }
       : {}),
-    reports: job.system_ids.map((id) => ({
+    reports: system_ids.map((id) => ({
       report_type: "magnet_health",
       system_id: id,
       recipients: job.recipients,
@@ -308,7 +344,9 @@ const build_request = (job, { fleet_system_ids = null } = {}) => {
 const describe_job = (job) => {
   const target =
     job.kind === "sme_brief"
-      ? job.system_ids.join(", ")
+      ? job.system_ids
+        ? job.system_ids.join(", ")
+        : `every system of customer ${job.customer_id}`
       : job.kind === "fleet_summary"
         ? "the whole mag fleet"
         : Object.entries(job.scope)

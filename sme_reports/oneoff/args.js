@@ -20,7 +20,7 @@ const USAGE = `usage: npm run report -- <job> [options]
   --list                 list the jobs in the config and exit
   --config <path>        job config file (default: sme_reports/oneoff/jobs.config.json)
   --period <spec>        override the job period: 7d, 30d, 90d, 6mo, or a day count
-  --customer <id>        override a customer_summary job's customer id
+  --customer <id>        override the job's customer scope (customer_summary, sme_brief)
   --system <SME#####>    override the job's system list (repeatable)
   --out-dir <path>       write documents here instead of sme_reports/out
   --email                send the job's email

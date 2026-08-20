@@ -125,6 +125,7 @@ const CONFIG = {
   jobs: {
     customer: { kind: "customer_summary", customer_id: "C0137", period: "6mo" },
     sme: { kind: "sme_brief", system_ids: ["SME21824"], period: "6mo" },
+    briefs: { kind: "sme_brief", customer_id: "C0137", zip: true, email: true },
     fleet: {
       kind: "fleet_summary",
       period: "6mo",
@@ -136,7 +137,7 @@ const CONFIG = {
 
 {
   const { jobs, defaults } = load_job_config(CONFIG);
-  assert.deepStrictEqual([...jobs.keys()], ["customer", "sme", "fleet"]);
+  assert.deepStrictEqual([...jobs.keys()], ["customer", "sme", "briefs", "fleet"]);
   assert.strictEqual(defaults.period.days, 30, "file defaults resolve");
   const customer = jobs.get("customer");
   assert.strictEqual(customer.period.days, 180, "job period outranks the file default");
@@ -157,6 +158,32 @@ const CONFIG = {
   throws(
     () => load_job_config({ jobs: { x: { kind: "sme_brief", system_ids: ["nope"] } } }),
     /is not a system id/
+  );
+  // A brief job takes exactly one selector: an explicit system list, or a
+  // customer whose whole mag fleet gets a brief each.
+  throws(
+    () => load_job_config({ ...CONFIG, jobs: { x: { kind: "sme_brief" } } }),
+    /exactly one of customer_id, system_ids/
+  );
+  throws(
+    () =>
+      load_job_config({
+        ...CONFIG,
+        jobs: { x: { kind: "sme_brief", customer_id: "C1", system_ids: ["SME1"] } }
+      }),
+    /exactly one of customer_id, system_ids/
+  );
+  throws(
+    () =>
+      load_job_config({
+        ...CONFIG,
+        jobs: { x: { kind: "sme_brief", customer_id: "C1", zip: "yes" } }
+      }),
+    /must be true or false/
+  );
+  throws(
+    () => load_job_config({ ...CONFIG, jobs: { x: { kind: "customer_summary", customer_id: "C1", zip: true } } }),
+    /unknown setting "zip"/
   );
   // A summary job needs an address even when nothing is emailed (it is the
   // loader's fallback per-report recipient) — named at the config, not deep
@@ -238,6 +265,23 @@ const CONFIG = {
   assert.strictEqual(emailed.batch_email.summary, false, "no second email for a plain brief batch");
   assert.strictEqual(emailed.batch_email.summary_pdf, false);
   assert.deepStrictEqual(emailed.batch_email.recipients, ["ops@example.com"]);
+  assert.strictEqual(emailed.batch_email.zip, false, "explicit-list briefs keep size-based zipping");
+
+  // A customer-scoped brief job: the system list comes from the caller
+  // (the CLI resolves the customer through scope.js, like the fleet kind),
+  // and zip: true forces one archive at any batch size.
+  throws(() => build_request(jobs.get("briefs")), /was not resolved to a system list/);
+  const zipped = load_raw_request(
+    build_request(jobs.get("briefs"), { brief_system_ids: ["SME01096", "SME01098"] })
+  );
+  assert.strictEqual(zipped.requests.length, 2);
+  assert.strictEqual(zipped.batch_email.zip, true, "the job's zip setting reaches the batch email");
+  assert.strictEqual(zipped.batch_email.attachments, true);
+  assert.strictEqual(zipped.batch_email.summary, false, "one email: the zip, nothing else");
+  assert.ok(
+    describe_job(jobs.get("briefs")).includes("every system of customer C0137"),
+    "the run description states the customer scope"
+  );
 
   // Asking for a summary document with the briefs brings the second email
   // back — it is what delivers that document.
@@ -283,7 +327,16 @@ const CONFIG = {
     { system_ids: ["SME01096"] },
     "--system narrows a customer job to an explicit set"
   );
-  throws(() => apply_overrides(jobs.get("sme"), { customer_id: "C1" }), /--customer applies to customer_summary/);
+  // --customer re-aims a brief job at a customer (replacing any explicit
+  // list), and --system narrows a customer-scoped brief job to an explicit
+  // set — each override keeps the exactly-one selector rule.
+  const re_aimed = apply_overrides(jobs.get("sme"), { customer_id: " C0151 " });
+  assert.strictEqual(re_aimed.customer_id, "C0151");
+  assert.strictEqual(re_aimed.system_ids, undefined);
+  const narrowed = apply_overrides(jobs.get("briefs"), { system_ids: ["SME01096"] });
+  assert.deepStrictEqual(narrowed.system_ids, ["SME01096"]);
+  assert.strictEqual(narrowed.customer_id, undefined);
+  throws(() => apply_overrides(jobs.get("fleet"), { customer_id: "C1" }), /--customer does not apply/);
   throws(() => apply_overrides(jobs.get("fleet"), { system_ids: ["SME01096"] }), /--system does not apply/);
   throws(() => apply_overrides(jobs.get("sme"), { period: "6m" }), /invalid/);
 }
@@ -294,10 +347,10 @@ const CONFIG = {
   const { jobs } = load_job_config(shipped);
   assert.ok(jobs.size, "jobs.config.json defines jobs");
   for (const [name, job] of jobs) {
-    const raw = build_request(
-      job,
-      job.kind === "fleet_summary" ? { fleet_system_ids: ["SME01096"] } : {}
-    );
+    const raw = build_request(job, {
+      ...(job.kind === "fleet_summary" ? { fleet_system_ids: ["SME01096"] } : {}),
+      ...(job.kind === "sme_brief" && job.customer_id ? { brief_system_ids: ["SME01096"] } : {})
+    });
     const loaded = load_raw_request(raw);
     assert.ok(loaded, `shipped job "${name}" composes a valid request`);
     if (loaded.scoped)

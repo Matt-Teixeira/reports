@@ -6,6 +6,7 @@
     "documents in sme_reports/out and sends nothing. Flags override per run:",
     "  npm run report:customer -- --customer C0151 --period 6mo",
     "  npm run report:sme -- --system SME19034 --period 6mo",
+    "  npm run report:customer-briefs -- --customer C0151 --period 7d",
     "  npm run report -- fleet --period 6mo --email"
   ],
 
@@ -32,6 +33,15 @@
       "description": "Magnet Health Brief for one or more MRI systems",
       "system_ids": ["SME21824"],
       "period": "6mo"
+    },
+
+    "customer-briefs": {
+      "kind": "sme_brief",
+      "description": "Every SME brief for one customer, emailed as one zip",
+      "_scope": "give exactly one of customer_id, system_ids (--customer overrides per run)",
+      "customer_id": "C0137",
+      "zip": true,
+      "email": true
     },
 
     "fleet": {

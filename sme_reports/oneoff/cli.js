@@ -41,6 +41,24 @@ const fleet_ids = async () => {
   return mag_ids;
 };
 
+// The system lists build_request cannot know without a database: the whole
+// mag fleet for the fleet kind, a customer's mag systems for a
+// customer-scoped brief job. Resolution is stated on the console before
+// the work starts (scope.js: resolution is loud, never silent).
+const request_extras = async (job) => {
+  if (job.kind === "fleet_summary") return { fleet_system_ids: await fleet_ids() };
+  if (job.kind === "sme_brief" && job.customer_id) {
+    const { resolve_scope } = require("../scope");
+    const resolution = await resolve_scope({ customer_id: job.customer_id });
+    console.log(
+      `customer ${job.customer_id} (${resolution.label}) -> ` +
+        `${resolution.system_ids.length} mag systems across ${resolution.detail.sites} sites`
+    );
+    return { brief_system_ids: resolution.system_ids };
+  }
+  return {};
+};
+
 const print_outcome = (job, batch) => {
   const lines = [];
   if (batch.fleet_pdf_path) lines.push(`summary document: ${batch.fleet_pdf_path}`);
@@ -81,10 +99,7 @@ const main = async () => {
   // long enough that discovering the wrong period afterwards is expensive.
   console.log(describe_job(job));
 
-  const raw = build_request(
-    job,
-    job.kind === "fleet_summary" ? { fleet_system_ids: await fleet_ids() } : {}
-  );
+  const raw = build_request(job, await request_extras(job));
 
   const [, writeLogEvents, , makeAppRunLog] = require("../../utils/logger/log");
   const { run_request_object } = require("../index");
