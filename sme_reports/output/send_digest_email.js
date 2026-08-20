@@ -15,6 +15,7 @@ const {
   themed_table,
   esc
 } = require("./email_theme");
+const { period_label } = require("../periods");
 
 const [addLogEvent] = require("../../utils/logger/log");
 const {
@@ -58,7 +59,8 @@ const chunk_units = (units) => {
 
 const send_part = async (run_log, job_id, recipient, cc_list, chunk, part, total_parts, opts) => {
   const date = new Date().toISOString().slice(0, 10);
-  const period = opts.lookback_days && opts.lookback_days !== 30 ? ` — ${opts.lookback_days}-day` : "";
+  const digest_label = period_label(opts.lookback_days);
+  const period = digest_label ? ` — ${digest_label}` : "";
   const part_tag = total_parts > 1 ? ` — part ${part}/${total_parts}` : "";
   const subject = `Magnet Health Summaries — ${opts.total_customers} customer${opts.total_customers === 1 ? "" : "s"}${period}${part_tag} — ${date}`;
 

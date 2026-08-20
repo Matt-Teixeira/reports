@@ -1,0 +1,53 @@
+{
+  "_readme": [
+    "One-off report jobs, run by hand: npm run report -- <job name>.",
+    "Edit this file to change what a job covers; keys starting with _ are comments.",
+    "period: 7d | 30d | 90d | 6mo (or a plain day count). email: false builds the",
+    "documents in sme_reports/out and sends nothing. Flags override per run:",
+    "  npm run report:customer -- --customer C0151 --period 6mo",
+    "  npm run report:sme -- --system SME19034 --period 6mo",
+    "  npm run report -- fleet --period 6mo --email"
+  ],
+
+  "defaults": {
+    "period": "30d",
+    "recipients": ["matt.teixeira@avantehs.com"],
+    "cc_list": [],
+    "email": false,
+    "archive": true,
+    "archive_records": false
+  },
+
+  "jobs": {
+    "customer": {
+      "kind": "customer_summary",
+      "description": "One customer's Magnet Health Summary, by customer id",
+      "_scope": "give exactly one of customer_id, site_ids, system_ids",
+      "customer_id": "C0137",
+      "period": "6mo"
+    },
+
+    "sme": {
+      "kind": "sme_brief",
+      "description": "Magnet Health Brief for one or more MRI systems",
+      "system_ids": ["SME21824"],
+      "period": "6mo"
+    },
+
+    "fleet": {
+      "kind": "fleet_summary",
+      "description": "Internal fleet summary — every mag-processed system",
+      "period": "6mo",
+      "exclude": [
+        "SME10844",
+        "SME11246",
+        "SME11247",
+        "SME13604",
+        "SME13605",
+        "SME13606",
+        "SME13607"
+      ],
+      "exclude_note": "RF/SC service stations, not fleet"
+    }
+  }
+}

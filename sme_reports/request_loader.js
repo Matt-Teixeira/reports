@@ -2,6 +2,8 @@ const fs = require("fs");
 const path = require("path");
 const { DateTime } = require("luxon");
 
+const { resolve_period, DEFAULT_DAYS } = require("./periods");
+
 // Loads and validates a report request JSON file, applying defaults.
 // The normalized request object is the single internal contract for the SME
 // report pipeline — a future alert.sme_reports config table maps 1:1 onto it.
@@ -19,6 +21,21 @@ const parse_date = (value, field) => {
   return dt;
 };
 
+// A named "period" ("6mo", "7d", "90d", or a plain day count) resolved to
+// days through the shared vocabulary (periods.js), so a request file, a
+// one-off CLI job and an artifact filename can never disagree about what a
+// span is called. It is the same setting as lookback_days — never a second
+// one layered on top — so naming both is a loud error.
+const days_of = (spec, at, sibling_lookback) => {
+  if (sibling_lookback !== undefined)
+    fail(`${at} and ${at.replace(/period$/, "lookback_days")} are the same setting — give one, not both`);
+  try {
+    return resolve_period(spec, at).days;
+  } catch (error) {
+    fail(error.message);
+  }
+};
+
 // Window normalization on its own: the batch-period derivation needs the
 // EFFECTIVE window of entries that may later be excluded (round-2 F2), so
 // this cannot live only inside normalize_request.
@@ -32,7 +49,11 @@ const window_of = (win) => {
     : DateTime.utc().endOf("day");
   // ?? not ||: zero must reach validation and fail loudly, not silently
   // become the 30-day default under a 7-day batch (review round-1 F7).
-  const lookback_days = win.lookback_days ?? 30;
+  // "period" is the NAMED spelling of the same setting ("6mo", "7d", a day
+  // count) — one setting, so carrying both is a request error rather than
+  // a silent precedence rule between two numbers that may disagree.
+  const lookback_days =
+    win.period !== undefined ? days_of(win.period, "window.period", win.lookback_days) : win.lookback_days ?? DEFAULT_DAYS;
   if (!Number.isInteger(lookback_days) || lookback_days <= 0)
     fail(`window.lookback_days must be a positive integer, got ${JSON.stringify(win.lookback_days)}`);
   const start = win.start
@@ -129,17 +150,29 @@ const assemble = (raw, list) => {
   const batch_email = normalize_batch_email(raw.batch_email);
   const summary_only = raw.summary_only === true;
 
-  // Top-level lookback_days: the batch's period (7 for the weekly customer
-  // product, 30 default), applied as each report's window default. A
-  // per-report window (its own lookback or explicit dates) still wins —
-  // the spread order below is the override.
-  if (raw.lookback_days !== undefined) {
+  // Top-level lookback_days (or its named spelling, "period": "6mo"): the
+  // batch's period — 7 for the weekly customer product, 180 for the
+  // 6-month review, 30 default — applied as each report's window default.
+  // A per-report window (its own lookback, its own period, or explicit
+  // dates) still wins.
+  let batch_days;
+  if (raw.period !== undefined) batch_days = days_of(raw.period, "period", raw.lookback_days);
+  else if (raw.lookback_days !== undefined) {
     if (!Number.isInteger(raw.lookback_days) || raw.lookback_days <= 0)
       fail(`lookback_days must be a positive integer, got ${JSON.stringify(raw.lookback_days)}`);
-    list = list.map((r) => ({
-      ...r,
-      window: { lookback_days: raw.lookback_days, ...(r.window || {}) }
-    }));
+    batch_days = raw.lookback_days;
+  }
+  if (batch_days !== undefined) {
+    // Applied as a DEFAULT, not an override: a report window that already
+    // states its own span (either spelling) keeps it, and one that states
+    // explicit dates is untouched — window_of ignores a lookback beside a
+    // start, exactly as the previous spread did.
+    list = list.map((r) => {
+      const win = { ...(r.window || {}) };
+      if (win.lookback_days === undefined && win.period === undefined)
+        win.lookback_days = batch_days;
+      return { ...r, window: win };
+    });
   }
   // Pre-exclusion candidates: the batch-period fallback for all-excluded
   // runs (round-2 F2) reads their windows, since no request survives to
@@ -264,7 +297,17 @@ const load_requests = (request_path) => {
   if (!request_path) fail("no request file path given");
   const full_path = path.resolve(request_path);
   if (!fs.existsSync(full_path)) fail(`request file not found: ${full_path}`);
-  const raw = JSON.parse(fs.readFileSync(full_path, "utf8"));
+  return load_raw_request(JSON.parse(fs.readFileSync(full_path, "utf8")));
+};
+
+// The same load, from an ALREADY-PARSED request object: the one-off CLI
+// (oneoff/) composes its request in memory from a job config instead of
+// reading a file, and must take the identical validation path — a second
+// assembly path is a second set of rules to keep in step. File mode is
+// this function plus a read.
+const load_raw_request = (raw) => {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw))
+    fail("request must be an object");
   if (raw.scope !== undefined) {
     // One source of truth per request: a scope RESOLVES the system list, an
     // explicit reports[] STATES it — carrying both invites silent drift
@@ -313,4 +356,9 @@ const materialize_scoped_requests = (raw, system_ids) => {
   return assemble(raw, list);
 };
 
-module.exports = { load_requests, materialize_scoped_requests, normalize_request };
+module.exports = {
+  load_requests,
+  load_raw_request,
+  materialize_scoped_requests,
+  normalize_request
+};

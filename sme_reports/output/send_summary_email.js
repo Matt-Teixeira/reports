@@ -20,6 +20,7 @@ const {
   is_limited,
   condition_cell_record
 } = require("../conditions");
+const { period_label } = require("../periods");
 
 const [addLogEvent] = require("../../utils/logger/log");
 const {
@@ -44,9 +45,11 @@ const send_summary_email = async (
 ) => {
   const date = new Date().toISOString().slice(0, 10);
   // Scoped runs lead with WHO the summary covers; non-default periods say
-  // so in the subject — a 7-day and a 30-day summary sent the same day
-  // must be tellable apart from the inbox list.
-  const period = lookback_days && lookback_days !== 30 ? ` — ${lookback_days}-day` : "";
+  // so in the subject — a 7-day, a 6-month and a 30-day summary sent the
+  // same day must be tellable apart from the inbox list. The wording is
+  // shared with the artifact tags (periods.js).
+  const label = period_label(lookback_days);
+  const period = label ? ` — ${label}` : "";
   const subject = `Magnet Health Summary — ${scope_label ? `${scope_label} — ` : ""}${results.length} systems${period} — ${date}`;
 
   // Grade the distilled record, not the bare archetype: quench and current

@@ -2,7 +2,11 @@ const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 
-const { load_requests, materialize_scoped_requests } = require("./request_loader");
+const {
+  load_requests,
+  load_raw_request,
+  materialize_scoped_requests
+} = require("./request_loader");
 const {
   fetch_identity,
   resolve_system_vendor,
@@ -15,6 +19,10 @@ const { build_render_model } = require("./render/model");
 const { analyze_system } = require("./compute/analyze");
 const { build_page } = require("./render/page");
 const { build_summary_facts, build_limited_record } = require("./compute/summary_facts");
+// Aliased on import: `period_tag` is also a STRING parameter on the fleet
+// summary / sidecar helpers below, and one name for both would read as a
+// shadowed function at every glance.
+const { period_tag: period_tag_of } = require("./periods");
 const write_html = require("./output/write_html");
 
 const [addLogEvent] = require("../utils/logger/log");
@@ -167,11 +175,12 @@ const run_one = async (run_log, job_id, request, on_facts = null) => {
     if (request.output.archive) {
       const archive_dir = path.join(__dirname, "archive");
       fs.mkdirSync(archive_dir, { recursive: true });
-      // Non-default periods tag the archived name: a 7-day and a 30-day
-      // brief archived the same day must not overwrite each other.
-      const lb = request.window.lookback_days;
-      const period_tag = lb && lb !== 30 ? `-${lb}d` : "";
-      const dated = `Avante-${request.system_id}-Magnet-Health${period_tag}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      // Non-default periods tag the archived name: a 7-day, a 6-month and a
+      // 30-day brief archived the same day must not overwrite each other.
+      // The tag vocabulary is shared (periods.js) so a filename and the
+      // email announcing it can never name the span differently.
+      const tag = period_tag_of(request.window.lookback_days);
+      const dated = `Avante-${request.system_id}-Magnet-Health${tag}-${new Date().toISOString().slice(0, 10)}.pdf`;
       outputs.archive_path = path.join(archive_dir, dated);
       fs.copyFileSync(outputs.pdf_path, outputs.archive_path);
     }
@@ -314,8 +323,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
     // for the harness, which never passes a cache.
     const { concurrency = 1, cache = null, on_facts = null } = opts;
     // Null = explicit-date windows: no chosen period, no tag (F3).
-    const period_tag =
-      lookback_days && lookback_days !== 30 ? `-${lookback_days}d` : "";
+    const batch_period_tag = period_tag_of(lookback_days);
     const slots = new Array(requests.length);
     let cursor = 0;
     const worker = async () => {
@@ -380,7 +388,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
           out_dir,
           excluded,
           scope_resolution,
-          period_tag,
+          batch_period_tag,
           { archive_records: batch_email.archive_records }
         );
         fleet_pdf_path = fleet.pdf_path;
@@ -436,11 +444,17 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
     return { results, failures, fleet_pdf_path, fleet_error, lookback_days };
 };
 
-const run_sme_report = async (run_log, request_path) => {
+// One entry path for every request-driven run, whatever produced the
+// request: `load` is a thunk returning what the loader returned (file mode
+// reads a file; the one-off CLI hands over an object it composed from its
+// job config). Everything after loading — scope resolution, the batch, the
+// fatal-summary rule, the error boundary, and closing Chromium — is shared,
+// so a one-off run cannot drift from a scheduled one on any of it.
+const run_entry = async (run_log, load) => {
   const job_id = uuidv4();
   const { close_pdf_renderer } = require("./output/render_pdf");
   try {
-    let loaded = load_requests(request_path);
+    let loaded = load();
     let scope_resolution = null;
     if (loaded.scoped) {
       // Resolution is LOUD, never silent (PLAN-SCOPED-WEEKLY.md A1): the
@@ -475,7 +489,7 @@ const run_sme_report = async (run_log, request_path) => {
       throw new Error(
         `fleet summary document failed after per-system delivery: ${batch.fleet_error}`
       );
-    return batch.results;
+    return { ...batch, scope_resolution };
   } catch (error) {
     await addLogEvent(E, run_log, "run_sme_report", cat, { job_id }, error);
     console.error(`sme_report failed: ${error.message}`);
@@ -489,6 +503,18 @@ const run_sme_report = async (run_log, request_path) => {
   }
 };
 
+// File mode — unchanged contract: resolves to the per-system results and
+// throws on any fatal run error.
+const run_sme_report = async (run_log, request_path) =>
+  (await run_entry(run_log, () => load_requests(request_path))).results;
+
+// In-memory mode, for the one-off CLI. Returns the whole batch (results,
+// failures, the summary document's path, the resolved scope) because a
+// one-off run's caller prints what it produced rather than emailing it.
+const run_request_object = (run_log, raw) =>
+  run_entry(run_log, () => load_raw_request(raw));
+
 module.exports = run_sme_report;
 module.exports.run_batch = run_batch;
+module.exports.run_request_object = run_request_object;
 module.exports.write_records_sidecar = write_records_sidecar;

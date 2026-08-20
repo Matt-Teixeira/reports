@@ -15,6 +15,7 @@ const {
   smtp_outcomes
 } = require("./fanout");
 const { is_attention, is_urgent } = require("./conditions");
+const { period_tag } = require("./periods");
 const {
   current_slot,
   load_slot_configs,
@@ -376,7 +377,7 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
       try {
         write_records_sidecar({
           scope: r.resolution,
-          period_tag: base_cfg.lookback_days !== 30 ? `-${base_cfg.lookback_days}d` : "",
+          period_tag: period_tag(base_cfg.lookback_days),
           records: r.records,
           failures: r.failures
         });

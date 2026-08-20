@@ -51,6 +51,18 @@ Status checklist for the single-SME report paradigm. Update as items land.
       response (< 2% of alert line within 2 h) are reported as "likely sensor
       flickers", excluded from events/archetypes; trailing dropouts stay real
 
+- [x] **6-month period** (`6mo` = 180 days) across the fleet summary, scoped
+      customer summaries and per-system briefs, on a shared period vocabulary
+      (`periods.js`: day count, artifact tag, subject wording in one entry);
+      `period` is accepted as the named spelling of `lookback_days` in request
+      files. Verified live: a 157-system 6-month fleet sweep, Piedmont's
+      43-system 6-month summary, and 6-month briefs for SME21824 / SME19034
+- [x] **One-off (operator-run) reports** — `npm run report -- <job>` over a
+      hand-edited job config (`sme_reports/oneoff/`, see [ONEOFF.md](ONEOFF.md)):
+      customer summary by customer id, briefs for named SMEs, internal fleet
+      document, any period. Compositional only — the same loader, batch runner
+      and senders; nothing scheduled calls it
+
 ## Validation backlog (opportunistic)
 
 - [ ] Eyeball the first report from a **real Siemens warm event**
