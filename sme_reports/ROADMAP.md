@@ -62,6 +62,14 @@ Status checklist for the single-SME report paradigm. Update as items land.
       customer summary by customer id, briefs for named SMEs, internal fleet
       document, any period. Compositional only — the same loader, batch runner
       and senders; nothing scheduled calls it
+- [x] Cover-lead pagination fix: a wrapped lead sentence was clipping the
+      fleet cover's last attention row (found on the first 6-month document,
+      reachable on any period — the live 30-day fleet lead measures 713px
+      against a 720px line, 7px from the same clip). The cover now RESERVES
+      a second lead line unconditionally (24 → 23 rows) instead of
+      predicting each document's width; check_fleet asserts two lines is the
+      ceiling and measures a real wrapped-lead cover — see RULES.md §5
+      "Cover lead"
 
 ## Validation backlog (opportunistic)
 

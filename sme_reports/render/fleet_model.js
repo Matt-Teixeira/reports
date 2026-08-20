@@ -42,7 +42,21 @@ const ROWS_FIRST_PAGE = 23;
 // 25 measured at 100% of the cover's usable height with ONE pixel to spare on
 // the live fleet document — passing, but a single-pixel margin on a page whose
 // masthead content varies week to week is not a margin. 24 keeps a row's worth.
-const ATTENTION_FIRST_PAGE = 24;
+//
+// 23 since 2026-08-14: the cover RESERVES room for a two-line lead sentence.
+// At 24 the budget silently assumed the lead fit on one line, and the first
+// 6-month fleet document ("155 systems analyzed — 106 need attention, 3
+// urgent, 1 limited coverage.") wrapped and pushed its last attention row
+// 8px past the footer, where overflow:hidden ate it. Reserving the line
+// unconditionally — rather than predicting each document's lead width —
+// keeps the row budget a CONSTANT: no font metric, no calibration, and no
+// way for a future edit to the sentence's wording to reintroduce the clip.
+// The reservation is sound because the lead cannot exceed two lines: even
+// with every optional clause at four digits it measures ~1007px against a
+// 1440px two-line budget, an invariant check_fleet.js asserts. It costs one
+// attention row on covers whose lead does fit; that row is the price of the
+// document never clipping one.
+const ATTENTION_FIRST_PAGE = 23;
 const ATTENTION_PER_PAGE = 24;
 const FAILURES_PER_PAGE = 20;
 
@@ -491,6 +505,9 @@ const build_fleet_model = (records, failures, meta = {}) => {
   // The overview paginates too. The attention list is the actionable part of
   // this document, so it is shown in full rather than truncated with a
   // "+N more" that sends the reader hunting through the vendor sections.
+  // ATTENTION_FIRST_PAGE already reserves the cover's second lead line, so
+  // this is a plain constant — the budget does not depend on what any
+  // particular document's lead sentence measures.
   const attention_pages = chunk_rows(attention, ATTENTION_FIRST_PAGE, ATTENTION_PER_PAGE);
   let data_issue_pages = chunk_rows(data_issues, FAILURES_PER_PAGE, FAILURES_PER_PAGE);
   let failure_pages = chunk_rows(

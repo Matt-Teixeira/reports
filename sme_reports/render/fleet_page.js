@@ -1,6 +1,7 @@
 const logo_base64 = require("./assets/logo");
 const CHARW8 = require("./assets/charw8");
 const fmt = require("./fmt");
+const { lead_html } = require("./lead");
 const { COLORS } = require("../output/email_theme");
 const {
   condition_label,
@@ -589,17 +590,16 @@ const failures_table = (rows) =>
   `\n</tbody></table>`;
 
 const overview_body = (vm, rows, first) => {
-  // Limited-coverage systems are counted BESIDE the analyzed tally, never
-  // inside it — "analyzed" is a claim the limited path deliberately does
-  // not make.
-  const limited_clause = vm.limited_count
-    ? `${vm.total ? ", " : " — "}<b style="color:${COLORS.grey};">${vm.limited_count} limited coverage</b>`
-    : "";
-  const lead = vm.total
-    ? `<b>${vm.total}</b> systems analyzed — <b style="color:${vm.attention_count ? COLORS.amber : COLORS.teal};">${vm.attention_count} need${vm.attention_count === 1 ? "s" : ""} attention</b>${vm.urgent_count ? `, <b style="color:${COLORS.red};">${vm.urgent_count} urgent</b>` : ""}${vm.data_issue_count ? `, <b style="color:${COLORS.grey};">${vm.data_issue_count} data issue${vm.data_issue_count === 1 ? "" : "s"}</b>` : ""}${limited_clause}.`
-    : vm.limited_count
-      ? `<b>No systems analyzed</b> in this period${limited_clause}.`
-      : `<b>No systems produced data</b> in this period.`;
+  // The lead sentence — including the limited-coverage clause, which counts
+  // BESIDE the analyzed tally rather than inside it ("analyzed" is a claim
+  // the limited path deliberately does not make) — is composed in
+  // render/lead.js. It lives there because fleet_model.js has to predict
+  // how many LINES it takes: the cover's attention-row budget assumes one,
+  // and a wrapped lead used to push the last row off a page that clips
+  // silently. One composition, so the render and the budget cannot
+  // disagree about the sentence they are respectively drawing and paying
+  // for.
+  const lead = lead_html(vm, COLORS);
 
   const rollup = vm.condition_rollup
     .map(

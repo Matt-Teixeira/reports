@@ -2204,6 +2204,97 @@ const rec = (over = {}) => ({
   const html_path = write_html(out_dir, "dev-fleet-summary", html);
   assert.ok(fs.existsSync(html_path));
 
+  // --- the cover's LEAD sentence and the line it reserves --------------------
+  // Found live on the 6-month fleet document (2026-08-14): a lead that
+  // wraps to two lines pushed the cover's last attention row 8px past the
+  // footer, where overflow:hidden ate it silently. The cover now reserves
+  // that second line unconditionally (ATTENTION_FIRST_PAGE), which is only
+  // sound while TWO lines is the ceiling — so this asserts the ceiling,
+  // and the geometry pass below measures a real wrapped-lead cover.
+  const { lead_lines, lead_html: lead_of } = require("../render/lead");
+  // The invariant the reservation rests on: no combination of counts this
+  // sentence can carry reaches a third line. If a future edit lengthens
+  // the wording past two lines, this fails and says the reservation must
+  // grow with it — the estimate is a check-time tripwire, deliberately not
+  // part of the render path.
+  const MAX_COUNTS = {
+    total: 9999,
+    attention_count: 9999,
+    urgent_count: 9999,
+    data_issue_count: 9999,
+    limited_count: 9999
+  };
+  assert.ok(
+    lead_lines(MAX_COUNTS) <= 2,
+    `the cover reserves two lead lines, but the longest possible lead takes ${lead_lines(MAX_COUNTS)}`
+  );
+  // The live sentence that clipped does wrap — the fixture below is a real
+  // two-line cover, not a hypothetical one.
+  assert.strictEqual(
+    lead_lines({ total: 155, attention_count: 106, urgent_count: 3, data_issue_count: 0, limited_count: 1 }),
+    2,
+    "the live 6-month fleet lead wraps (measured 726.8px against a 720px line)"
+  );
+  assert.strictEqual(
+    lead_lines({ total: 43, attention_count: 24, urgent_count: 2, data_issue_count: 0, limited_count: 0 }),
+    1,
+    "a customer-sized lead fits on one line"
+  );
+  // Composition is unchanged from the markup this replaced — one sentence,
+  // rendered by the page and paid for by the model.
+  assert.ok(
+    lead_of(
+      { total: 155, attention_count: 106, urgent_count: 3, data_issue_count: 2, limited_count: 1 },
+      { amber: "#A", teal: "#T", red: "#R", grey: "#G" }
+    ) ===
+      '<b>155</b> systems analyzed — <b style="color:#A;">106 need attention</b>, ' +
+        '<b style="color:#R;">3 urgent</b>, <b style="color:#G;">2 data issues</b>, ' +
+        '<b style="color:#G;">1 limited coverage</b>.',
+    "the lead's markup is composed exactly as the cover has always rendered it"
+  );
+
+  // A document whose cover lead WRAPS: 155 analyzed with 106 needing
+  // attention, 3 urgent and a limited-coverage row beside them — the live
+  // shape, rebuilt so the geometry pass measures it every run.
+  const wrap_records = [
+    ...Array.from({ length: 155 }, (_, i) =>
+      rec({
+        system_id: `SME${String(70000 + i)}`,
+        site_name: `Wrapped Lead Site ${i}`,
+        archetype:
+          i < 3
+            ? "compressor_stop_ongoing"
+            : i < 106
+              ? "compressor_stop_recovered"
+              : "stable_healthy",
+        comp_events: i < 106 ? 1 : 0,
+        comp_off_hours: i < 106 ? 9.5 : 0,
+        comp_recovered_t: i >= 3 && i < 106 ? W_END - 5 * HOUR : null
+      })
+    ),
+    limited_record({ system_id: "SME97900" })
+  ];
+  const wrap_vm = build_fleet_model(wrap_records, [], {});
+  assert.strictEqual(wrap_vm.total, 155, "the wrapped-lead fixture reproduces the live counts");
+  assert.strictEqual(wrap_vm.attention_count, 106);
+  assert.strictEqual(wrap_vm.urgent_count, 3);
+  assert.strictEqual(wrap_vm.limited_count, 1);
+  // The cover carries its budget whether the lead wrapped or not — the
+  // reservation is unconditional, so pagination is the same constant here
+  // as on a one-line cover.
+  const { ATTENTION_FIRST_PAGE: COVER_ROWS } = require("../render/fleet_model");
+  assert.strictEqual(
+    wrap_vm.overview_pages[0].length,
+    COVER_ROWS,
+    "the cover's row budget is a constant, wrapped lead or not"
+  );
+  assert.strictEqual(
+    vm.overview_pages[0].length,
+    COVER_ROWS,
+    "the one-line-lead fixture pays the same reservation"
+  );
+  const wrap_path = write_html(out_dir, "dev-wrapped-lead-summary", build_fleet_page(wrap_vm));
+
   // A measured SCOPED document too (plan A2): a realistic customer-sized
   // slice — including the overlay and data-issue rows at indices 16–31 —
   // through the same geometry pass, since the scoped cover carries
@@ -2276,7 +2367,10 @@ const rec = (over = {}) => ({
         for (const doc of [
           { name: "fleet", file: html_path, dense: true, cid_clips: cid_overflow(records) },
           { name: "scoped", file: scoped_path, dense: false, cid_clips: cid_overflow(records.slice(16, 32)) },
-          { name: "exclusions", file: exclusion_path, dense: false, cid_clips: 0 }
+          { name: "exclusions", file: exclusion_path, dense: false, cid_clips: 0 },
+          // The wrapped-lead cover: this document is here to prove page 1
+          // clears its footer when the lead takes two lines.
+          { name: "wrapped-lead", file: wrap_path, dense: false, cid_clips: 0 }
         ]) {
         await page.goto(`file://${doc.file}`, { waitUntil: "networkidle0" });
         const measured = await page.evaluate(() => {
