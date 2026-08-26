@@ -1,33 +1,11 @@
 # CLAUDE.md
 
-> ## ⚠️ MID-MIGRATION (started 2026-08-26) — read this first
->
-> **reports is being migrated to the fleet dev/release paradigm.** The spec is
-> `/opt/apps/data_acquisition/docs/migration_CLAUDE.md` (Part 1 = conventions,
-> Part 3 = migration checklist). Local reference implementations:
-> **data_acquisition** (pilot, dev clone `~/apps/data_acquisition`) and
-> **monday** (dev clone `~/apps/monday` — the closer shape for this app: no
-> log-file bulk, external-API credentials, run-record provenance). Until this
-> banner is removed, sections below may describe either the pre-migration
-> state or the target — each is labelled. When this file disagrees with the
-> paradigm docs, **the paradigm docs win**.
->
-> Migration state right now:
-> - `/opt/apps/reports` (this tree) is **frozen** — docs-only commits, no
->   code. It will be wiped and replaced by `build-release.sh` output at
->   cutover. The editable tree will be the dev clone at `~/apps/reports`.
-> - **There is no schedule, and none will be installed in this migration**
->   (decided 2026-08-26). This app has never run on this host — zero rows in
->   `util.app_run_logs`, empty `/opt/run-logs/reports`, no crontab entries
->   anywhere. That is deliberate: running report families at live dt slots
->   **emails real customers** (107 subscriptions in `alert.reports` on this
->   staging DB). Scheduling is a separate, explicit owner decision later.
-> - The image is being renamed `aux:${IMAGE_TAG}` → `reports:${USER_ID}`
->   (decided 2026-08-26; nothing else consumes `aux:` — closes setup-doc debt
->   item 10). The old `aux:staging` image is left in place until post-cutover
->   cleanup.
-> - `docs/run.sh` describes the pre-migration run flow (npm ci into a shared
->   cache mount). It is superseded by this file as migration commits land.
+> **Migrated to the fleet dev/release paradigm 2026-08-26** (spec:
+> `data_acquisition/docs/migration_CLAUDE.md`, Part 1). Structure-only:
+> **no schedule was installed, by decision** — see the warning below before
+> running anything. The editable tree is the dev clone `~/apps/reports`;
+> `/opt/apps/reports` is `build-release.sh` output (owned svc, wiped and
+> replaced on every release — never edit it in place).
 
 **reports** is a Node.js run-once report mailer. Invoked as
 `node index.js <report_family>`, it computes the current schedule slot
@@ -36,7 +14,12 @@ for that family whose `alert.reports.email_schedule` marks that slot true,
 builds per-user HTML reports from staging-DB queries, and emails them via
 Office 365 SMTP. One extra family, `monday`, is a read-only Monday.com board
 query. Run-once by design — it does its slot's work and exits; production
-means an external schedule (none installed here, see banner).
+would mean an external schedule, and **none is installed on this host**:
+the app had never run here before the migration (zero historical
+`util.app_run_logs` rows), and scheduling it is a separate, explicit owner
+decision — running families at live dt slots emails real customers, and
+the legacy schedule (if any) lives on the pre-migration production host,
+not here. New schedules go in the shared svc crontab per the paradigm.
 
 ## ⚠️ Do not run report families at live dt slots on this box
 
@@ -70,9 +53,28 @@ Other strengths to preserve through the migration:
   fails) and the **baked entrypoint** (`docker/entrypoint.sh` COPY'd into the
   image).
 
-## Docker / build / release — TARGET (per-commit status)
+## Development & release workflow
 
-The Part 1 pattern, adapted. Status is updated as each commit lands:
+```bash
+# Dev — from the dev clone (~/apps/reports), as yourself
+bash preflight-check.sh                 # expect ZERO warnings
+bash build.sh                           # in-tree npm install + image reports:<you>
+RUN_USER=<you> docker compose run --rm app node index.js <family>   # avoid :00/:30!
+
+# Release — mirrors the clean tree to /opt/apps/reports as reports:svc
+bash build-release.sh                   # refuses a dirty tree; stamps RELEASE_SHA
+
+# Run the released copy — from /opt/apps/reports, RUN_USER omitted (svc)
+cd /opt/apps/reports && docker compose run --rm app node index.js <family>
+```
+
+Logs: dev runs land in `./utils/logger/logs/` (gitignored); release runs in
+`/opt/run-logs/reports/` (svc:docker). Read with `cat <file> | python3 -m
+json.tool` — never open a run log in an editor.
+
+## Docker / build / release (fleet paradigm — landed 2026-08-26)
+
+The Part 1 pattern, adapted; each item verified at cutover:
 
 - [x] `entrypoint.sh` repairs the log dir while root (only-if-root-owned)
 - [x] image `reports:${USER_ID}` (`#RELEASE:USER_ID=svc` → `reports:svc`);
@@ -95,10 +97,14 @@ The Part 1 pattern, adapted. Status is updated as each commit lands:
 - [x] `uuid` declared in package.json (today it is an undeclared transitive
       dep required by `index.js` and `utils/logger/log.js`)
 
-Pre-migration state, for reference while the boxes above are unchecked:
-image `aux:${IMAGE_TAG}` built by `docker compose build`; node_modules via
-the shared cache mount; logger path chosen by `RUN_ENV`; no build/release/
-preflight scripts; `/opt/apps/reports` is the git working tree itself.
+Cutover verified 2026-08-26: dev round-trip (skipped/exit 0, dev-tree log,
+production dir untouched), guard negative test (dirty tree refused, DEST
+untouched), kill test (E_SIGNAL, exit 1, both sinks flushed), release
+round-trip (`reports-log.svc.*` in /opt/run-logs/reports, DB row
+`282a60d|svc|skipped`), zero preflight warnings in both copies, zero
+dev↔release drift. The retired `aux:staging` image and the orphaned
+`/opt/resources/node_mod_cache/reports` cache dir await post-cutover
+cleanup (owner sign-off).
 
 ## Known warts (kept deliberately — decided 2026-08-26)
 
