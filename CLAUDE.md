@@ -74,10 +74,10 @@ Other strengths to preserve through the migration:
 
 The Part 1 pattern, adapted. Status is updated as each commit lands:
 
-- [ ] `entrypoint.sh` repairs the log dir while root (only-if-root-owned)
+- [x] `entrypoint.sh` repairs the log dir while root (only-if-root-owned)
 - [x] image `reports:${USER_ID}` (`#RELEASE:USER_ID=svc` → `reports:svc`);
       `IMAGE_TAG` retired
-- [ ] `build.sh` — in-tree `npm install` as the host user + compose build;
+- [x] `build.sh` — in-tree `npm install` as the host user + compose build;
       shared `/opt/resources/node_mod_cache/reports` mount retired
 - [ ] `build-release.sh` — clean-tree guard above the wipe, `#RELEASE:`
       transforms, `RELEASE_SHA` stamp into the deployed `.env`
@@ -92,7 +92,7 @@ The Part 1 pattern, adapted. Status is updated as each commit lands:
       container (verify-full, real CA path); Monday.com authenticated `me`
       query; Outlook presence-only (decision 2026-08-26, Acumatica
       precedent — an SMTP AUTH probe logs into production O365)
-- [ ] `uuid` declared in package.json (today it is an undeclared transitive
+- [x] `uuid` declared in package.json (today it is an undeclared transitive
       dep required by `index.js` and `utils/logger/log.js`)
 
 Pre-migration state, for reference while the boxes above are unchecked:
