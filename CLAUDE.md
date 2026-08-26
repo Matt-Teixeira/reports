@@ -79,9 +79,9 @@ The Part 1 pattern, adapted. Status is updated as each commit lands:
       `IMAGE_TAG` retired
 - [x] `build.sh` — in-tree `npm install` as the host user + compose build;
       shared `/opt/resources/node_mod_cache/reports` mount retired
-- [ ] `build-release.sh` — clean-tree guard above the wipe, `#RELEASE:`
+- [x] `build-release.sh` — clean-tree guard above the wipe, `#RELEASE:`
       transforms, `RELEASE_SHA` stamp into the deployed `.env`
-- [ ] boot provenance — `env_note` (USER_ID, LOGGER_MODE,
+- [x] boot provenance — `env_note` (USER_ID, LOGGER_MODE,
       RELEASE_SHA|`dev-tree`, report family) + boot console line
 - [ ] logger on the fleet `LOG_DIR` pattern — constant in-container path,
       `${LOG_DIR:-./utils/logger/logs}` mount that fails safe to the dev path

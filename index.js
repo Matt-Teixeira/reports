@@ -248,7 +248,22 @@ async function on_boot() {
     new_online_systems: get_new_online_systems
   };
 
-  let note = { dt };
+  // RELEASE PROVENANCE (fleet paradigm): build-release.sh STAMPS RELEASE_SHA
+  // INTO THE DEPLOYED .env; A DEV TREE HAS NO KEY AND RECORDS 'dev-tree'. THE
+  // BOOT env_note MAKES EVERY util.app_run_logs ROW IDENTIFY ITS COMMIT
+  // (verbose_log->0->note->>'RELEASE_SHA'); THE CONSOLE LINE COVERS ANY
+  // CAPTURED OUTPUT (e.g. cron .out FILES, IF A SCHEDULE EVER EXISTS).
+  const release_sha = process.env.RELEASE_SHA || "dev-tree";
+  console.log(
+    `[reports] family=${report_type || "(none)"} release_sha=${release_sha}` +
+      ` user_id=${process.env.USER_ID}`
+  );
+  let note = {
+    dt,
+    report_family: report_type,
+    USER_ID: process.env.USER_ID,
+    RELEASE_SHA: release_sha
+  };
 
   const run_log = await makeAppRunLog();
   await addLogEvent(I, run_log, "on_boot", cal, note, null);
