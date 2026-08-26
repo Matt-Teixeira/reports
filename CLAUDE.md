@@ -83,7 +83,7 @@ The Part 1 pattern, adapted. Status is updated as each commit lands:
       transforms, `RELEASE_SHA` stamp into the deployed `.env`
 - [x] boot provenance — `env_note` (USER_ID, LOGGER_MODE,
       RELEASE_SHA|`dev-tree`, report family) + boot console line
-- [ ] logger on the fleet `LOG_DIR` pattern — constant in-container path,
+- [x] logger on the fleet `LOG_DIR` pattern — constant in-container path,
       `${LOG_DIR:-./utils/logger/logs}` mount that fails safe to the dev path
       (pre-migration logger fails UNSAFE: unknown `RUN_ENV` falls through to
       `/opt/run-logs/reports`)
@@ -123,14 +123,18 @@ preflight scripts; `/opt/apps/reports` is the git working tree itself.
   prune `alert-notify` as "another app's". Cleanup is deferred post-cutover
   per the fleet default; requires per-item sign-off.
 
-## Environment variables (pre-migration keys; migration adds/retires marked above)
+## Environment variables
 
-`APP_NAME`, `LOGGER`, `RUN_ENV` (logger-era, being replaced by
-`LOGGER_MODE`/`LOG_DIR`/`USER_ID`), `PGHOST`, `PGPORT`, `PGUSER`
-(`reports_rw`), `PGPASSWORD`, `PGDATABASE`, `PG_SSLMODE`, `PG_SSL_PATH`,
+`APP_NAME`, `LOGGER_MODE` (+`#RELEASE:LOGGER_MODE=log`), `LOG_DIR`
+(+`#RELEASE:LOG_DIR=/opt/run-logs/reports`), `USER_ID`
+(+`#RELEASE:USER_ID=svc`), `PGHOST`, `PGPORT`, `PGUSER` (`reports_rw`),
+`PGPASSWORD`, `PGDATABASE`, `PG_SSLMODE` (`verify-full`), `PG_SSL_PATH`,
 `OUTLOOK_USER`, `OUTLOOK_PW`, `MONDAY_API_TOKEN`, `MONDAY_BOARD_ID`,
-host-identity args (`DOCKER_GID`, `UID_0..2`), `IMAGE_TAG` (being retired),
-`RUN_USER` (being retired from `.env` — the entrypoint defaults to svc).
+host-identity args (`DOCKER_GID`, `UID_0..2`). `RELEASE_SHA` is injected by
+`build-release.sh` into the deployed `.env` only — never set by hand.
+Retired 2026-08-26: `LOGGER`/`RUN_ENV` (→ `LOGGER_MODE`/`LOG_DIR`),
+`IMAGE_TAG` (→ `USER_ID` tag), `RUN_USER` in `.env` (entrypoint defaults to
+svc; dev runs pass it on the command line).
 
 **This `.env` is the only copy of `OUTLOOK_PW` and `MONDAY_API_TOKEN`
 anywhere on this host.** It is backed up outside `/opt/apps` before any

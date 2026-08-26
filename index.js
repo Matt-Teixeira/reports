@@ -262,6 +262,7 @@ async function on_boot() {
     dt,
     report_family: report_type,
     USER_ID: process.env.USER_ID,
+    LOGGER_MODE: process.env.LOGGER_MODE,
     RELEASE_SHA: release_sha
   };
 

@@ -29,8 +29,10 @@ x-common-mounts: &common_mounts
     #    copy (dev clone, release) owns its own deps.
     - ./:/workspace
 
-    # 2) Centralized run logs on host
-    - /opt/run-logs/reports:/opt/run-logs/reports
+    # 2) Run logs — path depends on environment, and a missing LOG_DIR fails
+    #    SAFE into the dev tree (never writes into /opt/run-logs). The release
+    #    copy gets /opt/run-logs/reports via #RELEASE:LOG_DIR.
+    - ${LOG_DIR:-./utils/logger/logs}:/workspace/utils/logger/logs
 
     # 3) Shared PG SSL cert (read-only) — required by PG_SSLMODE=verify-full
     - /opt/resources/ssl:/opt/resources/ssl:ro
