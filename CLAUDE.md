@@ -87,7 +87,7 @@ The Part 1 pattern, adapted. Status is updated as each commit lands:
       `${LOG_DIR:-./utils/logger/logs}` mount that fails safe to the dev path
       (pre-migration logger fails UNSAFE: unknown `RUN_ENV` falls through to
       `/opt/run-logs/reports`)
-- [x] SIGTERM/SIGINT flush-once handlers (kill test pending in the smoke phase)
+- [x] SIGTERM/SIGINT flush-once handlers (kill test PASSED 2026-08-26: SIGTERM mid-run -> run_outcome failed, E_SIGNAL, exit 1, both sinks flushed)
 - [x] `preflight-check.sh` — authenticated PG as `reports_rw` from a sibling
       container (verify-full, real CA path); Monday.com authenticated `me`
       query; Outlook presence-only (decision 2026-08-26, Acumatica
