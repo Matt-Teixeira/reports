@@ -75,7 +75,7 @@ Other strengths to preserve through the migration:
 The Part 1 pattern, adapted. Status is updated as each commit lands:
 
 - [ ] `entrypoint.sh` repairs the log dir while root (only-if-root-owned)
-- [ ] image `reports:${USER_ID}` (`#RELEASE:USER_ID=svc` → `reports:svc`);
+- [x] image `reports:${USER_ID}` (`#RELEASE:USER_ID=svc` → `reports:svc`);
       `IMAGE_TAG` retired
 - [ ] `build.sh` — in-tree `npm install` as the host user + compose build;
       shared `/opt/resources/node_mod_cache/reports` mount retired

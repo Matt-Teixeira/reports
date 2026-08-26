@@ -22,16 +22,17 @@ x-common-mounts: &common_mounts
   volumes:
   # --- Bind mounts (host paths must exist) ---
 
-    # 1) Project source → live edit on host reflects in container
+    # 1) Project source → live edit on host reflects in container.
+    #    node_modules is IN-TREE (installed by build.sh as the host user), so
+    #    it rides along in this mount — the shared
+    #    /opt/resources/node_mod_cache mount is retired (2026-08-26); each
+    #    copy (dev clone, release) owns its own deps.
     - ./:/workspace
 
-    # 2) Cache node_modules on host (survives container removal)
-    - /opt/resources/node_mod_cache/reports:/workspace/node_modules
-
-    # 3) Centralized run logs on host
+    # 2) Centralized run logs on host
     - /opt/run-logs/reports:/opt/run-logs/reports
 
-    # 4) Shared PG SSL cert (read-only) — required by PG_SSLMODE=verify-full
+    # 3) Shared PG SSL cert (read-only) — required by PG_SSLMODE=verify-full
     - /opt/resources/ssl:/opt/resources/ssl:ro
 
 # ---------- Services ----------
