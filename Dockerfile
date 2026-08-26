@@ -11,10 +11,16 @@ RUN apt-get update \
 # 990/104, staging is 987/105) and a wrong value silently breaks bind-mount
 # permissions, so an unset value must fail the build instead. Supplied from
 # .env via docker-compose build args.
+ARG USER_ID
 ARG DOCKER_GID
 ARG UID_0
 ARG UID_1
 ARG UID_2
+
+# Identity label, matching the image tag (reports:${USER_ID}). Records who
+# built it, not a version -- RELEASE_SHA in the deployed .env is the
+# code-provenance record.
+LABEL version="${USER_ID}"
 
 # Create docker group matching the host GID
 RUN groupadd -g ${DOCKER_GID} docker

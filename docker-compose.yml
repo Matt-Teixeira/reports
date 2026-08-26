@@ -37,22 +37,27 @@ x-common-mounts: &common_mounts
 # ---------- Services ----------
 services:
   app:
-    # This repo OWNS the shared `aux` image. It was previously built by hand
-    # and had no build stanza here, which is why a fresh host had no way to
-    # produce it. Build with: docker compose build app
-    image: aux:${IMAGE_TAG}
+    # USER_ID drives the tag: reports:<username> for dev builds, reports:svc
+    # for the release copy (flipped by #RELEASE:USER_ID=svc at release time).
+    # Renamed from the historical shared `aux:` tag 2026-08-26 -- nothing
+    # else consumes aux:. Build with: bash build.sh
+    image: reports:${USER_ID}
     build:
       context: .
       # Host identity comes from .env so this file stays host-agnostic and the
       # dev and staging branches can share it. See .env.example.
       args:
+        USER_ID: ${USER_ID}
         DOCKER_GID: ${DOCKER_GID}
         UID_0: ${UID_0}
         UID_1: ${UID_1}
         UID_2: ${UID_2}
     <<: [*common_env, *common_mounts]
     environment:
-      RUN_USER: ${RUN_USER:-svc}
+      # Intentionally unset in .env: empty -> entrypoint.sh defaults to svc,
+      # so ONE place decides the production identity. Dev runs pass it on the
+      # command line. ':-' silences the compose WARN.
+      RUN_USER: ${RUN_USER:-}
       HOME: /tmp
       NPM_CONFIG_CACHE: /tmp/.npm
       # Local PG container overrides
