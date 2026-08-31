@@ -169,21 +169,25 @@ const run_one = async (run_log, job_id, request, on_facts = null) => {
       request.system_id,
       html
     );
-    // Keep a dated, version-controlled copy for self-reference — out/ is
-    // gitignored scratch that gets overwritten every run. output.archive
-    // false skips this (bulk sweeps would bloat the repo).
-    if (request.output.archive) {
-      const archive_dir = path.join(__dirname, "archive");
-      fs.mkdirSync(archive_dir, { recursive: true });
-      // Non-default periods tag the archived name: a 7-day, a 6-month and a
-      // 30-day brief archived the same day must not overwrite each other.
-      // The tag vocabulary is shared (periods.js) so a filename and the
-      // email announcing it can never name the span differently.
-      const tag = period_tag_of(request.window.lookback_days);
-      const dated = `Avante-${request.system_id}-Magnet-Health${tag}-${new Date().toISOString().slice(0, 10)}.pdf`;
-      outputs.archive_path = path.join(archive_dir, dated);
-      fs.copyFileSync(outputs.pdf_path, outputs.archive_path);
-    }
+    // ARCHIVE-DISABLED 2026-08-31 (owner decision): no copies of delivered
+    // PDFs are kept on disk. The block below kept a dated copy under
+    // sme_reports/archive/, which grows unboundedly and — on the release
+    // copy — is destroyed by build-release.sh's wipe anyway. Restore by
+    // uncommenting; `request.output.archive` still gates it, so no caller
+    // needs to change. outputs.archive_path stays unset.
+    //
+    // if (request.output.archive) {
+    //   const archive_dir = path.join(__dirname, "archive");
+    //   fs.mkdirSync(archive_dir, { recursive: true });
+    //   // Non-default periods tag the archived name: a 7-day, a 6-month and a
+    //   // 30-day brief archived the same day must not overwrite each other.
+    //   // The tag vocabulary is shared (periods.js) so a filename and the
+    //   // email announcing it can never name the span differently.
+    //   const tag = period_tag_of(request.window.lookback_days);
+    //   const dated = `Avante-${request.system_id}-Magnet-Health${tag}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    //   outputs.archive_path = path.join(archive_dir, dated);
+    //   fs.copyFileSync(outputs.pdf_path, outputs.archive_path);
+    // }
   }
 
   if (request.output.email) {
@@ -277,16 +281,21 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
     // document rendered from, archived so future runs can diff against
     // them ("changes since last report" is buildable only if this history
     // exists). Capture starts now, consumer comes later.
-    if (opts.archive_records) {
-      // Isolated: history capture is auxiliary — a failed sidecar write
-      // must never sink the summary document's delivery.
-      try {
-        write_records_sidecar({ scope, period_tag, records, failures });
-      } catch (sidecar_error) {
-        await addLogEvent(E, run_log, "build_fleet_summary", cat, { job_id, sidecar: true }, sidecar_error);
-        console.error(`records sidecar failed (delivery unaffected): ${sidecar_error.message}`);
-      }
-    }
+    // ARCHIVE-DISABLED 2026-08-31 (owner decision): the records sidecar
+    // writes JSON into sme_reports/archive/, so it is off with the rest of
+    // on-disk archiving. fanout.js still sets archive_records (!dry_run) —
+    // the flag is left intact so restoring is just an uncomment.
+    //
+    // if (opts.archive_records) {
+    //   // Isolated: history capture is auxiliary — a failed sidecar write
+    //   // must never sink the summary document's delivery.
+    //   try {
+    //     write_records_sidecar({ scope, period_tag, records, failures });
+    //   } catch (sidecar_error) {
+    //     await addLogEvent(E, run_log, "build_fleet_summary", cat, { job_id, sidecar: true }, sidecar_error);
+    //     console.error(`records sidecar failed (delivery unaffected): ${sidecar_error.message}`);
+    //   }
+    // }
     const note = {
       job_id,
       systems: vm.total,

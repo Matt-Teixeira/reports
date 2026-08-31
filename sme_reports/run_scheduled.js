@@ -55,12 +55,22 @@ const {
 // config id + a fresh uuid per document, copied with EXCL so a collision
 // FAILS instead of overwriting history. Dry runs deliberately archive
 // nothing — their rows carry the scratch name of what WOULD have sent.
+//
+// ARCHIVE-DISABLED 2026-08-31 (owner decision): no copies of delivered PDFs
+// are kept on disk, so this reduces to naming the document that was sent —
+// exactly what the dry-run path already records. The sends row therefore
+// still answers "what did X receive", but by scratch name rather than by an
+// attempt-unique archived name. NOTE the tradeoff being accepted: out/ is
+// overwrite-by-design, so two configs in one slot producing different
+// documents under the same basename are no longer distinguishable from this
+// column alone. Restore the body below to get attempt-unique names back.
 const archive_delivered = (pdf_path, config_id) => {
-  const archive_dir = path.join(__dirname, "archive");
-  fs.mkdirSync(archive_dir, { recursive: true });
-  const name = `${path.basename(pdf_path, ".pdf")}-cfg${config_id}-${uuidv4().slice(0, 8)}.pdf`;
-  fs.copyFileSync(pdf_path, path.join(archive_dir, name), fs.constants.COPYFILE_EXCL);
-  return name;
+  return path.basename(pdf_path);
+  // const archive_dir = path.join(__dirname, "archive");
+  // fs.mkdirSync(archive_dir, { recursive: true });
+  // const name = `${path.basename(pdf_path, ".pdf")}-cfg${config_id}-${uuidv4().slice(0, 8)}.pdf`;
+  // fs.copyFileSync(pdf_path, path.join(archive_dir, name), fs.constants.COPYFILE_EXCL);
+  // return name;
 };
 
 // Record one recipient's outcome. `outcomes` marks the recipient as
@@ -372,18 +382,20 @@ const run_user_summary = async (run_log, job_id, coalition, slot, cache) => {
       );
       if (!has_live_eligible) continue;
       r.archived_doc = archive_delivered(r.pdf_path, base_cfg.id);
-      // Deferred history sidecar (round-3 F2), best-effort: capture never
-      // blocks delivery.
-      try {
-        write_records_sidecar({
-          scope: r.resolution,
-          period_tag: period_tag(base_cfg.lookback_days),
-          records: r.records,
-          failures: r.failures
-        });
-      } catch (sidecar_error) {
-        console.error(`records sidecar failed for ${r.unit.customer_name} (delivery unaffected): ${sidecar_error.message}`);
-      }
+      // ARCHIVE-DISABLED 2026-08-31 (owner decision): the deferred history
+      // sidecar (round-3 F2) writes JSON into sme_reports/archive/, so it is
+      // off with the rest of on-disk archiving.
+      //
+      // try {
+      //   write_records_sidecar({
+      //     scope: r.resolution,
+      //     period_tag: period_tag(base_cfg.lookback_days),
+      //     records: r.records,
+      //     failures: r.failures
+      //   });
+      // } catch (sidecar_error) {
+      //   console.error(`records sidecar failed for ${r.unit.customer_name} (delivery unaffected): ${sidecar_error.message}`);
+      // }
     } catch (error) {
       rendered.set(r.unit.key, { ok: false, unit: r.unit, error: error.message });
       failed_units += 1;
