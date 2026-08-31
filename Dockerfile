@@ -29,21 +29,28 @@ RUN apt-get update \
 # HEADLESS CHROMIUM -- BAKED INTO THE IMAGE, NOT THE TREE.
 #
 # The image owns the browser and the tree owns the code: node_modules is
-# in-tree per copy (build.sh), but a ~170 MB browser per copy is not, and
+# in-tree per copy (build.sh), but a ~350 MB browser per copy is not, and
 # build-release.sh would mirror it into /opt/apps on every release. build.sh
 # therefore sets PUPPETEER_SKIP_DOWNLOAD=true for the npm install, and this
 # layer installs the browser instead.
 #
-# The version is NOT pinned here as a Chrome build number. `npx
-# puppeteer@<ver> browsers install chrome` installs exactly the build that
-# puppeteer version pins, so bumping the npm dependency and this arg together
-# can never leave the two out of sync. PUPPETEER_VERSION must equal
-# package.json's puppeteer version -- unlike the host-identity ARGs above it
-# carries a default, because it describes the app, not the host.
+# Install with @puppeteer/browsers and an EXPLICIT version -- NOT with
+# `npx puppeteer@<ver> browsers install chrome`. That form installs the whole
+# puppeteer package first, and its POSTINSTALL also downloads Chrome; the
+# postinstall hangs indefinitely here (observed 2026-08-31: 32 minutes stuck
+# at ~1 KiB/s, while a plain container pulled the same CDN at 44 MB/s -- so
+# it is the installer, not the network). @puppeteer/browsers fetches the same
+# build in about 6 seconds.
+#
+# CHROME_VERSION is DERIVED, not hand-maintained: build.sh reads it out of the
+# installed puppeteer's own revisions table and passes it through compose, so
+# bumping the npm dependency moves the browser with it. The default below is
+# only a fallback for a bare `docker compose build` and must equal the build
+# that package.json's puppeteer version pins.
 # ----------------------------------------------------------
-ARG PUPPETEER_VERSION=21.11.0
+ARG CHROME_VERSION=121.0.6167.85
 ENV PUPPETEER_CACHE_DIR=/opt/puppeteer
-RUN npx --yes puppeteer@${PUPPETEER_VERSION} browsers install chrome \
+RUN npx --yes @puppeteer/browsers install "chrome@${CHROME_VERSION}" --path /opt/puppeteer \
  && chrome_bin="$(find /opt/puppeteer -type f -name chrome | head -1)" \
  && [ -n "$chrome_bin" ] \
  && ln -s "$chrome_bin" /usr/local/bin/chrome-headless \

@@ -33,6 +33,23 @@ docker run --rm \
   -e PUPPETEER_SKIP_DOWNLOAD=true \
   node:lts npm install
 
+# Derive the Chrome build from the puppeteer that npm just installed, rather
+# than hand-maintaining a version in two places. The Dockerfile installs
+# exactly this build, so bumping the puppeteer dependency moves the browser
+# with it. Falls back to the compose default if the lookup fails (e.g. a
+# puppeteer layout change) -- the build still succeeds, and the preflight
+# browser-launch probe is what catches a genuine mismatch.
+CHROME_VERSION="$(docker run --rm -v "$(pwd)":/workspace -w /workspace \
+  --user "$(id -u):$(id -g)" -e NPM_CONFIG_CACHE=/tmp/.npm node:lts \
+  node -p "require('puppeteer-core/lib/cjs/puppeteer/revisions.js').PUPPETEER_REVISIONS.chrome" 2>/dev/null || true)"
+if [ -n "$CHROME_VERSION" ]; then
+    export CHROME_VERSION
+    echo "==> chrome build derived from installed puppeteer: $CHROME_VERSION"
+else
+    echo "==> WARNING: could not derive the Chrome build from node_modules/puppeteer-core;"
+    echo "    falling back to the default pinned in docker-compose.yml."
+fi
+
 echo "==> docker compose build app (image reports:${USER_ID})"
 docker compose build app
 

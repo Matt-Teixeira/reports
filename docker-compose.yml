@@ -55,11 +55,13 @@ services:
         UID_0: ${UID_0}
         UID_1: ${UID_1}
         UID_2: ${UID_2}
-        # Unlike the host-identity args above, this one describes the APP, not
-        # the host, so it carries a default in the Dockerfile and is only set
-        # here if .env overrides it. It MUST equal package.json's puppeteer
-        # version -- the image installs the browser that version pins.
-        PUPPETEER_VERSION: ${PUPPETEER_VERSION:-21.11.0}
+        # Unlike the host-identity args above, this one describes the APP,
+        # not the host. build.sh DERIVES it from the installed puppeteer's own
+        # revisions table and exports it, so the baked browser always matches
+        # the npm pin. The literal is only a fallback for a bare
+        # `docker compose build` and must equal what package.json's puppeteer
+        # version pins.
+        CHROME_VERSION: ${CHROME_VERSION:-121.0.6167.85}
     <<: [*common_env, *common_mounts]
     environment:
       # Intentionally unset in .env: empty -> entrypoint.sh defaults to svc,
