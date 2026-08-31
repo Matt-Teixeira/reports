@@ -1,5 +1,24 @@
 # CLAUDE.md
 
+> ## ⚠️ MID-MERGE — this file describes the PRE-MERGE app (2026-08-31)
+>
+> `STAGING_docker` is taking the `PROD` branch's application work (109 commits:
+> the `sme_reports/` Magnet Health Brief engine, scoped/customer summaries, EDU
+> reporting, PDF rendering via headless Chromium, zip batch delivery) while
+> keeping the docker/release paradigm. Until this banner is removed, sections
+> below may describe either the pre- or post-merge state. Known deltas in
+> flight:
+>
+> - a new run family `sme_report` (file mode and DB-config scheduled mode)
+> - `puppeteer` + a baked Chromium and the `zip` binary become image
+>   dependencies — the Dockerfile is no longer "gosu only"
+> - PDF archiving is being deliberately disabled (no host archive path)
+> - `reports_rw` needs three new grants (`alert.sme_report_sends` INSERT + its
+>   sequence, `public.users` SELECT)
+>
+> Unchanged and reaffirmed: **no schedule is installed on this host, by
+> decision.** See the hazard section below before running anything.
+
 > **Migrated to the fleet dev/release paradigm 2026-08-26** (spec:
 > `data_acquisition/docs/migration_CLAUDE.md`, Part 1). Structure-only:
 > **no schedule was installed, by decision** — see the warning below before
