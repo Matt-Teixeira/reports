@@ -2,3 +2,17 @@
 node_modules/
 *.txt
 pg_ssl.crt
+
+# NOTE: PROD ignores `utils/` — this branch deliberately does NOT. The shared
+# library is VENDORED and TRACKED here (fleet paradigm: never clone the old
+# AvanteHS-RTT/utils repo). Do not reinstate that ignore rule on a merge.
+
+sme_reports/out/
+*Zone.Identifier
+
+# Generated report artifacts — never tracked (delivered PDFs live in email;
+# archiving to disk is disabled on this host, see sme_reports/index.js and
+# run_scheduled.js)
+sme_reports/archive/
+/Avante-*.pdf
+/Avante-*.html

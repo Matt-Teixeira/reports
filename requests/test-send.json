@@ -1,0 +1,13 @@
+{
+  "report_type": "magnet_health",
+  "system_id": "SME15822",
+  "recipients": [
+    "matt.teixeira@avantehs.com"
+  ],
+  "cc_list": [],
+  "output": {
+    "html": true,
+    "pdf": true,
+    "email": true
+  }
+}

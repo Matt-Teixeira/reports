@@ -26,7 +26,19 @@
     "reportable_issue": "node index.js reportable_issue",
     "unsuccessful_acqu_hhm": "node index.js unsuccessful_acqu_hhm",
     "new_online_systems": "node index.js new_online_systems",
-    "monday": "node index.js monday"
+    "monday": "node index.js monday",
+    "report": "node sme_reports/oneoff/cli.js",
+    "report:customer": "node sme_reports/oneoff/cli.js customer",
+    "report:sme": "node sme_reports/oneoff/cli.js sme",
+    "report:customer-briefs": "node sme_reports/oneoff/cli.js customer-briefs",
+    "report:fleet": "node sme_reports/oneoff/cli.js fleet",
+    "report:list": "node sme_reports/oneoff/cli.js --list",
+    "check:oneoff": "node sme_reports/dev/check_oneoff.js",
+    "check:scope": "node sme_reports/dev/check_scope.js",
+    "check:config": "node sme_reports/dev/check_config.js",
+    "check:compute": "node sme_reports/dev/check_compute.js",
+    "check:fleet": "node sme_reports/dev/check_fleet.js",
+    "check:chart": "node sme_reports/dev/check_chart.js"
   },
   "keywords": [],
   "author": "",
@@ -38,7 +50,8 @@
     "node-fetch": "^2.7.0",
     "nodemailer": "^6.9.8",
     "pg-promise": "^11.5.4",
+    "puppeteer": "^21.11.0",
     "short-uuid": "^4.2.2",
-    "uuid": "^8.3.2"
+    "uuid": "^9.0.1"
   }
 }

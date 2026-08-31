@@ -1,0 +1,21 @@
+{
+  "batch_email": {
+    "recipients": ["matt.teixeira@avantehs.com"],
+    "cc_list": [],
+    "summary": true,
+    "summary_pdf": true
+  },
+  "reports": [
+    { "report_type": "magnet_health", "system_id": "SME15822" },
+    { "report_type": "magnet_health", "system_id": "SME18368" },
+    { "report_type": "magnet_health", "system_id": "SME01403" },
+    { "report_type": "magnet_health", "system_id": "SME01133" },
+    { "report_type": "magnet_health", "system_id": "SME01141" },
+    { "report_type": "magnet_health", "system_id": "SME16381" },
+    { "report_type": "magnet_health", "system_id": "SME16261" },
+    { "report_type": "magnet_health", "system_id": "SME18635" },
+    { "report_type": "magnet_health", "system_id": "SME19034" },
+    { "report_type": "magnet_health", "system_id": "SME12381" },
+    { "report_type": "magnet_health", "system_id": "SME20004" }
+  ]
+}

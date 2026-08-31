@@ -1,0 +1,173 @@
+const fs = require("fs");
+const path = require("path");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const exec_file = promisify(execFile);
+const { v4: uuidv4 } = require("uuid");
+const { build_fresh_zip } = require("./fresh_zip");
+
+const build_transporter = require("../../email/build-transporter");
+const send_with_retry = require("./send_with_retry");
+const { condition_cell_record } = require("../conditions");
+const {
+  COLORS,
+  FONT,
+  logo_attachment,
+  wrap_email,
+  themed_table,
+  esc
+} = require("./email_theme");
+
+const [addLogEvent] = require("../../utils/logger/log");
+const {
+  type: { I, E },
+  tag: { det, cat }
+} = require("../../utils/logger/enums");
+
+// Sends the generated briefs by email. Small batches attach the PDFs
+// individually; batches larger than AUTO_ZIP_THRESHOLD are bundled into a
+// zip (batch_email.zip = true forces zipping for any size). Batches whose
+// PDFs exceed CHUNK_PDF_BYTES are split across multiple "part n/N" emails so
+// each stays under the O365 message-size limit (~25 MB after base64 growth).
+
+const AUTO_ZIP_THRESHOLD = 4;
+const CHUNK_PDF_BYTES = 12 * 1024 * 1024;
+const SEND_THROTTLE_MS = 1500;
+
+const chunk_by_size = (results) => {
+  const chunks = [];
+  let current = [];
+  let bytes = 0;
+  for (const r of results) {
+    const size = fs.statSync(r.pdf_path).size;
+    if (current.length && bytes + size > CHUNK_PDF_BYTES) {
+      chunks.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(r);
+    bytes += size;
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
+};
+
+const send_one = async (run_log, job_id, batch_email, chunk, out_dir, part, total_parts, total_systems) => {
+  const date = new Date().toISOString().slice(0, 10);
+  const part_tag = total_parts > 1 ? ` — part ${part}/${total_parts}` : "";
+  const subject = `Magnet Health Briefs — ${total_systems} systems${part_tag} — ${date}`;
+  const use_zip = batch_email.zip || chunk.length > AUTO_ZIP_THRESHOLD;
+
+  // Grade the distilled record, not the bare archetype — quench and the
+  // overlay states live there, and the summary email and fleet PDF already
+  // grade this way. The bare archetype called a quenched magnet "stable".
+  const rows = chunk.map((r) => [
+    `<b>${esc(r.system_id)}</b>`,
+    `${esc(r.site_name)}<br><span style="font-size:11px;color:${COLORS.grey};">${esc(r.manufacturer)} ${esc(r.modality || "")}</span>`,
+    condition_cell_record({ ...(r.summary || {}), archetype: r.archetype })
+  ]);
+  const body_html =
+    `<p style="${FONT}font-size:14px;color:${COLORS.navy};margin:0 0 14px 0;">Attached are the one-page Magnet Health Briefs for <b>${chunk.length}</b> of ${total_systems} systems${use_zip ? " (bundled as a zip)" : ""}${part_tag}.</p>` +
+    themed_table(
+      [
+        { label: "SYSTEM", width: "90" },
+        { label: "SITE" },
+        { label: "CONDITION", width: "190" }
+      ],
+      rows
+    );
+
+  let attachments;
+  let zip_path = null;
+  if (use_zip) {
+    const zip_name =
+      total_parts > 1
+        ? `Magnet-Health-Briefs-${date}-part${part}.zip`
+        : `Magnet-Health-Briefs-${date}.zip`;
+    // Fresh archive at a PRIVATE unique path (subscriptions review rounds
+    // 1–2): `zip` ADDS to an existing file, and a shared date path lets a
+    // concurrent run rebuild the archive out from under an in-flight
+    // send. The recipient sees only the clean zip_name.
+    zip_path = await build_fresh_zip(
+      path.join(out_dir, `batch-${uuidv4().slice(0, 8)}-${zip_name}`),
+      chunk.map((r) => r.pdf_path)
+    );
+    attachments = [{ filename: zip_name, path: zip_path }];
+  } else {
+    attachments = chunk.map((r) => ({
+      filename: path.basename(r.pdf_path),
+      path: r.pdf_path
+    }));
+  }
+
+  const message = {
+    from: process.env.OUTLOOK_USER,
+    to: batch_email.recipients.join(","),
+    subject,
+    html: wrap_email({
+      title: `Magnet Health Briefs${part_tag}`,
+      date,
+      body_html
+    }),
+    attachments: [logo_attachment(), ...attachments]
+  };
+  if (batch_email.cc_list.length) message.cc = batch_email.cc_list.join(",");
+
+  // SMTP truth isolated from telemetry (round-3 F1); transporter
+  // construction inside the try so its failure cannot leak the private
+  // zip (round-3 F4).
+  let info;
+  try {
+    const transporter = await build_transporter();
+    info = await send_with_retry(transporter, message);
+  } catch (error) {
+    await addLogEvent(E, run_log, "send_batch_email", cat, { job_id, to: message.to, part: `${part}/${total_parts}`, status: "ERROR" }, error).catch(() => {});
+    throw error;
+  } finally {
+    // Best-effort cleanup of the private zip — a cleanup failure must
+    // never change the send outcome.
+    if (zip_path) {
+      try {
+        fs.rmSync(zip_path, { force: true });
+      } catch (cleanup_error) {
+        console.error(`batch zip cleanup failed (send outcome unaffected): ${cleanup_error.message}`);
+      }
+    }
+  }
+  // Best-effort success telemetry — cannot change the SMTP result.
+  try {
+    const note = {
+      job_id,
+      to: message.to,
+      part: `${part}/${total_parts}`,
+      systems: chunk.map((r) => r.system_id),
+      zipped: use_zip,
+      status: "SENT",
+      response: info && info.response
+    };
+    await addLogEvent(I, run_log, "send_batch_email", det, note, null);
+  } catch (log_error) {
+    console.error(`batch send log failed (send outcome unaffected): ${log_error.message}`);
+  }
+  return info;
+};
+
+const send_batch_email = async (run_log, job_id, batch_email, results, out_dir) => {
+  const chunks = chunk_by_size(results);
+  for (let i = 0; i < chunks.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, SEND_THROTTLE_MS));
+    await send_one(
+      run_log,
+      job_id,
+      batch_email,
+      chunks[i],
+      out_dir,
+      i + 1,
+      chunks.length,
+      results.length
+    );
+  }
+  return { parts: chunks.length };
+};
+
+module.exports = send_batch_email;

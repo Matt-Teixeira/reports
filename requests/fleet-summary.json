@@ -1,0 +1,676 @@
+{
+  "summary_only": true,
+  "exclude": [
+    "SME10844",
+    "SME11246",
+    "SME11247",
+    "SME13604",
+    "SME13605",
+    "SME13606",
+    "SME13607"
+  ],
+  "exclude_note": "RF/SC service stations, not fleet",
+  "batch_email": {
+    "recipients": [
+      "matt.teixeira@avantehs.com"
+    ],
+    "cc_list": [],
+    "summary": true,
+    "summary_pdf": true,
+    "attachments": false
+  },
+  "reports": [
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01096"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01123"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01133"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01140"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01141"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME02582"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME02583"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME08709"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME08722"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME10242"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME10244"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME10250"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME10259"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME12083"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME12152"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME12631"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME13612"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME13615"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15605"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15799"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15800"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15801"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15803"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15804"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15806"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15807"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15808"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15812"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15813"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15814"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15815"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15817"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15818"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15819"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15820"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15821"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16261"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16263"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16264"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16266"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16267"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16268"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16270"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16272"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16345"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16377"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16380"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16381"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16803"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16909"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME16947"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME17676"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18351"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18353"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18354"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18355"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18358"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18371"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME19053"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME19163"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME19164"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME19530"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME19647"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20004"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20122"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20288"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20292"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20295"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20296"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20484"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20485"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20486"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20488"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20647"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20648"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20756"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20757"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21284"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21824"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21898"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21899"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21914"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21917"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21920"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21922"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21923"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21932"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME22099"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME22407"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME22990"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01138"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01402"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01403"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01404"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01405"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01424"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME10229"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME10232"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15802"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15805"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15809"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15811"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15816"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15822"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15823"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18368"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME19034"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20487"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01097"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01100"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01101"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01107"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01109"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01111"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01113"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01115"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01118"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01121"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01125"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01130"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01131"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01135"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME01136"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME08716"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME10231"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME10262"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME10756"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME10844"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME11139"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME11221"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME11246"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME11247"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME12029"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME12164"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME12381"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME12471"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME12753"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME13078"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME13604"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME13605"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME13606"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME13607"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME15166"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18357"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18359"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18367"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18635"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME18636"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME19528"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20553"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20554"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20555"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20556"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20557"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME20758"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21580"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21796"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21797"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21915"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21916"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21925"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME21933"
+    },
+    {
+      "report_type": "magnet_health",
+      "system_id": "SME22365"
+    }
+  ]
+}

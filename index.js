@@ -383,6 +383,46 @@ async function on_boot() {
       return;
     }
 
+    // SINGLE-SME MAGNET HEALTH BRIEF -- DISPATCHES TO ITS OWN ENGINE UNDER
+    // sme_reports/ AND SKIPS THE alert.reports SCHEMA FLOW ENTIRELY.
+    //   node index.js sme_report ./requests/<name>.json   file/batch mode
+    //   node index.js sme_report [--slot|--config|--dry-run]  scheduled mode
+    //
+    // DISPATCHES *INSIDE* THE SHARED try WITH THE SHARED run_log: THE PROD
+    // BRANCH BUILT ITS OWN run_log AND CALLED writeLogEvents() DIRECTLY,
+    // WHICH SKIPPED finalizeRun -- NO run_outcome EVENT, NO DB INSERT, NO
+    // SIGNAL-SAFE FLUSH. ops-dashboard AND incident-engine READ THAT
+    // CONTRACT, SO THE DISPATCH LIVES HERE AND LETS THE SHARED finally
+    // GRADE THE RUN (run_outcome/v1).
+    if (report_type === "sme_report") {
+      // STRICT PARSE FIRST: A TYPO'D --config MUST ABORT, NEVER FALL
+      // THROUGH TO THE LIVE SLOT BATCH. A BAD ARGUMENT IS AN OPERATOR
+      // ERROR, SO IT CARRIES THE USAGE CODE (EXIT 3) RATHER THAN LOOKING
+      // LIKE A FAILED RUN (EXIT 1) -- SAME GRADING AS AN UNKNOWN FAMILY.
+      const { parse_sme_args } = require("./sme_reports/cli_args");
+      let opts;
+      try {
+        opts = parse_sme_args(process.argv.slice(3));
+      } catch (error) {
+        error.code = "E_UNKNOWN_RUN_GROUP";
+        throw error;
+      }
+
+      if (opts.request_path) {
+        const run_sme_report = require("./sme_reports");
+        await run_sme_report(run_log, opts.request_path);
+      } else {
+        // SCHEDULED (DB-CONFIG) MODE: MATCH THE CURRENT SLOT AGAINST
+        // alert.sme_reports AND FAN OUT. OPERATOR OVERRIDES:
+        //   --slot mon-08:00   run a specific slot without waiting for cron
+        //   --config 3         run one config row by id (dry-run if disabled)
+        //   --dry-run          force the no-send path regardless of the row
+        const run_scheduled = require("./sme_reports/run_scheduled");
+        await run_scheduled(run_log, opts);
+      }
+      return;
+    }
+
     if (
       report_type === "get_user_report_schemas" ||
       !report_queries[report_type]

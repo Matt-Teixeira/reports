@@ -1,0 +1,13 @@
+{
+  "batch_email": {
+    "recipients": ["matt.teixeira@avantehs.com"],
+    "cc_list": [],
+    "summary": true
+  },
+  "reports": [
+    { "report_type": "magnet_health", "system_id": "SME01136" },
+    { "report_type": "magnet_health", "system_id": "SME10756" },
+    { "report_type": "magnet_health", "system_id": "SME11139" },
+    { "report_type": "magnet_health", "system_id": "SME20758" }
+  ]
+}
