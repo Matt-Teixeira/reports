@@ -12,18 +12,28 @@
 -- grant. NOTE: "GRANT SELECT ON ALL TABLES IN SCHEMA x" covers existing tables
 -- only; a table added later needs this script re-run.
 --
--- Grant surface (verified against the code 2026-07-27):
+-- PREREQUISITE (2026-08-31): run sql/sme_reports_config.sql FIRST. The grants
+-- below name alert.sme_report_sends and its sequence directly, and this script
+-- is non-transactional (DB-03) — against a database without those objects it
+-- stops midway, having applied everything above the failure.
+--
+-- Grant surface (verified against the code 2026-08-31, post-PROD-merge):
 --   READS   alert.* , mag.* , config.* , edu.*  (report queries join broadly here)
 --           util.ip_sec                          (VPN IP lookups)
---           public.customers / sites / systems   (entity joins; NOTHING else in
---           public — it also holds hhm_credentials/users, which this app must
---           never read)
---   WRITES  alert.models         UPDATE  (sql/schedule_matrix.sql)
---           alert.notifications  UPDATE  (email/sms status updates)
---           util.app_run_logs    INSERT  (logger self-log, utils/logger/log.js)
---   No sequence privileges anywhere (none of the write targets have serial
---   columns). No DELETE/TRUNCATE anywhere. Temp tables come from the PUBLIC
+--           public.customers / sites / systems   (entity joins)
+--           public.users — FOUR COLUMNS ONLY, column-level (see below)
+--   WRITES  alert.models              UPDATE  (sql/schedule_matrix.sql)
+--           alert.notifications       UPDATE  (email/sms status updates)
+--           alert.sme_report_sends    INSERT  (sme_reports/sql/insert-send.sql)
+--           util.app_run_logs         INSERT  (logger self-log, utils/logger/log.js)
+--   ONE sequence privilege: USAGE on alert.sme_report_sends_id_seq. The id is
+--   BIGSERIAL and nextval() in a column DEFAULT executes as the INSERTING role,
+--   not the owner — without this the INSERT above fails. (The pre-merge claim
+--   "no sequence privileges anywhere / none of the write targets have serial
+--   columns" was true until the sme_reports merge; it no longer is.)
+--   No DELETE/TRUNCATE anywhere. Temp tables come from the PUBLIC
 --   TEMP grant on the database (used by alert-tests SQL).
+--   NOTHING in archive_* — see the archived-partition sweep below.
 --
 -- Deviation from the incident-engine pattern, on purpose (pilot scope): the
 -- self-log INSERT is granted on util.app_run_logs directly instead of through
@@ -59,6 +69,12 @@ REVOKE ALL ON SCHEMA alert                  FROM reports_rw;
 GRANT USAGE  ON SCHEMA alert                TO reports_rw;
 GRANT SELECT ON ALL TABLES IN SCHEMA alert  TO reports_rw;
 GRANT UPDATE ON alert.models, alert.notifications TO reports_rw;
+-- Send-status tracking for the scheduled sme_reports runner: one row per
+-- envelope recipient per delivery attempt. The sequence grant is NOT optional
+-- (BIGSERIAL default → nextval runs as the inserting role); it is deliberately
+-- placed after the REVOKE ALL ON ALL SEQUENCES above.
+GRANT INSERT ON alert.sme_report_sends              TO reports_rw;
+GRANT USAGE  ON SEQUENCE alert.sme_report_sends_id_seq TO reports_rw;
 
 -- mag / config / edu: read-only.
 REVOKE ALL ON ALL TABLES    IN SCHEMA mag    FROM reports_rw;
@@ -93,6 +109,49 @@ GRANT INSERT ON util.app_run_logs            TO reports_rw;
 REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM reports_rw;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM reports_rw;
 GRANT SELECT ON public.customers, public.sites, public.systems TO reports_rw;
+-- public.users, COLUMN-LEVEL ON PURPOSE. The sme_reports derived-recipient
+-- path reads exactly these four columns (sme_reports/sql/audience-users.sql
+-- and user-caches.sql). A full-table grant would also expose roles, phone
+-- numbers and anything added to this table later; the column list keeps the
+-- original "nothing else in public" posture as tight as the feature allows.
+-- public.hhm_credentials and every other public table remain unreachable
+-- (verified by the audit below).
+GRANT SELECT (email_address, status, notify_email, system_list_cache)
+  ON public.users TO reports_rw;
+
+-- ---------------------------------------------------------------------------
+-- ARCHIVED-PARTITION SWEEP (added 2026-08-31).
+--
+-- Moving a table to another schema PRESERVES its ACL. odd-jobs' partition
+-- archiver detaches month partitions from alert/edu/mag and moves them into
+-- archive_*, so every partition that was live the last time the sweeps above
+-- ran carries this role's SELECT out with it. The role has no USAGE on the
+-- archive_* schemas, so the privilege is unusable — but it is HELD, and the
+-- fail-closed audit below (correctly) refuses to certify it.
+--
+-- Found the hard way: this script had become un-re-runnable, aborting on 13
+-- stale grants (archive_alert/edu/mag, the 2026_02 partitions) that had
+-- nothing to do with the change being deployed. Allowlisting archive_* would
+-- have been the wrong fix — it would widen the surface to hide the drift.
+-- Instead, revoke on every archive schema that exists, every run.
+--
+-- Loop rather than a literal REVOKE list: the archive_* schemas do not exist
+-- on a fresh server, and this script is non-transactional (DB-03) — a REVOKE
+-- naming a missing schema would abort the run partway through.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  s record;
+BEGIN
+  FOR s IN
+    SELECT nspname FROM pg_namespace WHERE nspname LIKE 'archive%' ORDER BY 1
+  LOOP
+    EXECUTE format('REVOKE ALL ON ALL TABLES    IN SCHEMA %I FROM reports_rw', s.nspname);
+    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM reports_rw', s.nspname);
+    EXECUTE format('REVOKE ALL ON SCHEMA %I                  FROM reports_rw', s.nspname);
+  END LOOP;
+END
+$$;
 
 -- ---------------------------------------------------------------------------
 -- DATABASE-WIDE ALLOWLIST AUDIT (fail-closed). Every effective table/view/
@@ -138,10 +197,18 @@ BEGIN
        (e.nspname IN ('alert','mag','config','edu') AND e.priv = 'SELECT')
     OR (e.nspname, e.relname, e.priv) = ('alert', 'models', 'UPDATE')
     OR (e.nspname, e.relname, e.priv) = ('alert', 'notifications', 'UPDATE')
+    OR (e.nspname, e.relname, e.priv) = ('alert', 'sme_report_sends', 'INSERT')
+    -- the first sequence privilege this role has ever held (BIGSERIAL id on
+    -- alert.sme_report_sends); USAGE only, never SELECT/UPDATE.
+    OR (e.nspname, e.relname, e.priv) = ('alert', 'sme_report_sends_id_seq', 'USAGE')
     OR (e.nspname, e.relname, e.priv) = ('util', 'ip_sec', 'SELECT')
     OR (e.nspname, e.relname, e.priv) = ('util', 'app_run_logs', 'INSERT')
     OR (e.nspname = 'public' AND e.relname IN ('customers','sites','systems')
         AND e.priv = 'SELECT')
+    -- column-level grant: has_any_column_privilege reports SELECT here, which
+    -- is why this reads the same as a table grant. The four-column scope is
+    -- enforced by the GRANT above, not by this clause.
+    OR (e.nspname, e.relname, e.priv) = ('public', 'users', 'SELECT')
     -- extension defaults granted to PUBLIC (read-only; query text masked for
     -- unprivileged roles) — allowlisted explicitly so any OTHER grant trips.
     OR (e.nspname, e.relname, e.priv) = ('public', 'pg_stat_statements', 'SELECT')
