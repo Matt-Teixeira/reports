@@ -1,3 +1,11 @@
 node_modules
 .git
 .env
+
+# Generated and reference artifacts -- large, and nothing in the image reads
+# them. The Dockerfile COPYs only docker/entrypoint.sh, so these were pure
+# build-context weight (~12.7 MB of tracked PDFs alone).
+sme_reports/archive
+sme_reports/out
+reports_new
+requests

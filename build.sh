@@ -22,10 +22,15 @@ USER_ID="$(grep -E '^USER_ID=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d
 : "${USER_ID:?USER_ID is not set — add it to .env (drives the image tag reports:\$USER_ID)}"
 
 echo "==> npm install (in-tree, as $(id -un))"
+# PUPPETEER_SKIP_DOWNLOAD: the browser is BAKED INTO THE IMAGE (see
+# Dockerfile), not installed per copy. Without this, puppeteer's postinstall
+# pulls ~170 MB into the tree/HOME of this throwaway container -- bytes that
+# build-release.sh would then mirror into /opt/apps on every release.
 docker run --rm \
   -v "$(pwd)":/workspace -w /workspace \
   --user "$(id -u):$(id -g)" \
   -e NPM_CONFIG_CACHE=/tmp/.npm \
+  -e PUPPETEER_SKIP_DOWNLOAD=true \
   node:lts npm install
 
 echo "==> docker compose build app (image reports:${USER_ID})"
