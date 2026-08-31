@@ -537,6 +537,13 @@ const run_scheduled = async (run_log, opts = {}) => {
     await addLogEvent(I, run_log, "run_scheduled", cal, note, null);
     if (!rows.length) {
       console.log(`slot ${slot}: no enabled report configs`);
+      // OPT INTO THE run_outcome/v1 "skipped" GRADE: a valid invocation with
+      // no work is NOT the same as a successful send, and index.js's
+      // deriveOutcome only reports skipped when a runner says so. Without
+      // this, every off-slot cron tick would record "success" and the
+      // non-matching-minute smoke test could not be told apart from a real
+      // delivery run. Exit code is 0 either way.
+      run_log.outcome = "skipped";
       return { slot, ran: 0 };
     }
     console.log(`slot ${slot}: ${rows.length} config row${rows.length === 1 ? "" : "s"}`);
