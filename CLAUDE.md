@@ -1,23 +1,12 @@
 # CLAUDE.md
 
-> ## ⚠️ MID-MERGE — this file describes the PRE-MERGE app (2026-08-31)
->
-> `STAGING_docker` is taking the `PROD` branch's application work (109 commits:
-> the `sme_reports/` Magnet Health Brief engine, scoped/customer summaries, EDU
-> reporting, PDF rendering via headless Chromium, zip batch delivery) while
-> keeping the docker/release paradigm. Until this banner is removed, sections
-> below may describe either the pre- or post-merge state. Known deltas in
-> flight:
->
-> - a new run family `sme_report` (file mode and DB-config scheduled mode)
-> - `puppeteer` + a baked Chromium and the `zip` binary become image
->   dependencies — the Dockerfile is no longer "gosu only"
-> - PDF archiving is being deliberately disabled (no host archive path)
-> - `reports_rw` needs three new grants (`alert.sme_report_sends` INSERT + its
->   sequence, `public.users` SELECT)
->
-> Unchanged and reaffirmed: **no schedule is installed on this host, by
-> decision.** See the hazard section below before running anything.
+> **PROD application work merged in 2026-08-31.** `STAGING_docker` now carries
+> both the fleet docker/release paradigm and the `PROD` branch's app code (109
+> commits: the `sme_reports/` Magnet Health Brief engine, scoped and
+> customer-scoped summaries, EDU environmental reporting, Chromium PDF
+> rendering, zip batch delivery). See *The `sme_report` family* and *Rendering
+> stack* below. **No schedule is installed on this host, by decision** — that
+> is unchanged and now covers `sme_report` too.
 
 > **Migrated to the fleet dev/release paradigm 2026-08-26** (spec:
 > `data_acquisition/docs/migration_CLAUDE.md`, Part 1). Structure-only:
@@ -32,7 +21,9 @@
 for that family whose `alert.reports.email_schedule` marks that slot true,
 builds per-user HTML reports from staging-DB queries, and emails them via
 Office 365 SMTP. One extra family, `monday`, is a read-only Monday.com board
-query. Run-once by design — it does its slot's work and exits; production
+query. A second, independent engine under `sme_reports/` serves the
+`sme_report` family (see below) and does not touch the `alert.reports` schema
+flow at all. Run-once by design — it does its slot's work and exits; production
 would mean an external schedule, and **none is installed on this host**:
 the app had never run here before the migration (zero historical
 `util.app_run_logs` rows), and scheduling it is a separate, explicit owner
@@ -49,6 +40,62 @@ half-hour mark sends real email. Safe invocations:
 - any family at a **non-matching** minute → outcome `skipped`, exit 0, no
   email (this is the standard smoke test);
 - `node index.js monday` → read-only board query, no email.
+
+## The `sme_report` family (merged from PROD 2026-08-31)
+
+A separate engine under `sme_reports/`, dispatched from `index.js` and graded by
+the same `run_outcome/v1` contract as every other family:
+
+```bash
+# File / batch mode — a request JSON drives it
+node index.js sme_report ./requests/<name>.json
+
+# Scheduled (DB-config) mode — no file argument: matches the CURRENT slot
+# against alert.sme_reports and fans out
+node index.js sme_report
+node index.js sme_report --slot mon-08:00   # a specific slot, off-cron
+node index.js sme_report --config 3         # one config row by id
+node index.js sme_report --dry-run          # force the no-send path
+```
+
+Argument parsing is strict and happens FIRST: a typo'd `--config` aborts rather
+than falling through to the live slot batch, and an argument error exits **3**
+(usage), not 1 — same grading as an unknown report family.
+
+`alert.sme_reports` rows are inert until **both** gates open (`enabled=true`
+AND `dry_run=false`). The table is currently empty on this host, so the
+scheduled mode is a no-op until rows exist. Config rows are written by the
+frontend; this app only reads them, and writes one
+`alert.sme_report_sends` row per envelope recipient per delivery attempt.
+
+**PDF archiving is deliberately disabled** (owner decision 2026-08-31). No
+copies of delivered PDFs or history sidecars are written to disk. Four sites
+carry an `ARCHIVE-DISABLED` marker — two in `sme_reports/index.js`, two in
+`sme_reports/run_scheduled.js`; restoring is an uncomment, not a rewrite. One
+consequence to know: `alert.sme_report_sends.document` now records the `out/`
+scratch basename rather than an attempt-unique archived name, and `out/` is
+overwrite-by-design.
+
+## Rendering stack — lives in the IMAGE, not the tree
+
+`sme_reports` renders every PDF with headless Chromium and zips batches with
+the Info-ZIP binary. All of it is baked into the image:
+
+- **Chromium** — installed at build time via
+  `npx puppeteer@${PUPPETEER_VERSION} browsers install chrome`, so the browser
+  always matches the npm pin. `PUPPETEER_EXECUTABLE_PATH` is set by the image;
+  leave it unset in `.env`. `build.sh` passes `PUPPETEER_SKIP_DOWNLOAD=true` so
+  the ~170 MB browser never lands in the tree, where `build-release.sh` would
+  mirror it into `/opt/apps` on every release.
+- **`zip`** — `sme_reports/output/fresh_zip.js` shells out to the real binary.
+  Batches over 4 PDFs are bundled automatically.
+- **`fonts-liberation`** — not cosmetic. `render/assets/charw8.js` holds
+  per-character pixel widths measured in Chromium for the Helvetica/Arial
+  stack; without a metric-compatible face, Chromium substitutes and every
+  computed column width is silently wrong.
+
+`preflight-check.sh` probes all three for real (launches and closes a browser)
+rather than checking for their presence.
 
 ## Run outcome contract (run_outcome/v1) — keep
 
@@ -67,7 +114,17 @@ Other strengths to preserve through the migration:
 - **Least-privilege DB role** `reports_rw` (INSERT-not-SELECT on
   `util.app_run_logs` by design; provisioned by `db/setup-role.sql` with the
   root-only `/root/reports_rw_pw` password file — see the setup doc,
-  "DATABASE ROLES").
+  "DATABASE ROLES"). Widened 2026-08-31 for `sme_reports`: `INSERT` on
+  `alert.sme_report_sends` **plus `USAGE` on its sequence** (BIGSERIAL —
+  `nextval` in a DEFAULT runs as the inserting role, so the INSERT fails
+  without it), and **column-level** `SELECT` on exactly four columns of
+  `public.users`. `hhm_credentials` and the rest of `public` stay unreachable.
+  **Run `sql/sme_reports_config.sql` BEFORE `db/setup-role.sql`** — the grants
+  name those tables directly and the script is non-transactional (DB-03).
+  The script also now sweeps `archive_*` schemas on every run: odd-jobs'
+  partition archiver moves granted partitions out of `alert`/`edu`/`mag`, and
+  ACLs follow the table, which had left the fail-closed audit aborting on
+  stale grants.
 - **No-default build ARGs** (host identity must come from `.env` or the build
   fails) and the **baked entrypoint** (`docker/entrypoint.sh` COPY'd into the
   image).
@@ -155,7 +212,9 @@ cleanup (owner sign-off).
 (+`#RELEASE:USER_ID=svc`), `PGHOST`, `PGPORT`, `PGUSER` (`reports_rw`),
 `PGPASSWORD`, `PGDATABASE`, `PG_SSLMODE` (`verify-full`), `PG_SSL_PATH`,
 `OUTLOOK_USER`, `OUTLOOK_PW`, `MONDAY_API_TOKEN`, `MONDAY_BOARD_ID`,
-host-identity args (`DOCKER_GID`, `UID_0..2`). `RELEASE_SHA` is injected by
+host-identity args (`DOCKER_GID`, `UID_0..2`). Optional, both with working
+fallbacks: `PUPPETEER_EXECUTABLE_PATH` (set by the image — leave unset) and
+`SME_REPORT_AUTHOR` (PDF byline, defaults to "Remote Solutions"). `RELEASE_SHA` is injected by
 `build-release.sh` into the deployed `.env` only — never set by hand.
 Retired 2026-08-26: `LOGGER`/`RUN_ENV` (→ `LOGGER_MODE`/`LOG_DIR`),
 `IMAGE_TAG` (→ `USER_ID` tag), `RUN_USER` in `.env` (entrypoint defaults to

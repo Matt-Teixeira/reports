@@ -111,10 +111,11 @@ fi
 
 # ---------------------------------------------------------------- 5. app files
 section "Application files"
-for f in index.js package.json Dockerfile docker/entrypoint.sh docker-compose.yml build.sh build-release.sh; do
+for f in index.js package.json Dockerfile docker/entrypoint.sh docker-compose.yml build.sh build-release.sh \
+         sql/sme_reports_config.sql sme_reports/cli_args.js sme_reports/run_scheduled.js; do
     if [ -f "$f" ]; then ok "$f present"; else error "$f missing"; fi
 done
-for d in jobs tools email sql utils/db utils/logger; do
+for d in jobs tools email sql utils/db utils/logger sme_reports sme_reports/sql sme_reports/output; do
     if [ -d "$d" ]; then ok "$d/ present"; else error "$d/ missing"; fi
 done
 if [ -e utils/.git ]; then error "utils/.git exists — utils must be app-owned, not a nested repo"; else ok "utils/ is app-owned (no nested .git)"; fi
@@ -226,6 +227,47 @@ else
     fi
 fi
 
+# ------------------------------------------------- 7b. rendering stack (image)
+# The merged sme_reports engine renders every PDF with headless Chromium and
+# zips batches with the Info-ZIP binary. Both live in the IMAGE, not the tree,
+# so a stale image built before that change fails deep inside a batch instead
+# of here. Probe the real thing: launch and close a browser, and check the
+# binary -- the same "authenticated, not presence-only" rule the external
+# service checks follow.
+section "Rendering stack (in-image)"
+if ! docker image inspect "reports:${USER_ID_V}" >/dev/null 2>&1; then
+    warn "image reports:${USER_ID_V} missing — skipping rendering probe (run build.sh)"
+else
+    if docker compose run --rm -T --entrypoint /bin/bash app \
+         -c 'command -v zip' >/dev/null 2>&1; then
+        ok "zip binary present in image (sme_reports/output/fresh_zip.js)"
+    else
+        error "zip missing from image — batch delivery over 4 PDFs will fail"
+    fi
+
+    if docker compose run --rm -T --entrypoint /bin/bash app \
+         -c 'fc-list 2>/dev/null | grep -qi liberation' >/dev/null 2>&1; then
+        ok "Liberation fonts present (charw8.js column widths are measured for them)"
+    else
+        warn "no Liberation fonts in image — Chromium will substitute metrics and PDF tables will mis-lay-out"
+    fi
+
+    # Launches the browser exactly as render_pdf.js does, then closes it.
+    if docker compose run --rm -T app node -e '
+        const p = require("puppeteer");
+        p.launch({ headless: "new",
+                   executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+                   args: ["--no-sandbox", "--disable-setuid-sandbox"] })
+         .then(b => b.close())
+         .then(() => process.exit(0))
+         .catch(e => { console.error(e.message); process.exit(1); });
+    ' >/dev/null 2>&1; then
+        ok "headless Chromium launches in-image (PDF rendering available)"
+    else
+        error "Chromium failed to launch in-image — every sme_report PDF run would fail"
+    fi
+fi
+
 # ------------------------------------------------------------------ 8. summary
 section "Summary"
 echo "  $OKS ok, $WARNINGS warnings, $ERRORS errors"
@@ -235,3 +277,8 @@ if [ "$ERRORS" -gt 0 ]; then
 fi
 [ "$WARNINGS" -gt 0 ] && echo "  RESULT: PASS (with warnings — a clean run should report zero)"
 [ "$WARNINGS" -eq 0 ] && echo "  RESULT: PASS"
+
+# Explicit: without this the script exits with the status of the LAST test
+# above, so a warnings-only run (RESULT: PASS) exited 1 and read as a failure.
+# Errors already returned 1 from the block above; warnings must not.
+exit 0
