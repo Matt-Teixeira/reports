@@ -56,7 +56,7 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'reports_rw')
 ALTER ROLE reports_rw LOGIN PASSWORD :'pw'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT;
 
-GRANT CONNECT ON DATABASE staging TO reports_rw;
+GRANT CONNECT ON DATABASE dev TO reports_rw;
 
 -- ---------------------------------------------------------------------------
 -- Strip-and-regrant, schema by schema.
