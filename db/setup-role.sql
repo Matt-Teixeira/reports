@@ -1,7 +1,7 @@
 -- db/setup-role.sql
 -- One-time setup of the least-privilege role the reports app connects as.
--- Run as a superuser against the database the app targets (PGDATABASE=staging):
---   docker exec -i pg_db psql -U postgres -d staging -v pw='choose-a-strong-password' \
+-- Run as a superuser against the database the app targets (PGDATABASE):
+--   docker exec -i pg_db psql -U postgres -d <DB_NAME> -v pw='choose-a-strong-password' \
 --     -f - < db/setup-role.sql
 --
 -- Pattern copied from /opt/apps/incident-engine/db/setup-owner-role.sql and
@@ -56,7 +56,8 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'reports_rw')
 ALTER ROLE reports_rw LOGIN PASSWORD :'pw'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT;
 
-GRANT CONNECT ON DATABASE dev TO reports_rw;
+-- CONNECT on the database this script runs in, whatever its name.
+SELECT format('GRANT CONNECT ON DATABASE %I TO reports_rw', current_database()) \gexec
 
 -- ---------------------------------------------------------------------------
 -- Strip-and-regrant, schema by schema.
