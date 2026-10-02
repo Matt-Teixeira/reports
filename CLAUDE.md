@@ -191,12 +191,11 @@ cleanup (owner sign-off).
   values, commented out. `pg-pool.js` falls back `PGHOST || PG_HOST` (etc.),
   so *uncommenting* that block would silently point the app at Azure PROD —
   leave it commented; it exists only as an operator reference.
-- **Rotation script: listed but inert by design.** reports appears in
-  `/opt/resources/scripts/rotate-envs-20260817.sh`, but that script matches
-  on the postgres **superuser** password value and this app connects as
-  `reports_rw` — so a superuser rotation correctly never rewrites this
-  `.env`. `reports_rw` rotation goes through `/root/reports_rw_pw` +
-  `db/setup-role.sql` instead (setup doc, "DATABASE ROLES").
+- **Password rotation.** There is no rotation script in the fleet; the staging
+  server's `/opt/resources/scripts/rotate-envs-20260817.sh` is not part of the
+  server runbook. `reports_rw` rotates through `/root/reports_rw_pw` +
+  `db/setup-role.sql` (server runbook 3.8 and 4.0.3); rotating the `postgres`
+  password never touches this `.env`.
 - **`utils/` museum.** `utils/db/sql/` still carries SQL for other apps
   (alert-processor, mmb-rpp, odd-jobs, aws-ff, preflight-check) and
   `utils/vpn|units|config-processor|sh` are unused here. **Note:** the live
