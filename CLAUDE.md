@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+> **DEV merged into `DEV_docker` 2026-10-19** (`origin/DEV` at cb2c438: SITE
+> GROUP USERS / customer-users sections on fleet and customer summaries, and
+> the Anomaly Report under `sme_reports/incident/`). It needed a role widening
+> — site-group tables plus four more `users` columns; see *Least-privilege DB
+> role* below. **Re-run `db/setup-role.sql` on any database before deploying
+> this code there**, or every `sme_report` run fails on the identity query.
+
 > **PROD application work merged in 2026-08-31.** `STAGING_docker` now carries
 > both the fleet docker/release paradigm and the `PROD` branch's app code (109
 > commits: the `sme_reports/` Magnet Health Brief engine, scoped and

@@ -77,6 +77,10 @@ echo "==> releasing $APP_NAME  commit: $GIT_SHA  ->  $DEST"
 # the gitignored pg_ssl.crt. Patterns are deliberately NARROW: verified via
 # git ls-files that no tracked .txt/.crt/.csv/.log exists and no tracked
 # .json matches '*-log.*.json' (package.json / package-lock.json do not).
+# sme_reports/out/ is the PDF/HTML scratch dir (gitignored, no tracked files;
+# the writers mkdir it on demand): dev check runs and file-mode briefs land
+# there, so without the exclude every release shipped rendered customer
+# documents into $DEST (2026-10-19: 7.8 MB, incl. a real system's brief).
 # Verify exclude changes by diffing `tar -tf` output, never by eyeballing.
 sudo mkdir -p "$DEST"
 sudo find "$DEST" -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf {} +
@@ -88,6 +92,7 @@ sudo tar -C "$SRC" \
     --exclude='./.agents' \
     --exclude='./.codex' \
     --exclude='./utils/logger/logs' \
+    --exclude='./sme_reports/out' \
     --exclude='*-log.*.json' \
     --exclude='*.txt' \
     --exclude='pg_ssl.crt' \
