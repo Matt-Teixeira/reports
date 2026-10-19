@@ -1,0 +1,13 @@
+{
+  "scope": { "customer_id": "C0151" },
+  "summary_only": true,
+  "lookback_days": 7,
+  "batch_email": {
+    "recipients": ["matt.teixeira@avantehs.com"],
+    "cc_list": [],
+    "summary": false,
+    "summary_pdf": true,
+    "attachments": false,
+    "archive_records": false
+  }
+}

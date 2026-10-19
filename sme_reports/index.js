@@ -13,7 +13,9 @@ const {
   fetch_series,
   fetch_edu_series,
   fetch_thresholds,
-  fetch_units
+  fetch_units,
+  fetch_site_group_users,
+  fetch_customer_users
 } = require("./data");
 const { build_render_model } = require("./render/model");
 const { analyze_system } = require("./compute/analyze");
@@ -244,6 +246,52 @@ const write_records_sidecar = ({ scope, period_tag, records, failures }) => {
   return sidecar;
 };
 
+// The closing SITE GROUP USERS section's rows: every user assigned to a
+// site group that one of this document's systems belongs to (the records
+// carry site_group_id from the identity query). Isolated: the user list
+// is auxiliary to the document, so a failed lookup must never sink the
+// PDF — but it is never silent either: the section STATES that the list
+// is unavailable (fleet_model renders the error page) and the run log
+// carries the cause. Documents whose systems are in no group return an
+// empty list and get no section at all.
+const load_site_group_users = async (run_log, job_id, records) => {
+  const ids = [
+    ...new Set(
+      records
+        .map((r) => r.site_group_id)
+        .filter((id) => id !== null && id !== undefined)
+    )
+  ];
+  if (!ids.length) return { rows: [], error: null };
+  try {
+    return { rows: await fetch_site_group_users(ids), error: null };
+  } catch (error) {
+    await addLogEvent(E, run_log, "build_fleet_summary", cat, { job_id, site_group_users: ids }, error);
+    console.error(`site group users lookup failed (document still built): ${error.message}`);
+    return { rows: null, error: error.message };
+  }
+};
+
+// The customer's users OUTSIDE its site groups, for a document scoped to
+// exactly one customer (scope.customer_ids from resolve_scope). The
+// internal all-customers fleet document is the special case that lists
+// group members only — every customer's users would be ~400 rows of
+// nobody's business — and so is a scope that spans several customers.
+// Same isolation as the group lookup: a failure is stated on the page
+// and logged, never fatal and never silent.
+const load_customer_users = async (run_log, job_id, scope) => {
+  const ids = (scope && scope.customer_ids) || [];
+  if (ids.length !== 1) return null;
+  const customer_id = ids[0];
+  try {
+    return { customer_id, rows: await fetch_customer_users(customer_id), error: null };
+  } catch (error) {
+    await addLogEvent(E, run_log, "build_fleet_summary", cat, { job_id, customer_users: customer_id }, error);
+    console.error(`customer users lookup failed (document still built): ${error.message}`);
+    return { customer_id, rows: null, error: error.message };
+  }
+};
+
 // Builds the multi-page fleet summary from the distilled per-system records.
 // A failure here must not sink the batch — the per-system PDFs are already
 // on disk and the summary email can still go out without an attachment —
@@ -257,7 +305,9 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
   const { render_pdf_document } = require("./output/render_pdf");
   try {
     const records = results.map((r) => r.summary).filter(Boolean);
-    const vm = build_fleet_model(records, failures, { excluded, scope });
+    const site_group_users = await load_site_group_users(run_log, job_id, records);
+    const customer_users = await load_customer_users(run_log, job_id, scope);
+    const vm = build_fleet_model(records, failures, { excluded, scope, site_group_users, customer_users });
     const date = new Date().toISOString().slice(0, 10);
     const html = build_fleet_page(vm);
     // Scoped documents are named by their scope IDENTITY (slug + scope-set
@@ -303,6 +353,8 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
       attention: vm.attention_count,
       urgent: vm.urgent_count,
       failures: vm.failure_count,
+      site_groups: vm.users_section ? vm.users_section.count : 0,
+      site_group_users: vm.users_section ? vm.users_section.user_count : 0,
       pdf_path
     };
     await addLogEvent(I, run_log, "build_fleet_summary", det, note, null);

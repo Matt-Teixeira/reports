@@ -8,6 +8,8 @@ const {
   siemens_non_tim_series,
   get_default_thresholds,
   get_mag_routing,
+  site_group_users,
+  customer_users,
   units_queries,
   edu_config,
   edu_series
@@ -200,8 +202,24 @@ const fetch_edu_series = async (system_id, window) => {
   };
 };
 
+// Users assigned to the given site groups (public.user_site_groups) for
+// the fleet document's closing SITE GROUP USERS section. One row per
+// (group, user); a group with nobody assigned returns one row with a NULL
+// email_address (the query LEFT-joins from the group side), so an empty
+// group is stated, never silently absent.
+const fetch_site_group_users = (site_group_ids) =>
+  db.any(site_group_users, [site_group_ids]);
+
+// Every user whose system-list filter names the customer (see
+// customer-users.sql), for the same section's "users in no group" block
+// on a document scoped to ONE customer. One row per user, with how many
+// customers the filter names in all.
+const fetch_customer_users = (customer_id) => db.any(customer_users, [customer_id]);
+
 module.exports = {
   fetch_identity,
+  fetch_site_group_users,
+  fetch_customer_users,
   resolve_system_vendor,
   fetch_series,
   fetch_edu_series,

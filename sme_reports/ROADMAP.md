@@ -71,6 +71,34 @@ Status checklist for the single-SME report paradigm. Update as items land.
       ceiling and measures a real wrapped-lead cover — see RULES.md §5
       "Cover lead"
 
+- [x] **Site groups** (2026-09-08): a system's identity now carries its
+      site group (`public.site_group_sites` → `site_groups`, at most one per
+      site; 89 of 156 mag systems are in one of 16 groups, 67 in none) and
+      the distilled records keep it. The fleet summary and the scoped
+      customer summaries close with a **SITE GROUP USERS** section — every
+      group the document's systems belong to, with the users assigned to it
+      in the app (`public.user_site_groups` → `users`: name, email, status,
+      last login date, notify flag), an empty group stated, systems in no
+      group named, and a
+      failed lookup stated on the page rather than a missing section.
+      Documents whose systems are in no group get no section. Row budget
+      and legend reservation are the shared ones; check_fleet measures the
+      section's pages and protects the EMAIL column. 2026-09-21 (review
+      feedback): the customer name no longer repeats under each group — the
+      document is scoped to the customer — and a LAST LOGIN column
+      (`users.last_logged_in`, date only, a dash for never) was added for
+      user-activity accountability. Same day: a document scoped to ONE
+      customer now also lists the customer's users in no group — the app
+      has no users.customer_id, so `users.system_list_config` (the JSON
+      access filter naming customer ids) is the link — as a "Users in no
+      group" block after the groups; accounts whose filter spans several
+      customers are counted on one row, not listed; Avante addresses are
+      dropped from the section entirely (fleet_model is_avante_user). The
+      internal fleet document is the special case: group members only.
+- [ ] Scope a run BY site group (`{"site_group_id": N}` beside customer /
+      sites / systems) — the resolution query would take the same LEFT join
+      the identity query now uses
+
 ## Validation backlog (opportunistic)
 
 - [ ] Eyeball the first report from a **real Siemens warm event**

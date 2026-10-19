@@ -19,9 +19,9 @@ npm run report -- customer                               # same thing, generic f
 # ---------------------------------------------------------------------------
 # Customer summary — one customer's Magnet Health Summary PDF
 # ---------------------------------------------------------------------------
-
+# C009816 Trinity Health · C0051 INTELAS
 npm run report:customer -- --customer C0051 --period 6mo
-npm run report:customer -- --customer C0051 --period 6mo --email
+npm run report:customer -- --customer C009816 --period 6mo --email
 npm run report:customer -- --customer C0137 --period 30d
 npm run report:customer -- --customer C0137 --period 7d --email
 

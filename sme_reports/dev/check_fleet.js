@@ -103,6 +103,8 @@ const rec = (over = {}) => ({
   sensor_suspect: false,
   left_censored: false,
   offline_kind: null,
+  site_group_id: null,
+  site_group_name: null,
   ...over
 });
 
@@ -1800,6 +1802,289 @@ const rec = (over = {}) => ({
   assert.ok(internal.includes("secret_table"), "the internal document keeps the raw error");
 }
 
+// --- SITE GROUP USERS: the section that closes the document -----------------
+// A system's site group rides its identity (site_group_sites → site_groups,
+// at most one per site); the fleet document closes with the users assigned
+// to each group present. Stated, never judged, never silently absent.
+{
+  const {
+    build_users_section,
+    USERS_COLUMNS,
+    UNGROUPED_IDS_PER_ROW,
+    LEGEND_ROWS,
+    ROWS_FIRST_PAGE
+  } = require("../render/fleet_model");
+  // last_logged_in mirrors the live table (2026-09-21: every active account
+  // has one, no invited account does, deactivated ones are split) — a Date
+  // for active users, as pg-promise returns the timestamptz, null otherwise.
+  const user = (site_group_id, email, first_name, last_name, status, notify_email, site_group_name = `Group ${site_group_id}`) => ({
+    site_group_id,
+    site_group_name,
+    customer_id: "C1",
+    customer_name: "TestCo",
+    email_address: email,
+    first_name,
+    last_name,
+    status,
+    notify_email,
+    last_logged_in: status === "active" ? new Date("2026-09-14T13:05:00Z") : null
+  });
+  // No grouped system: nothing to list, no section, no page, no heading.
+  {
+    const vm = build_fleet_model([rec(), rec({ system_id: "SME00002" })], [], {
+      site_group_users: { rows: [], error: null }
+    });
+    assert.strictEqual(vm.users_section, null, "no site groups → no users section");
+    assert.ok(!build_fleet_page(vm).includes("SITE GROUP USERS"), "no heading either");
+    assert.strictEqual(build_users_section([], { rows: [] }), null);
+  }
+  // Groups present: flat rows, one per user, group named on its first row.
+  {
+    const records = [
+      rec({ system_id: "SME00001", site_group_id: 2, site_group_name: "Zeta" }),
+      rec({ system_id: "SME00002", site_group_id: 2, site_group_name: "Zeta" }),
+      rec({ system_id: "SME00003", site_group_id: 1, site_group_name: "Alpha" }),
+      rec({ system_id: "SME00004", site_group_id: 3, site_group_name: "Empty" }),
+      rec({ system_id: "SME00005" }),
+      rec({ system_id: "SME00006" }),
+      rec({ system_id: "SME00007" }),
+      rec({ system_id: "SME00008" }),
+      rec({ system_id: "SME00009" })
+    ];
+    const rows = [
+      // Zeta: sort is status (active, invited, deactivated) then last name;
+      // the same address in two groups counts ONCE in user_count.
+      user(2, "zed@example.com", "Zed", "Young", "deactivated", true, "Zeta"),
+      user(2, "amy@example.com", "Amy", "Baker", "active", true, "Zeta"),
+      user(2, "ivy@example.com", "Ivy", "Adams", "invited", false, "Zeta"),
+      user(2, "bob@example.com", "Bob", "Abbott", "active", null, "Zeta"),
+      user(1, "amy@example.com", "Amy", "Baker", "active", true, "Alpha"),
+      // A hostile DB-sourced name renders escaped, never as markup.
+      user(1, "x@example.com", "<b>Bold</b>", null, "active", true, "Alpha"),
+      // The empty-group row the LEFT join returns: group, no user.
+      user(3, null, null, null, null, null, "Empty")
+    ];
+    const vm = build_fleet_model(records, [], { site_group_users: { rows, error: null } });
+    const us = vm.users_section;
+    assert.ok(us, "users section present");
+    assert.deepStrictEqual(us.columns, USERS_COLUMNS);
+    assert.strictEqual(us.count, 3, "three site groups represented");
+    assert.strictEqual(us.user_count, 5, "distinct addresses, not assignments (amy is in two groups)");
+    assert.strictEqual(us.ungrouped_count, 5);
+    assert.strictEqual(us.error, null);
+    const flat = us.pages.flat();
+    // Groups alphabetical: Alpha, Empty, Zeta; then the no-group block.
+    assert.deepStrictEqual(
+      flat.map((r) => (r.kind === "user" ? `${r.group.site_group_name}:${r.email}` : `${r.kind}`)),
+      [
+        "Alpha:amy@example.com",
+        "Alpha:x@example.com",
+        "empty",
+        "Zeta:bob@example.com",
+        "Zeta:amy@example.com",
+        "Zeta:ivy@example.com",
+        "Zeta:zed@example.com",
+        "ungrouped",
+        "ungrouped"
+      ],
+      "users sort by status then last name; groups alphabetical; no-group block last"
+    );
+    assert.deepStrictEqual(
+      flat.filter((r) => r.kind === "ungrouped").map((r) => r.system_ids),
+      [["SME00005", "SME00006", "SME00007", "SME00008"], ["SME00009"]],
+      `no-group ids chunk ${UNGROUPED_IDS_PER_ROW} per row so every id stays named`
+    );
+    assert.deepStrictEqual(
+      flat.filter((r) => r.first && r.kind !== "ungrouped").map((r) => r.group.system_ids.length),
+      [1, 1, 2],
+      "the group carries this document's systems, which the cell counts"
+    );
+    assert.strictEqual(
+      vm.page_count,
+      vm.overview_pages.length + vm.sections.reduce((n, s) => n + s.pages.length, 0) + us.pages.length,
+      "the users section's pages are counted"
+    );
+    const html = build_fleet_page(vm);
+    assert.ok(html.includes("SITE GROUP USERS"), "heading");
+    assert.ok(html.includes("3 site groups · 5 users"), "heading counts");
+    assert.ok(html.includes("no users assigned"), "an empty group is stated");
+    assert.ok(html.includes("Systems in no group"), "systems in no group are stated");
+    assert.ok(html.includes('<div class="m">5 systems</div>'), "…with their count");
+    assert.ok(!html.includes("Users in no group"), "no customer user list on the internal fleet document");
+    assert.ok(html.includes("who is assigned to each group in the app"), "…whose subtitle says group members only");
+    assert.ok(html.includes('<div class="m">2 systems</div>'), "a group's cell counts this document's systems in it");
+    assert.ok(html.includes('<div class="m">1 system</div>'), "…singular when one");
+    assert.ok(!html.includes("TestCo"), "the customer's name is not repeated under every group — the document is scoped to it");
+    // LAST LOGIN: the date alone for an account that has logged in, a dash
+    // for one that never has (every invited account), never a raw Date.
+    assert.ok(html.includes("<th>LAST LOGIN</th>"), "last login is a column");
+    assert.deepStrictEqual(
+      flat.filter((r) => r.kind === "user").map((r) => (r.last_login === null ? null : typeof r.last_login)),
+      ["number", "number", "number", "number", null, null],
+      "active users carry a login time in millis; invited and deactivated ones without a login carry null"
+    );
+    assert.strictEqual((html.match(/<td>2026-09-14<\/td>/g) || []).length, 4, "each active user's last login is dated");
+    assert.ok(!html.includes("GMT") && !html.includes("13:05"), "the date alone, never a raw Date or a time");
+    assert.ok(html.includes("SME00005, SME00006, SME00007, SME00008"), "…and named");
+    assert.ok(!html.includes("<b>Bold</b>"), "a hostile name is escaped");
+    assert.ok(html.includes("&lt;b&gt;Bold&lt;/b&gt;"), "…and still rendered");
+    assert.ok(html.includes(">deactivated</td>"), "status is stated as-is");
+    // The legend closes the document on the users section's last page.
+    const last = html.split('<div class="page">').pop();
+    assert.ok(last.includes("EMAIL") && last.includes('class="legend pin"'), "legend pins under the users table");
+    for (const bad of ["undefined", "NaN", "null"]) assert.ok(!html.includes(`>${bad}<`), `page contains ${bad}`);
+  }
+  // A limited-coverage row's group counts like any other's.
+  {
+    const limited = {
+      assessment_status: "limited_coverage", system_id: "SME97001", cus_sys_id: null,
+      site_name: "L", customer_name: "TestCo", city: "T", state: "OK", manufacturer: "Canon",
+      modality: "MRI", limited_label: "Canon", vendor_key: "LIMITED", edu: null,
+      window_start: T0, window_end: W_END, window_hours: 720, site_group_id: 9, site_group_name: "Nine"
+    };
+    const vm = build_fleet_model([rec(), limited], [], {
+      site_group_users: { rows: [user(9, "n@example.com", "N", "Ine", "active", true, "Nine")], error: null }
+    });
+    assert.strictEqual(vm.users_section.count, 1);
+    assert.deepStrictEqual(vm.users_section.groups[0].system_ids, ["SME97001"]);
+  }
+  // The fetched group name is the current one and wins over the record's.
+  {
+    const vm = build_fleet_model([rec({ site_group_id: 5, site_group_name: "Old Name" })], [], {
+      site_group_users: { rows: [user(5, "a@example.com", "A", "B", "active", true, "New Name")], error: null }
+    });
+    assert.strictEqual(vm.users_section.groups[0].site_group_name, "New Name");
+  }
+  // The section takes the legend's tail reservation: a section that ends
+  // exactly on a full page is re-split so the last page has room.
+  {
+    const records = [rec({ site_group_id: 1, site_group_name: "Big" })];
+    const rows = Array.from({ length: ROWS_FIRST_PAGE }, (_, i) =>
+      user(1, `u${i}@example.com`, "U", `Ser${String(i).padStart(2, "0")}`, "active", true, "Big")
+    );
+    const vm = build_fleet_model(records, [], { site_group_users: { rows, error: null } });
+    const pages = vm.users_section.pages;
+    assert.strictEqual(pages.length, 2, "a full first page is re-split for the legend");
+    assert.ok(pages[pages.length - 1].length <= LEGEND_ROWS, "the last page leaves the legend its rows");
+    assert.strictEqual(pages.flat().length, ROWS_FIRST_PAGE, "no row is lost in the split");
+    // …and the vendor section that no longer ends the document keeps its
+    // full page: the reservation moved, it did not double.
+    assert.strictEqual(vm.sections[0].pages.length, 1);
+  }
+  // A failed lookup is a STATED page, never a missing section.
+  {
+    const records = [rec({ site_group_id: 1, site_group_name: "G" }), rec({ system_id: "SME00002" })];
+    const vm = build_fleet_model(records, [], { site_group_users: { rows: null, error: "connection refused" } });
+    const us = vm.users_section;
+    assert.strictEqual(us.error, "connection refused");
+    assert.strictEqual(us.pages.length, 1);
+    assert.strictEqual(vm.page_count, vm.overview_pages.length + vm.sections[0].pages.length + 1);
+    const html = build_fleet_page(vm);
+    assert.ok(html.includes("User list unavailable"), "the failure is stated on the page");
+    assert.ok(html.includes("connection refused"), "…with its cause");
+    assert.ok(html.includes("1 site group is represented"), "…and what it covers");
+    assert.ok(html.includes("1 system is in no group"));
+    assert.ok(!html.includes("<table class=\"users\">"), "no table pretends to be a list");
+    // No meta at all (a caller that never fetched) reads the same way.
+    const none = build_fleet_model(records, [], {});
+    assert.strictEqual(none.users_section.error, "user list was not loaded");
+  }
+  // A document scoped to ONE customer also lists the customer's users in
+  // no group (users.system_list_config names the customer) — after the
+  // groups, before the systems in no group — and counts, rather than
+  // lists, the accounts whose access spans several customers.
+  {
+    const cu = (email, first_name, last_name, status, customer_count, last_logged_in = null) => ({
+      email_address: email, first_name, last_name, status, notify_email: true, customer_count, last_logged_in
+    });
+    const records = [
+      rec({ system_id: "SME00001", site_group_id: 1, site_group_name: "Alpha" }),
+      rec({ system_id: "SME00002" })
+    ];
+    const group_rows = [
+      user(1, "amy@example.com", "Amy", "Baker", "active", true, "Alpha"),
+      // Avante's own accounts are dropped wherever they appear: assigned
+      // to a group, or in the customer's list with a single-customer filter.
+      user(1, "gus@AvanteHS.com", "Gus", "Staff", "active", true, "Alpha")
+    ];
+    const customer_rows = [
+      cu("amy@example.com", "Amy", "Baker", "active", 1, new Date("2026-09-14T13:05:00Z")), // in a group: listed there, never again
+      cu("dana@example.com", "Dana", "Young", "invited", 1),
+      cu("carl@example.com", "Carl", "Ortiz", "active", 1, "2026-09-02T08:00:00Z"),
+      cu("eve@avantehs.com", "Eve", "Staff", "active", 24, new Date()), // Avante: dropped, not even counted
+      cu("hal.avante@gmail.com", "Hal", "Alias", "active", 1), // names the company in the local part: dropped too
+      cu("frank@example.net", "Frank", "Shared", "active", 3), // access to three customers: counted
+      cu(null, null, null, null, 1) // a row with no address is nothing
+    ];
+    const meta = (customer_users) => ({
+      scope: { label: "TestCo", detail: { kind: "customer_id", customers: 1, sites: 1, systems: 2 }, customer_ids: ["C1"] },
+      site_group_users: { rows: group_rows, error: null },
+      customer_users
+    });
+    const vm = build_fleet_model(records, [], meta({ customer_id: "C1", rows: customer_rows, error: null }));
+    const us = vm.users_section;
+    assert.strictEqual(us.count, 1, "one site group");
+    assert.strictEqual(us.user_count, 3, "amy, carl and dana are the users listed");
+    assert.strictEqual(us.nogroup_user_count, 2);
+    assert.strictEqual(us.staff_count, 1, "frank is counted, not listed; eve is an Avante account and is neither");
+    assert.strictEqual(us.avante_count, 3, "eve, gus and hal are the Avante accounts dropped");
+    const flat = us.pages.flat();
+    assert.deepStrictEqual(
+      flat.map((r) => (r.kind === "user" ? `${r.group.site_group_name}:${r.email}:${r.first}` : `${r.kind}:${r.first}`)),
+      [
+        "Alpha:amy@example.com:true",
+        "Users in no group:carl@example.com:true",
+        "Users in no group:dana@example.com:false",
+        "staff:false",
+        "ungrouped:true"
+      ],
+      "groups, then the customer's users in no group (active first), the staff count, then systems in no group"
+    );
+    assert.strictEqual(flat[2].last_login, null, "an invited user has never logged in");
+    assert.strictEqual(typeof flat[1].last_login, "number", "an ISO string from a fixture is a login time too");
+    const html = build_fleet_page(vm);
+    assert.ok(html.includes("1 site group · 3 users"), "the heading counts every listed user");
+    assert.ok(html.includes("who has access in the app, by site group"), "…and says what the table now is");
+    assert.ok(html.includes('Users in no group</span><div class="m">2 users</div>'), "the block is named and counted");
+    assert.ok(html.includes("plus 1 account whose access spans several customers · not listed"), "multi-customer accounts are counted on one row");
+    assert.ok(!/avante/i.test(html.replace(/Avante( · Moving Healthcare Forward)?<\/(span|div)>/g, "")), "no Avante address anywhere in the table");
+    assert.ok(!html.includes("gus@") && !html.includes("hal.avante"), "Avante accounts are dropped from groups and the no-group block alike");
+    assert.ok(html.includes("<td>2026-09-02</td>"), "carl's last login is dated");
+    assert.strictEqual((html.match(/amy@example\.com/g) || []).length, 1, "a grouped user is listed once");
+    assert.ok(!html.includes("eve@avantehs.com") && !html.includes("frank@example.net"), "counted accounts are not listed");
+    assert.ok(html.indexOf("Users in no group") < html.indexOf("Systems in no group"), "users before systems");
+    // No group at all — most customers — still gets the section, for its users.
+    const nogroups = build_fleet_model([rec()], [], meta({ customer_id: "C1", rows: customer_rows, error: null }));
+    assert.ok(nogroups.users_section, "a customer with no site groups still lists its users");
+    assert.strictEqual(nogroups.users_section.count, 0);
+    assert.strictEqual(nogroups.users_section.user_count, 3, "amy is in no group here, so she is listed below");
+    assert.ok(build_fleet_page(nogroups).includes("0 site groups · 3 users"));
+    // Every own user in a group: the staff count stands alone, opening the block.
+    const all_grouped = build_fleet_model(records, [], meta({ customer_id: "C1", rows: customer_rows.slice(0, 1).concat(customer_rows.slice(3)), error: null }));
+    const staff_only = all_grouped.users_section.pages.flat().find((r) => r.kind === "staff");
+    assert.ok(staff_only && staff_only.first, "the staff row names the block when it is the block");
+    assert.ok(build_fleet_page(all_grouped).includes('Users in no group</span><div class="m">0 users</div>'));
+    // A group whose only assignee is an Avante account reads as having none.
+    const only_avante = build_fleet_model(records, [], {
+      site_group_users: { rows: [group_rows[1]], error: null }
+    });
+    assert.deepStrictEqual(
+      only_avante.users_section.pages.flat().map((r) => r.kind),
+      ["empty", "ungrouped"],
+      "an Avante-only group is stated as having no users assigned"
+    );
+    assert.strictEqual(only_avante.users_section.avante_count, 1);
+    // The customer lookup failing states the page like the group lookup failing.
+    const failed = build_fleet_model(records, [], meta({ customer_id: "C1", rows: null, error: "customer users: connection reset" }));
+    assert.strictEqual(failed.users_section.error, "customer users: connection reset");
+    assert.ok(build_fleet_page(failed).includes("User list unavailable"));
+    // The internal fleet document (no customer_users) lists group members only.
+    const internal = build_fleet_model(records, [], { site_group_users: { rows: group_rows, error: null } });
+    assert.strictEqual(internal.users_section.nogroup_user_count, 0);
+    assert.ok(!build_fleet_page(internal).includes("Users in no group"));
+  }
+}
+
 // --- full-scale pagination + artifacts --------------------------------------
 {
   const VENDORS = [
@@ -2043,8 +2328,87 @@ const rec = (over = {}) => ({
     })
   ];
 
-  const vm = build_fleet_model([...records, ...limited_records], failures);
+  // Site groups, in the live fleet's shape (2026-09-08: 89 of 156 mag
+  // systems in 16 groups, 67 in none): every third record is grouped into
+  // one of six named groups, record 1 sits in a group with NOBODY assigned
+  // (Althea's "Macon"), the rest are in no group — enough of them that the
+  // no-group block runs to many rows. Users mirror the live distribution
+  // (Intelas "Northside" has 26 assignments, a third of them not active),
+  // include the longest grouped address on record (44 chars) so the EMAIL
+  // column is measured against it, one address in two groups, one user
+  // with no name on file, and one hostile name. The section paginates over
+  // several sheets, so the geometry pass measures its continuation pages
+  // and its legend page.
+  const GROUPS = [
+    [1, "Northside", "Intelas"],
+    [2, "NYC", "Intelas"],
+    [3, "Hillcrest", "Renovo Solutions, LLC"],
+    [4, "CHRISTUS", "Intelas"],
+    [5, "Jack Hughston/Bridgeway", "Intelas"],
+    [6, "Saint-Joseph", "Trinity Health"],
+    [7, "Macon", "Althea USA"]
+  ];
+  for (const [i, r] of records.entries()) {
+    const g = i === 1 ? GROUPS[6] : i % 3 === 0 ? GROUPS[(i / 3) % 6] : null;
+    if (!g) continue;
+    r.site_group_id = g[0];
+    r.site_group_name = g[1];
+    r.customer_name = g[2];
+  }
+  limited_records[0].site_group_id = 6;
+  limited_records[0].site_group_name = "Saint-Joseph";
+  limited_records[0].customer_name = "Trinity Health";
+  const group_users = [];
+  const STATUSES = ["active", "active", "invited", "deactivated"];
+  const NOTIFY = [true, false, null];
+  for (const [g, n] of [[1, 26], [2, 12], [3, 6], [4, 14], [5, 11], [6, 3]])
+    for (let i = 0; i < n; i++)
+      group_users.push({
+        site_group_id: g,
+        site_group_name: GROUPS[g - 1][1],
+        customer_id: `C${g}`,
+        customer_name: GROUPS[g - 1][2],
+        email_address:
+          g === 1 && i === 0
+            ? "Camelia.Bradshaw-patterson@intelashealth.com"
+            : g === 2 && i === 0
+              ? "shared.user@example.com"
+              : `user${g}${String(i).padStart(2, "0")}@example-hospital.org`,
+        first_name: g === 1 && i === 1 ? null : g === 1 && i === 2 ? "<script>" : `First${i}`,
+        last_name: g === 1 && i === 1 ? null : `Lastname${String(i).padStart(2, "0")}`,
+        status: STATUSES[i % 4],
+        notify_email: NOTIFY[i % 3],
+        // Active accounts have logged in (a spread of dates), invited ones
+        // never, deactivated ones every other — the live split.
+        last_logged_in:
+          STATUSES[i % 4] === "active"
+            ? new Date(Date.UTC(2026, 8, 21) - i * 3 * 86400e3)
+            : STATUSES[i % 4] === "deactivated" && i % 8 === 3
+              ? "2025-11-02T09:00:00Z"
+              : null
+      });
+  group_users.push({ ...group_users.find((u) => u.email_address === "shared.user@example.com"), site_group_id: 1, site_group_name: "Northside" });
+  group_users.push({
+    site_group_id: 7, site_group_name: "Macon", customer_id: "C7", customer_name: "Althea USA",
+    email_address: null, first_name: null, last_name: null, status: null, notify_email: null, last_logged_in: null
+  });
+  const users_meta = { rows: group_users, error: null };
+  const grouped_ids = new Set(
+    [...records, ...limited_records]
+      .filter((r) => r.site_group_id !== null && r.site_group_id !== undefined)
+      .map((r) => r.system_id)
+  );
+
+  const vm = build_fleet_model([...records, ...limited_records], failures, { site_group_users: users_meta });
   assert.strictEqual(vm.total, 163, "limited rows count BESIDE the analyzed tally, never in it");
+  assert.strictEqual(vm.users_section.count, 7, "every group a record names is listed");
+  assert.strictEqual(vm.users_section.user_count, 72, "distinct addresses across 73 assignments");
+  assert.ok(vm.users_section.pages.length >= 3, "the users section paginates in this fixture");
+  assert.ok(
+    vm.users_section.pages[vm.users_section.pages.length - 1].length <=
+      require("../render/fleet_model").LEGEND_ROWS,
+    "the users section's last page leaves the legend its rows"
+  );
   assert.strictEqual(vm.limited_count, 3);
   assert.strictEqual(vm.limited_section.count, 3);
   assert.ok(
@@ -2071,7 +2435,8 @@ const rec = (over = {}) => ({
     vm.failure_pages.length +
     vm.sections.reduce((n, s) => n + s.pages.length, 0) +
     (vm.edu_section ? vm.edu_section.pages.length : 0) +
-    (vm.limited_section ? vm.limited_section.pages.length : 0);
+    (vm.limited_section ? vm.limited_section.pages.length : 0) +
+    vm.users_section.pages.length;
   assert.strictEqual(vm.page_count, expected_pages);
   assert.strictEqual(
     vm.sections.reduce((n, s) => n + s.count, 0),
@@ -2138,8 +2503,10 @@ const rec = (over = {}) => ({
     .join("");
   for (const r of records) {
     // Once per vendor section, plus once more in the EDU section for
-    // systems whose EDU reported.
-    const expected = r.edu ? 2 : 1;
+    // systems whose EDU reported, plus once more in the users section's
+    // "no site group" block for systems in no group (grouped systems are
+    // counted there, never named).
+    const expected = (r.edu ? 2 : 1) + (grouped_ids.has(r.system_id) ? 0 : 1);
     const hits = sections_html.split(r.system_id).length - 1;
     assert.strictEqual(hits, expected, `${r.system_id} appears ${hits} times in sections, expected ${expected}`);
   }
@@ -2167,9 +2534,29 @@ const rec = (over = {}) => ({
   for (const id of ["SME97001", "SME97002", "SME97003"])
     assert.strictEqual(
       html.split(id).length - 1,
-      1,
-      `${id} appears exactly once — the limited section and nowhere else`
+      grouped_ids.has(id) ? 1 : 2,
+      `${id} appears in the limited section (and the no-site-group block if ungrouped) and nowhere else`
     );
+  assert.ok(html.includes("SITE GROUP USERS"), "users section heading present");
+  assert.ok(
+    html.indexOf("SITE GROUP USERS") > html.indexOf("LIMITED COVERAGE — OTHER MANUFACTURERS"),
+    "users section closes the document after the limited section"
+  );
+  assert.ok(html.includes("Camelia.Bradshaw-patterson@intelashealth.com"), "the longest live address renders");
+  // A continuation page that opens mid-group names the group again.
+  {
+    const pages = vm.users_section.pages;
+    const mid = pages.findIndex((rows, i) => i > 0 && rows.length && !rows[0].first);
+    assert.ok(mid > 0, "the fixture has a users page that opens mid-group");
+    const users_html = html.split("SITE GROUP USERS").slice(1);
+    assert.ok(
+      users_html[mid].includes('<div class="m">(cont.)</div>'),
+      "a page opening mid-group repeats the group name with (cont.)"
+    );
+    assert.ok(!users_html[0].includes('<div class="m">(cont.)</div>'), "the first page does not");
+  }
+  assert.ok(html.includes("no users assigned"), "the empty group is stated");
+  assert.ok(!html.includes("<script>"), "a hostile user name never reaches the page as markup");
   assert.ok(
     html.includes("3 limited coverage"),
     "the cover lead counts limited systems beside the analyzed tally"
@@ -2312,11 +2699,49 @@ const rec = (over = {}) => ({
         // Exclusions here exercise the RIDE-ALONG placement: failures exist
         // and vendor sections follow, so the block shares the failures page
         // while the legend closes the document elsewhere.
-        excluded: { ids: ["SME13604", "SME13605", "SME13606"], note: "RF/SC service stations, not fleet" }
+        excluded: { ids: ["SME13604", "SME13605", "SME13606"], note: "RF/SC service stations, not fleet" },
+        site_group_users: users_meta,
+        // The customer's users in no group, in the live shape (Renovo,
+        // 2026-09-21: 82 own users, 5 in its one group, 76 multi-customer
+        // accounts): enough rows that the block paginates, the longest
+        // name on record, the staff count row, all measured. The
+        // multi-customer accounts are NOT Avante addresses here: those are
+        // dropped outright (fleet_model is_avante_user), and this fixture
+        // needs the count row on the page to measure it.
+        customer_users: {
+          customer_id: "C1",
+          rows: [
+            ...group_users.slice(0, 6).map((u) => ({ ...u, customer_count: 1 })),
+            ...Array.from({ length: 40 }, (_, i) => ({
+              email_address: `cust${String(i).padStart(2, "0")}@example-hospital.org`,
+              first_name: i === 0 ? "Bruck" : `Own${i}`,
+              last_name: i === 0 ? "Woldeselassie" : `Person${String(i).padStart(2, "0")}`,
+              status: STATUSES[i % 4],
+              notify_email: NOTIFY[i % 3],
+              last_logged_in: STATUSES[i % 4] === "active" ? new Date(Date.UTC(2026, 8, 20) - i * 86400e3) : null,
+              customer_count: 1
+            })),
+            ...Array.from({ length: 76 }, (_, i) => ({
+              email_address: `shared${i}@example-vendor.net`, first_name: "S", last_name: `T${i}`, status: "active",
+              notify_email: true, last_logged_in: new Date(), customer_count: 24
+            }))
+          ],
+          error: null
+        }
       }
     )
   );
   const scoped_path = write_html(out_dir, "dev-scoped-summary", scoped_html);
+  assert.ok(scoped_html.includes("plus 76 accounts whose access spans several customers"), "the scoped fixture counts its staff");
+
+  // The users section's ERROR page: heading plus a note, sharing its sheet
+  // with the pinned legend — measured so the note can never run under it.
+  const users_error_html = build_fleet_page(
+    build_fleet_model(records.slice(0, 8), [], {
+      site_group_users: { rows: null, error: "connect ETIMEDOUT 10.0.0.1:5432 while reading site group users" }
+    })
+  );
+  const users_error_path = write_html(out_dir, "dev-users-error-summary", users_error_html);
 
   // The exclusion statement's WORST page, at the loader's bounds (100 ids,
   // a 239-char note against the 240 cap): an all-excluded run — no
@@ -2370,7 +2795,8 @@ const rec = (over = {}) => ({
           { name: "exclusions", file: exclusion_path, dense: false, cid_clips: 0 },
           // The wrapped-lead cover: this document is here to prove page 1
           // clears its footer when the lead takes two lines.
-          { name: "wrapped-lead", file: wrap_path, dense: false, cid_clips: 0 }
+          { name: "wrapped-lead", file: wrap_path, dense: false, cid_clips: 0 },
+          { name: "users-error", file: users_error_path, dense: false, cid_clips: cid_overflow(records.slice(0, 8)) }
         ]) {
         await page.goto(`file://${doc.file}`, { waitUntil: "networkidle0" });
         const measured = await page.evaluate(() => {
@@ -2452,6 +2878,20 @@ const rec = (over = {}) => ({
                     clipped_cells["SYSTEM"] = (clipped_cells["SYSTEM"] || 0) + 1;
                   return;
                 }
+                // Font-tiered text (the users table's group, name and
+                // email) is measured on its own span, like the customer
+                // id: the cell's Range would span the block second line
+                // and report the column's full width whatever the text did.
+                const fit = td.querySelector(".fit");
+                if (fit) {
+                  if (measure(fit) > avail) {
+                    const key =
+                      keys[[...td.parentNode.children].indexOf(td)] ||
+                      `col${[...td.parentNode.children].indexOf(td)}`;
+                    clipped_cells[key] = (clipped_cells[key] || 0) + 1;
+                  }
+                  return;
+                }
                 if (measure(td) <= avail) return;
                 const label =
                   td.tagName === "TH"
@@ -2492,12 +2932,14 @@ const rec = (over = {}) => ({
         // Columns that must stay legible in full. SYSTEMS is here too: the
         // failure rows are chunked precisely so every failed id stays named,
         // and an ellipsis there silently undoes that.
+        // EMAIL too: a user list whose addresses are cut is not a list.
         const PROTECTED = new Set([
           "SYSTEM",
           "CONDITION",
           "COMPRESSOR",
           "SYSTEMS",
-          "REASON"
+          "REASON",
+          "EMAIL"
         ]);
         const squeezed = {};
         for (const m of measured)

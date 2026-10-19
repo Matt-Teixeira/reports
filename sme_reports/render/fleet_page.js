@@ -558,6 +558,120 @@ const section_table = (section, rows) => {
   return `<table class="${cls}">${colgroup}<thead><tr>${head}</tr></thead><tbody>\n${body}\n</tbody></table>`;
 };
 
+// --- SITE GROUP USERS table --------------------------------------------
+// A flat six-column table on its own pixel budget (720px content column,
+// like SECTION_W's rows). Not in the solver: its columns are people, not
+// metrics. Widths are measured claims (charw8, the same Chromium-measured
+// table the SYSTEM column uses): STATUS holds "deactivated" (71.2px),
+// LAST LOGIN an ISO date (68.1px) and NOTIFY its header; SITE GROUP, NAME
+// and EMAIL step their font down 8pt → 7pt → 6pt (id_pt, the customer-id
+// tiers) so the text renders WHOLE rather than ellipsising — an address
+// cut short is not an address. At 6pt EMAIL holds ~51 chars against the
+// 44-char longest grouped address on record (219.5px at 6pt, measured live
+// 2026-09-21, when LAST LOGIN took 78px from the three text columns); the
+// geometry pass protects it, and a longer one would fail check_fleet, not
+// quietly clip. The systems count rides the group cell's second line.
+const USERS_W = { site_group: 156, name: 124, email: 236, status: 82, last_login: 78, notify: 44 };
+
+const fit_span = (text, avail) => {
+  const pt = id_pt(text, avail);
+  return `<span class="fit"${pt === 8 ? "" : ` style="font-size:${pt}pt;"`}>${esc(text)}</span>`;
+};
+
+const users_geom = () => {
+  const g = {};
+  for (const [key, w] of Object.entries(USERS_W)) g[key] = w - TD_PAD_PX;
+  return g;
+};
+
+const n_systems = (n) => `${n} system${n === 1 ? "" : "s"}`;
+
+// Two named blocks close the table after the groups — "Users in no
+// group" (the customer's users no group names; a pseudo-group from
+// fleet_model) and "Systems in no group" — each captioned by its count,
+// like a group is by its systems. The captions are short on purpose: at
+// the 156px column "109 systems" is a fraction of the 149.3px available,
+// where the earlier "site not in any group" clipped.
+// `cont`: the row opens a continuation page mid-group, so the group is
+// named again with "(cont.)" — a reader landing on page 10 must not meet
+// twenty addresses under an empty SITE GROUP column.
+const n_users = (n) => `${n} user${n === 1 ? "" : "s"}`;
+
+const cell_users_group = (row, geom, cont = false) => {
+  if (!row.first && !cont) return `<td></td>`;
+  if (row.kind === "ungrouped")
+    return cont
+      ? `<td class="sys">Systems in no group<div class="m">(cont.)</div></td>`
+      : `<td class="sys">Systems in no group<div class="m">${n_systems(row.count)}</div></td>`;
+  if (cont)
+    return `<td class="sys">${fit_span(row.group.site_group_name, geom.site_group)}<div class="m">(cont.)</div></td>`;
+  const caption =
+    row.group.site_group_id === null ? n_users(row.group.user_count) : n_systems(row.group.system_ids.length);
+  return `<td class="sys">${fit_span(row.group.site_group_name, geom.site_group)}<div class="m">${caption}</div></td>`;
+};
+
+const STATUS_STYLE = {
+  active: `style="color:${COLORS.teal};"`,
+  invited: `style="color:${COLORS.amber};"`,
+  deactivated: `class="dim"`
+};
+
+const users_row = (row, geom, cont) => {
+  const group = cell_users_group(row, geom, cont);
+  if (row.kind === "empty")
+    return `<tr>${group}<td class="dim">—</td><td class="dim">no users assigned</td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td></tr>`;
+  if (row.kind === "ungrouped")
+    return `<tr>${group}<td class="dim">—</td><td class="dim">${fit_span(row.system_ids.join(", "), geom.email)}</td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td></tr>`;
+  // Multi-customer accounts are counted, not listed: one row across the
+  // five people-columns, closing the "Users in no group" block — or
+  // standing alone when every one of the customer's own users is in a
+  // group. Avante's own accounts never reach here (fleet_model drops any
+  // address naming the company), so the row no longer calls them staff.
+  if (row.kind === "staff")
+    return (
+      `<tr>${group}<td colspan="5" class="dim">plus ${row.count} account${row.count === 1 ? "" : "s"} ` +
+      `whose access spans several customers · not listed</td></tr>`
+    );
+  const name = [row.first_name, row.last_name]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  const status = String(row.status || "").toLowerCase();
+  const status_attr = STATUS_STYLE[status] || `class="dim"`;
+  const notify =
+    row.notify_email === true ? "on" : row.notify_email === false ? `<span class="dim">off</span>` : `<span class="dim">—</span>`;
+  // The date alone (UTC, like every date in the document): a filed report
+  // is reread later, when "3 days ago" would be a lie. An account that has
+  // never logged in — every invited one — is a dash, which is the point.
+  const login = row.last_login === null ? `<td class="dim">—</td>` : `<td>${fmt.iso_date(row.last_login)}</td>`;
+  return (
+    `<tr>${group}` +
+    (name ? `<td>${fit_span(name, geom.name)}</td>` : `<td class="dim">—</td>`) +
+    `<td>${fit_span(row.email, geom.email)}</td>` +
+    `<td ${status_attr}>${esc(status || "—")}</td>` +
+    login +
+    `<td>${notify}</td></tr>`
+  );
+};
+
+const users_table = (section, rows) => {
+  const total = section.columns.reduce((n, key) => n + USERS_W[key], 0);
+  const colgroup =
+    `<colgroup>` +
+    section.columns
+      .map((key) => `<col style="width:${((USERS_W[key] / total) * 100).toFixed(2)}%;">`)
+      .join("") +
+    `</colgroup>`;
+  const geom = users_geom();
+  return (
+    `<table class="users">${colgroup}<thead><tr>` +
+    `<th>SITE GROUP</th><th>NAME</th><th>EMAIL</th><th>STATUS</th><th>LAST LOGIN</th><th>NOTIFY</th>` +
+    `</tr></thead><tbody>\n` +
+    rows.map((row, i) => users_row(row, geom, i === 0 && !row.first)).join("\n") +
+    `\n</tbody></table>`
+  );
+};
+
 // --- overview page ----------------------------------------------------
 
 const attention_table = (vm, rows) =>
@@ -798,6 +912,41 @@ const build_fleet_page = (vm) => {
     });
   }
 
+  // Site group users close the document: the groups this document's
+  // systems belong to, and who is assigned to each in the app. SYSTEMS
+  // counts this document's systems in the group, not the group's total.
+  // A failed lookup is a stated page — heading, then why the list is
+  // missing — never a silently absent section.
+  if (vm.users_section) {
+    const us = vm.users_section;
+    const summary =
+      ` <span class="n">— ${us.count} site group${us.count === 1 ? "" : "s"}` +
+      (us.error ? "" : ` · ${us.user_count} user${us.user_count === 1 ? "" : "s"}`) +
+      `</span>`;
+    // The subtitle says what the table is: on a customer-scoped document
+    // the customer's users by group, then the ones in none; on the
+    // internal fleet document, group members only.
+    const subtitle =
+      us.nogroup_user_count || us.staff_count
+        ? "who has access in the app, by site group"
+        : "who is assigned to each group in the app";
+    us.pages.forEach((rows, i) => {
+      const cont = i > 0 ? ` <span class="n">(cont.)</span>` : "";
+      const heading =
+        `<h2>SITE GROUP USERS${i === 0 ? summary : ""} <span class="n">· ${subtitle}</span>${cont}</h2>`;
+      if (us.error) {
+        pages.push(
+          heading +
+            `<div class="note">User list unavailable — the user lookup failed for this run (${esc(trunc(us.error, 120))}). ` +
+            `${us.count} site group${us.count === 1 ? "" : "s"} ${us.count === 1 ? "is" : "are"} represented by these systems` +
+            `${us.ungrouped_count ? `; ${us.ungrouped_count} system${us.ungrouped_count === 1 ? " is" : "s are"} in no group` : ""}.</div>`
+        );
+        return;
+      }
+      pages.push(heading + users_table(us, rows));
+    });
+  }
+
   // The legend closes the document, pinned above the last page's footer.
   // fleet_model.js has already reserved the room: the final page's row budget
   // is LEGEND_ROWS lower than a normal page, and a section whose last chunk
@@ -816,4 +965,4 @@ ${html}
 `;
 };
 
-module.exports = { build_fleet_page, esc, trunc, SECTION_W };
+module.exports = { build_fleet_page, esc, trunc, SECTION_W, USERS_W };
