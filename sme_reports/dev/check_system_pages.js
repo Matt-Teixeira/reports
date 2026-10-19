@@ -15,6 +15,10 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+// No DB is queried, but incident/system_pages requires utils/logger/log,
+// whose pg-pool reads PG_SSL_PATH on load — load the root .env (a no-op
+// where the env comes from the container).
+require("dotenv").config({ path: path.join(__dirname, "..", "..", ".env") });
 
 const { scrub_avante, is_avante_user } = require("../incident/scrub");
 const { analyze_activity, SLOT_MS } = require("../incident/activity");
