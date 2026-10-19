@@ -260,6 +260,11 @@ const build_summary_facts = (facts, identity) => {
     customer_name: identity.customer_name,
     city: identity.city,
     state: identity.state,
+    // The site's group in the app (site_groups via site_group_sites), or
+    // null when the site is in none — the fleet document's SITE GROUP
+    // USERS section is keyed by this. Additive; older sidecars lack it.
+    site_group_id: identity.site_group_id ?? null,
+    site_group_name: identity.site_group_name ?? null,
     manufacturer: identity.manufacturer,
     modality: identity.modality,
     vendor_key: vendor.key,
@@ -387,6 +392,8 @@ const build_limited_record = ({ identity, label, window, edu_facts }) => ({
   customer_name: identity.customer_name,
   city: identity.city,
   state: identity.state,
+  site_group_id: identity.site_group_id ?? null,
+  site_group_name: identity.site_group_name ?? null,
   manufacturer: identity.manufacturer,
   modality: identity.modality,
   // The display manufacturer for the LIMITED section's cell (trimmed).

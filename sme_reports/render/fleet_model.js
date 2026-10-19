@@ -350,6 +350,206 @@ const data_issue_readings = (r) => {
   return { bad: bad.join(" · "), ok: ok.join(" · ") };
 };
 
+// --- SITE GROUP USERS: the section that closes the document ---------------
+// Every site group one of this document's systems belongs to (records carry
+// site_group_id from the identity query), with the users assigned to it in
+// the app (public.user_site_groups), each with the last time they logged
+// in (users.last_logged_in — null for an account that never has, which is
+// every invited one). A FLAT table — one row per user, the
+// group named on its first row — so pagination is the same arithmetic as
+// every other section (ROWS_FIRST_PAGE / ROWS_PER_PAGE against the fixed
+// .28in row). Stated, never judged: a group with nobody assigned is a row
+// saying so, systems in no group close the table as a named block, and a
+// failed lookup renders the section's heading over a note rather than
+// vanishing. A document scoped to one customer also lists the customer's
+// users who are in NO group (build_users_section, `customer_users`) —
+// most of them, for every customer — so every customer-scoped document
+// gets the section; the internal fleet document gets one only when its
+// systems are in groups, and lists group members only.
+// The systems count is not a column: it rides the group cell's second
+// line (fleet_page.js), which bought EMAIL the width to render whole.
+// The customer's name does NOT ride there any more: the document is
+// scoped to the customer, so naming it under every group was redundant.
+const USERS_COLUMNS = ["site_group", "name", "email", "status", "last_login", "notify"];
+
+// users.last_logged_in as epoch millis, or null: pg-promise hands back a
+// Date for the timestamptz, a fixture may hand an ISO string, and neither
+// an unparseable value nor a never-logged-in null becomes a date.
+const login_ms = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const t = v instanceof Date ? v.getTime() : new Date(v).getTime();
+  return Number.isFinite(t) ? t : null;
+};
+
+// System ids per "no site group" row — the EMAIL column (sized in
+// fleet_page.js) holds four "SME00000" ids with their separators at 7pt
+// (273.6px measured at 8pt, tiered down like a long address).
+const UNGROUPED_IDS_PER_ROW = 4;
+
+// Active accounts first — they are who a reader would contact — then
+// invited, then deactivated; alphabetical by last name within a status,
+// with users who have no name on file trailing the named ones (an empty
+// string would otherwise sort FIRST and lead every group with a dash).
+const STATUS_RANK = { active: 0, invited: 1, deactivated: 2 };
+const status_rank = (u) => STATUS_RANK[String(u.status || "").toLowerCase()] ?? 3;
+const name_part = (v) => String(v || "").trim();
+const by_user = (a, b) => {
+  const la = name_part(a.last_name);
+  const lb = name_part(b.last_name);
+  return (
+    status_rank(a) - status_rank(b) ||
+    (la === "") - (lb === "") ||
+    la.localeCompare(lb) ||
+    name_part(a.first_name).localeCompare(name_part(b.first_name)) ||
+    String(a.email_address || "").localeCompare(String(b.email_address || ""))
+  );
+};
+
+// Avante's own accounts are not the customer's users: any address with
+// "avante" in it (avantehs.com, avante.com, a personal-looking alias that
+// still names the company) is dropped from BOTH lists before anything is
+// grouped or counted, so it is neither listed under a group nor counted
+// among the multi-customer accounts. The group row the LEFT join returns
+// for an empty group carries no address and is kept.
+const AVANTE_EMAIL = /avante/i;
+const is_avante_user = (u) => AVANTE_EMAIL.test(String(u.email_address || ""));
+
+// `customer_users` (index.js load_customer_users): the customer's users
+// by the app's own access filter, or null when the document is not scoped
+// to exactly one customer — the internal fleet document lists group
+// members only. Users whose access is this customer ALONE and who sit in
+// none of its groups form a "Users in no group" block after the groups;
+// users whose filter spans several customers are counted on one row and
+// not listed. A user in a group is listed there and never again below.
+const build_users_section = (all_rows, site_group_users, customer_users = null) => {
+  const present = new Map();
+  const ungrouped = [];
+  for (const r of all_rows) {
+    const id = r.site_group_id ?? null;
+    if (id === null) {
+      ungrouped.push(r.system_id);
+      continue;
+    }
+    if (!present.has(id))
+      present.set(id, {
+        site_group_id: id,
+        site_group_name: r.site_group_name || `site group ${id}`,
+        system_ids: []
+      });
+    present.get(id).system_ids.push(r.system_id);
+  }
+  if (!present.size && !customer_users) return null;
+  const groups = [...present.values()].sort(
+    (a, b) =>
+      String(a.site_group_name).localeCompare(String(b.site_group_name)) ||
+      a.site_group_id - b.site_group_id
+  );
+  const base = {
+    vendor_key: "USERS",
+    title: "Site group users",
+    columns: USERS_COLUMNS,
+    count: groups.length,
+    groups,
+    ungrouped_count: ungrouped.length,
+    // Users the customer's access filter names but no group does, and
+    // the multi-customer accounts counted rather than listed.
+    nogroup_user_count: 0,
+    staff_count: 0,
+    // Avante accounts dropped from the two lists (is_avante_user).
+    avante_count: 0
+  };
+  // A lookup failed (or was never run): one page — heading and a stated
+  // reason — so the document still says these groups exist and that their
+  // user list is missing, instead of a section that silently is not there.
+  // The customer lookup failing states the same page: half a user list
+  // would read as the whole one.
+  const loaded = site_group_users && Array.isArray(site_group_users.rows);
+  const customer_loaded = !customer_users || Array.isArray(customer_users.rows);
+  if (!loaded || !customer_loaded)
+    return {
+      ...base,
+      user_count: 0,
+      error: !loaded
+        ? (site_group_users && site_group_users.error) || "user list was not loaded"
+        : customer_users.error || "customer user list was not loaded",
+      pages: [[]]
+    };
+
+  const avante = new Set();
+  const by_group = new Map();
+  for (const row of site_group_users.rows) {
+    if (!by_group.has(row.site_group_id)) by_group.set(row.site_group_id, { name: row.site_group_name, users: [] });
+    // The empty-group row (LEFT join) carries the group but no user.
+    if (!row.email_address) continue;
+    if (is_avante_user(row)) {
+      avante.add(row.email_address);
+      continue;
+    }
+    by_group.get(row.site_group_id).users.push(row);
+  }
+  const user_row = (u, group, first) => ({
+    kind: "user",
+    group,
+    first,
+    email: u.email_address,
+    first_name: u.first_name,
+    last_name: u.last_name,
+    status: u.status || null,
+    last_login: login_ms(u.last_logged_in),
+    notify_email: u.notify_email ?? null
+  });
+  const rows = [];
+  const emails = new Set();
+  for (const g of groups) {
+    const fetched = by_group.get(g.site_group_id);
+    // The fetched name is the CURRENT one; the record's copy is from the
+    // identity read earlier in the run. Same table, so they only differ
+    // if someone renamed the group mid-run — prefer the later read.
+    if (fetched && fetched.name) g.site_group_name = fetched.name;
+    const users = fetched ? fetched.users.slice().sort(by_user) : [];
+    if (!users.length) {
+      rows.push({ kind: "empty", group: g, first: true });
+      continue;
+    }
+    users.forEach((u, i) => {
+      emails.add(u.email_address);
+      rows.push(user_row(u, g, i === 0));
+    });
+  }
+  if (customer_users) {
+    for (const u of customer_users.rows) if (u.email_address && is_avante_user(u)) avante.add(u.email_address);
+    const rest = customer_users.rows.filter(
+      (u) => u.email_address && !is_avante_user(u) && !emails.has(u.email_address)
+    );
+    const own = rest.filter((u) => Number(u.customer_count) <= 1).sort(by_user);
+    const staff = rest.length - own.length;
+    base.nogroup_user_count = own.length;
+    base.staff_count = staff;
+    // The block's pseudo-group: the same cell idiom as a named group —
+    // its name, then a count on the second line.
+    const nogroup = { site_group_id: null, site_group_name: "Users in no group", system_ids: [], user_count: own.length };
+    own.forEach((u, i) => {
+      emails.add(u.email_address);
+      rows.push(user_row(u, nogroup, i === 0));
+    });
+    if (staff) rows.push({ kind: "staff", first: !own.length, group: nogroup, count: staff });
+  }
+  for (let i = 0; i < ungrouped.length; i += UNGROUPED_IDS_PER_ROW)
+    rows.push({
+      kind: "ungrouped",
+      first: i === 0,
+      count: ungrouped.length,
+      system_ids: ungrouped.slice(i, i + UNGROUPED_IDS_PER_ROW)
+    });
+  return {
+    ...base,
+    user_count: emails.size,
+    avante_count: avante.size,
+    error: null,
+    pages: chunk_rows(rows, ROWS_FIRST_PAGE, ROWS_PER_PAGE)
+  };
+};
+
 const build_fleet_model = (records, failures, meta = {}) => {
   const all_rows = [...(records || [])];
   // LIMITED-COVERAGE partition (assessment_status): limited rows carry
@@ -500,6 +700,11 @@ const build_fleet_model = (records, failures, meta = {}) => {
       }
     : null;
 
+  // SITE GROUP USERS: keyed by EVERY record's site group — limited rows
+  // included; a Canon's site is in a group like any other — from the
+  // rows meta.site_group_users fetched for exactly these groups.
+  const users_section = build_users_section(all_rows, meta.site_group_users || null, meta.customer_users || null);
+
   const vendor_rollup = sections.map((s) => ({ title: s.title, count: s.count }));
 
   // The overview paginates too. The attention list is the actionable part of
@@ -535,14 +740,19 @@ const build_fleet_model = (records, failures, meta = {}) => {
 
   // Reserve the legend's room on whichever group ENDS the document. Page
   // order in fleet_page.js is overview → data issues → failures → exclusions
-  // → vendor sections → EDU section → LIMITED section, so the limited
-  // section claims the tail whenever it exists, then EDU (whose members are
-  // a subset of the vendor-sectioned rows, so it can only exist when vendor
-  // sections do), then the last vendor section. The exclusion statement,
-  // when it takes its own page, is a heading plus a loader-bounded block
-  // (≤100 ids, note ≤240 chars — measured against the pinned legend in
-  // check_fleet), so it ends the document without needing the reservation.
-  if (limited_section) {
+  // → vendor sections → EDU section → LIMITED section → SITE GROUP USERS,
+  // so the users section claims the tail whenever it exists, then limited,
+  // then EDU (whose members are a subset of the vendor-sectioned rows, so
+  // it can only exist when vendor sections do), then the last vendor
+  // section. The exclusion statement, when it takes its own page, is a
+  // heading plus a loader-bounded block (≤100 ids, note ≤240 chars —
+  // measured against the pinned legend in check_fleet), so it ends the
+  // document without needing the reservation. The users section's ERROR
+  // page is likewise a heading plus a one-line note (reserve_tail on its
+  // empty page is a no-op), measured the same way.
+  if (users_section) {
+    users_section.pages = reserve_tail(users_section.pages, LEGEND_ROWS);
+  } else if (limited_section) {
     limited_section.pages = reserve_tail(limited_section.pages, LEGEND_ROWS);
   } else if (edu_section) {
     edu_section.pages = reserve_tail(edu_section.pages, LEGEND_ROWS);
@@ -563,7 +773,8 @@ const build_fleet_model = (records, failures, meta = {}) => {
     exclusion_pages +
     sections.reduce((n, s) => n + s.pages.length, 0) +
     (edu_section ? edu_section.pages.length : 0) +
-    (limited_section ? limited_section.pages.length : 0);
+    (limited_section ? limited_section.pages.length : 0) +
+    (users_section ? users_section.pages.length : 0);
 
   // The document's period comes from EVERY successful record — limited
   // rows included (round-4 F2): a limited-only summary carries a real
@@ -598,6 +809,7 @@ const build_fleet_model = (records, failures, meta = {}) => {
     edu_section,
     limited_section,
     limited_count: limited_rows.length,
+    users_section,
     overview_pages,
     data_issues,
     data_issue_count: data_issues.length,
@@ -629,9 +841,13 @@ module.exports = {
   FAILURE_IDS_PER_ROW,
   chunk_rows,
   reserve_tail,
+  build_users_section,
+  is_avante_user,
   SECTIONS,
   EDU_COLUMNS,
   LIMITED_COLUMNS,
+  USERS_COLUMNS,
+  UNGROUPED_IDS_PER_ROW,
   ROWS_PER_PAGE,
   ROWS_FIRST_PAGE,
   ATTENTION_FIRST_PAGE,
