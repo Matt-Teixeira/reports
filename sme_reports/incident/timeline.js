@@ -712,4 +712,5 @@ tr.day:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 @media (max-width:640px){.wrap{padding:0 14px}.hdr .logo{height:36px}}
 `;
 
-module.exports = { build_timeline };
+// CSS and CLIENT_JS are shared with the activity page (system_page.js).
+module.exports = { build_timeline, CSS, CLIENT_JS };

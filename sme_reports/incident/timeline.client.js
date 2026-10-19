@@ -11,6 +11,10 @@ const MODELS = Object.fromEntries(DATA.models.map(m => [m.code, m]));
 const ORDER = DATA.models.map(m => m.code);
 const byOrder = (a,b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const CUST = DATA.customer_org;            // e.g. "Crothall / Intelas"
+// Vendor-specific chart labels. Defaults are the GE pair the timeline
+// was built on; the activity page (incident/activity.js) sends its own.
+const LBL = Object.assign({primary:'He pressure', p_units:'PSI', p_dec:3, level:'He level', l_units:'%', l_dec:2}, DATA.labels || {});
+const RECIPS = DATA.recipients_label || `${CUST} users`;
 
 /* ---------- formatting ---------- */
 let TZ = DATA.tz_default;
@@ -73,6 +77,7 @@ notes.forEach(b => b.list.forEach(r => {
   if(r.sms === 'SENT') s.sms++;
 }));
 const org = u => ORGS[u] || 'Other';
+const ORG_ORDER = DATA.org_order || ['Avante', CUST, 'Other'];
 
 /* ---------- the capture-slot spine ---------- */
 const slots = [], slotAt = new Map();
@@ -123,7 +128,7 @@ function renderSummary(){
     tile('Period', `${esc(shortDay(a))} – ${esc(shortDay(b))}`, `${esc(dayLabel(a))} ${timeMin(a)} to ${esc(dayLabel(b))} ${timeMin(b)} ${tzAbbr()} · ${slots.length} half-hour slots`),
     tile('Readings', `${MAGN} · ${EDUN}`, `magnet · compressor, of ${slots.length} slots`),
     tile('Detections', TOTAL, `across ${ORDER.length} alert models in ${runs.length} runs` + (showMissed ? ` · <b>${missedSlots} slots</b> expected, not detected` : '')),
-    tile('Notifications', NOTE_ROWS, `in ${notes.length} batches to ${esc(CUST)} users`),
+    tile('Notifications', NOTE_ROWS, `in ${notes.length} batches to ${esc(RECIPS)}`),
     tile('Reached', ok, `${off} with both channels off · ${err} error${err === 1 ? '' : 's'}`, 'good')
   ].join('');
   const ev = document.getElementById('evidence');
@@ -135,7 +140,7 @@ function renderSummary(){
 const T0 = DATA.window.from, T1 = DATA.window.to;
 const PTHR = DATA.models.filter(m => m.kind === 'pressure' && m.op === '>');
 const LTHR = DATA.models.filter(m => m.kind === 'level' && m.op === '<');
-const P_TOP = DATA.scales.p_top, L_LO = DATA.scales.l_lo, L_HI = DATA.scales.l_hi;
+const P_LO = DATA.scales.p_lo || 0, P_TOP = DATA.scales.p_top, L_LO = DATA.scales.l_lo, L_HI = DATA.scales.l_hi;
 function renderLanes(){
   const W = 1100, L = 190, PW = W - L - 10, top = 30, LH = 24;
   const SH = 30, GAP = 26;
@@ -143,29 +148,34 @@ function renderLanes(){
   const detH = cY + cH + GAP, dY = detH + SH;
   const notH = dY + ORDER.length*LH + GAP, nY = notH + SH, H = nY + LH + 8;
   const x = t => L + (t - T0) / (T1 - T0) * PW;
-  const py = v => pY + pH - v / P_TOP * pH, ly = v => lY + lH - (v - L_LO) / (L_HI - L_LO) * lH;
+  const py = v => pY + pH - (v - P_LO) / (P_TOP - P_LO) * pH, ly = v => lY + lH - (v - L_LO) / (L_HI - L_LO) * lH;
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="He pressure, He level, compressor status, detections and notifications over the window">`;
   if(DATA.shade) s += `<rect class="band" x="${x(DATA.shade.start)}" y="${top-6}" width="${x(DATA.shade.end)-x(DATA.shade.start)}" height="${H-top+6}"/>`;
   const mids = [];
   for(let t = T0; t <= T1; t += 3600e3){ if(fmt(new Date(t),{hour:'2-digit',hourCycle:'h23'}) === '00') mids.push(t); }
-  mids.forEach(m => {
+  // One labelled gridline per k days, k chosen so labels stay >= 70px apart
+  // (a 6-month window would otherwise print 180 overlapping dates).
+  const every = Math.max(1, Math.ceil(70 / (86400e3 / (T1 - T0) * PW)));
+  mids.forEach((m, i) => { if(i % every) return;
     s += `<line class="grid" x1="${x(m)}" x2="${x(m)}" y1="${top-6}" y2="${H}"/>`;
-    s += `<text class="tick" x="${x(m)+4}" y="${top-12}">${esc(dayLabel(new Date(m)))}</text>`;
+    // A label that would run past the plot's right edge is dropped (its
+    // gridline stays) rather than clipped mid-word.
+    if(x(m) <= L + PW - 64) s += `<text class="tick" x="${x(m)+4}" y="${top-12}">${esc(dayLabel(new Date(m)))}</text>`;
   });
   const sect = (y, label, sub, first) => {
     let h = first ? '' : `<line class="secrule" x1="0" x2="${W}" y1="${y-12}" y2="${y-12}"/>`;
     return h + `<rect class="sechead" x="0" y="${y}" width="${W}" height="${SH-8}"/><text class="sect" x="12" y="${y+16}">${label.toUpperCase()}</text><text class="secsub" x="${12 + label.length*10.4 + 12}" y="${y+16}">${sub}</text>`;
   };
-  s += sect(dataH, 'Data', `Readings from ${DATA.sources.mag} and ${DATA.sources.edu}, one point per capture slot`, true);
+  s += sect(dataH, 'Data', DATA.data_sub || `Readings from ${DATA.sources.mag} and ${DATA.sources.edu}, one point per capture slot`, true);
   s += sect(detH, 'Detections', 'alert.detections, placed at the capture slot each run evaluated');
   s += sect(notH, 'Notifications', 'alert.notifications batches; solid when at least one shown recipient was reached, outlined when none were');
   s += `<rect class="pframe" x="${L}" y="${pY}" width="${PW}" height="${pH}"/><rect class="pframe" x="${L}" y="${lY}" width="${PW}" height="${lH}"/>`;
-  s += `<text x="${L-12}" y="${pY+pH/2}" text-anchor="end" class="plabel">He pressure</text><text x="${L-12}" y="${pY+pH/2+14}" text-anchor="end" class="tick">PSI</text>`;
-  s += `<text x="${L-12}" y="${lY+lH/2}" text-anchor="end" class="plabel">He level</text><text x="${L-12}" y="${lY+lH/2+14}" text-anchor="end" class="tick">%</text>`;
+  s += `<text x="${L-12}" y="${pY+pH/2}" text-anchor="end" class="plabel">${esc(LBL.primary)}</text><text x="${L-12}" y="${pY+pH/2+14}" text-anchor="end" class="tick">${esc(LBL.p_units)}</text>`;
+  s += `<text x="${L-12}" y="${lY+lH/2}" text-anchor="end" class="plabel">${esc(LBL.level)}</text><text x="${L-12}" y="${lY+lH/2+14}" text-anchor="end" class="tick">${esc(LBL.l_units)}</text>`;
   // Axis extents, outside each panel's left edge: max at the top, min at the bottom.
   const ext = (y0, h, lo, hi) => `<text class="tick axv" x="${L-5}" y="${y0+9}" text-anchor="end">${hi}</text><text class="tick axv" x="${L-5}" y="${y0+h-1}" text-anchor="end">${lo}</text>`;
-  s += ext(pY, pH, 0, P_TOP) + ext(lY, lH, L_LO, L_HI);
-  PTHR.forEach(m => { s += `<line class="thr ${m.sev === 'high' ? 'high' : 'med'}" x1="${L}" x2="${L+PW}" y1="${py(m.value)}" y2="${py(m.value)}"/><text class="tick" x="${L+4}" y="${py(m.value)-3}">${m.value}</text>`; });
+  s += ext(pY, pH, P_LO, P_TOP) + ext(lY, lH, L_LO, L_HI);
+  PTHR.forEach(m => { if(m.value < P_LO || m.value > P_TOP) return; s += `<line class="thr ${m.sev === 'high' ? 'high' : 'med'}" x1="${L}" x2="${L+PW}" y1="${py(m.value)}" y2="${py(m.value)}"/><text class="tick" x="${L+4}" y="${py(m.value)-3}">${m.value}</text>`; });
   LTHR.forEach(m => { if(m.value < L_LO || m.value > L_HI) return;
     s += `<line class="thr ${m.sev === 'high' ? 'high' : 'med'}" x1="${L}" x2="${L+PW}" y1="${ly(m.value)}" y2="${ly(m.value)}"/><text class="tick" x="${L+4}" y="${ly(m.value)-3}">${m.value}</text>`; });
   const path = (fn, yf) => { let d = '', pen = false;
@@ -175,15 +185,26 @@ function renderLanes(){
     return d; };
   s += `<path class="pline" d="${path(m => m.pr, py)}"/><path class="lline" d="${path(m => m.lvl, ly)}"/>`;
   s += `<text x="${L-12}" y="${cY+cH-3}" text-anchor="end" class="plabel">Compressor</text>`;
+  // Consecutive slots in the same state draw as ONE rect (a 6-month window
+  // is ~8,760 slots); a gap in readings ends the run.
   const sw = 1800e3 / (T1 - T0) * PW;
-  for(const sl of slots){ if(sl.comp == null) continue;
-    s += `<rect class="${sl.comp ? 'con' : 'coff'}" x="${(x(sl.id) - sw/2).toFixed(1)}" y="${cY}" width="${(sw+0.3).toFixed(1)}" height="${cH}"><title>${esc(dayLabel(sl.t))} ${timeMin(sl.t)} ${tzAbbr()}: ${sl.comp ? 'running' : 'off'}</title></rect>`; }
+  for(let i = 0; i < slots.length; ){ const a = slots[i]; if(a.comp == null){ i++; continue; }
+    let j = i; while(j + 1 < slots.length && slots[j+1].comp === a.comp) j++;
+    const b = slots[j], x0 = x(a.id) - sw/2, w = x(b.id) - x(a.id) + sw;
+    const when = i === j ? `${esc(dayLabel(a.t))} ${timeMin(a.t)}` : `${esc(dayLabel(a.t))} ${timeMin(a.t)} to ${esc(dayLabel(b.t))} ${timeMin(b.t)}`;
+    s += `<rect class="${a.comp ? 'con' : 'coff'}" x="${x0.toFixed(1)}" y="${cY}" width="${(w+0.3).toFixed(1)}" height="${cH}"><title>${when} ${tzAbbr()}: ${a.comp ? 'running' : 'off'}</title></rect>`;
+    i = j + 1; }
   ORDER.forEach((c,i) => {
     const m = MODELS[c], y = dY + i*LH, cy = y + LH/2;
     s += `<g class="${active.has(c) ? '' : 'off'}"><line class="laneline" x1="${L}" x2="${L+PW}" y1="${cy}" y2="${cy}"/>`;
     s += `<text x="${L-12}" y="${cy+4}" text-anchor="end">${esc(m.name)}</text>`;
-    for(const d of byCode[c]){
-      s += `<rect class="mk ${m.sev}" x="${(x(d.slot.getTime())-1.1).toFixed(1)}" y="${y+5}" width="2.2" height="${LH-10}" rx="1"><title>${esc(m.name)}, ${esc(dayLabel(d.ins))} ${timeMin(d.ins)} ${tzAbbr()}</title></rect>`;
+    // One mark per pixel column: on long windows many runs share a pixel,
+    // and drawing each would add thousands of identical rects.
+    const cols = new Map();
+    for(const d of byCode[c]){ const k = Math.round(x(d.slot.getTime()));
+      const e = cols.get(k); if(e) e.n++; else cols.set(k, {d, n:1}); }
+    for(const {d, n} of cols.values()){
+      s += `<rect class="mk ${m.sev}" x="${(x(d.slot.getTime())-1.1).toFixed(1)}" y="${y+5}" width="2.2" height="${LH-10}" rx="1"><title>${esc(m.name)}, ${esc(dayLabel(d.ins))} ${timeMin(d.ins)} ${tzAbbr()}${n > 1 ? ` (+${n-1} more nearby)` : ''}</title></rect>`;
     }
     s += `</g>`;
   });
@@ -223,7 +244,7 @@ function recipSummary(){
 
 /* ---------- recipient filters ---------- */
 function renderRecips(){
-  const orgs = ['Avante', CUST, 'Other'];
+  const orgs = ORG_ORDER;
   const keys = Object.keys(USERS).sort((a,b) => USERS[a].toLowerCase().localeCompare(USERS[b].toLowerCase()));
   let h = '';
   for(const o of orgs){
@@ -255,8 +276,9 @@ const nodata = '<span class="nodata">No data</span>';
 const LVL_LINE = LTHR.length ? Math.max(...LTHR.map(m => m.value)) : -Infinity;
 const P_CRIT = PTHR.filter(m => m.sev === 'high').map(m => m.value), P_WARN = PTHR.map(m => m.value);
 const P_CRIT_AT = P_CRIT.length ? Math.min(...P_CRIT) : Infinity, P_WARN_AT = P_WARN.length ? Math.min(...P_WARN) : Infinity;
-const lvlCell = v => `<span class="${v < LVL_LINE ? 'warn' : ''}">${v.toFixed(2)}%</span>`;
-const prCell = v => `<span class="${v > P_CRIT_AT ? 'crit' : v > P_WARN_AT ? 'warn' : ''}">${v.toFixed(3)}</span>`;
+const L_SFX = LBL.l_units === '%' ? '%' : '';
+const lvlCell = v => v == null ? nodata : `<span class="${v < LVL_LINE ? 'warn' : ''}">${v.toFixed(LBL.l_dec)}${L_SFX}</span>`;
+const prCell = v => v == null ? nodata : `<span class="${v > P_CRIT_AT ? 'crit' : v > P_WARN_AT ? 'warn' : ''}">${v.toFixed(LBL.p_dec)}</span>`;
 const compCell = v => v == null ? nodata : v ? 'Running' : '<span class="crit">Off</span>';
 function rangeCell(vals, f){
   if(!vals.length) return nodata;
@@ -377,7 +399,7 @@ function renderDetail(){
     const mags = g.views.map(v => v.s.mag).filter(Boolean);
     const missed = g.views[0].missed;
     el.innerHTML = `<div class="dhead"><p class="kicker">${g.views.length} identical slots</p><h3>${esc(dayLabel(a.t))} ${timeMin(a.t)} to ${esc(shortDay(b.t))} ${timeMin(b.t)} ${tzAbbr()}</h3></div>
-      <section id="d-data"><h4>Readings</h4><div class="stats">${stat('He level', rangeCell(mags.map(m => m.lvl), lvlCell))}${stat('He pressure', rangeCell(mags.map(m => m.pr), prCell))}${stat('Compressor', compCell(a.comp))}</div></section>
+      <section id="d-data"><h4>Readings</h4><div class="stats">${stat(esc(LBL.level), rangeCell(mags.map(m => m.lvl).filter(v => v != null), lvlCell))}${stat(esc(LBL.primary), rangeCell(mags.map(m => m.pr).filter(v => v != null), prCell))}${stat('Compressor', compCell(a.comp))}</div></section>
       <section id="d-det"><h4>Detections</h4>${actualChips(g.views) || '<p class="nodata">None in these slots</p>'}${g.views[0].aFlag ? '<p class="flag">Absent/Null triggered on every slot here, though magnet data exists for them</p>' : ''}</section>
       ${missed.length ? `<section id="d-miss"><h4>Expected, not detected</h4><div class="chips">${missed.map(c => `<span class="chip miss"><b>${esc(MODELS[c].name)}</b>every slot</span>`).join('')}</div></section>` : ''}
       <p><button type="button" class="jump" data-expand="${a.id}">${openGroups.has(a.id) ? 'Collapse' : 'List'} these ${g.views.length} slots in the table</button></p>`;
@@ -385,8 +407,9 @@ function renderDetail(){
   }
   const v = viewById.get(selected.id), s = v.s;
   let h = `<div class="dhead"><p class="kicker">Capture slot</p><h3>${esc(dayLabel(s.t))} ${timeMin(s.t)} ${tzAbbr()}</h3><p class="sub">capture_datetime ${isoOut(s.t)}</p></div>`;
-  h += `<section id="d-data"><h4>Readings</h4><div class="stats">${stat('He level', s.mag ? lvlCell(s.mag.lvl) : nodata)}${stat('He pressure', s.mag ? prCell(s.mag.pr) + ' PSI' : nodata)}${stat('Compressor', compCell(s.comp))}</div>
-    <p class="src">${s.mag ? `${DATA.sources.mag} row found` : `No row in ${DATA.sources.mag}`}. ${s.comp == null ? `No row in ${DATA.sources.edu}` : `${DATA.sources.edu} row found`}.</p></section>`;
+  const pTxt = s.mag && s.mag.pr != null ? prCell(s.mag.pr) + (LBL.p_units ? ' ' + esc(LBL.p_units) : '') : nodata;
+  h += `<section id="d-data"><h4>Readings</h4><div class="stats">${stat(esc(LBL.level), s.mag ? lvlCell(s.mag.lvl) : nodata)}${stat(esc(LBL.primary), pTxt)}${stat('Compressor', compCell(s.comp))}</div>
+    <p class="src">${DATA.sources.mag ? (s.mag ? `${DATA.sources.mag} row found` : `No row in ${DATA.sources.mag}`) + '. ' : 'No readings for this period. '}${DATA.sources.edu ? (s.comp == null ? `No row in ${DATA.sources.edu}` : `${DATA.sources.edu} row found`) + '.' : ''}</p></section>`;
   h += `<section id="d-det"><h4>Detections</h4>`;
   if(!s.run) h += `<p class="nodata">No detection run evaluated this slot.</p>`;
   else {

@@ -52,3 +52,8 @@ SQL and `MAG_FIELDS`); assumes the incident is a compressor stop (throws
 otherwise); the prose and the "What we are changing" step are written for
 this event; customer contacts are identified from `users.system_list_config`
 naming exactly this customer.
+
+**System Activity pages** (`activity.js`, `system_page.js`,
+`system_pages.js`, `scrub.js`) reuse this page's client and styling for a
+no-interpretation, any-vendor, customer-facing page per flagged system on
+fleet and customer summaries — see `../PLAN-FLEET-SYSTEM-PAGES.md`.
