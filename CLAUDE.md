@@ -118,7 +118,14 @@ Other strengths to preserve through the migration:
   `alert.sme_report_sends` **plus `USAGE` on its sequence** (BIGSERIAL —
   `nextval` in a DEFAULT runs as the inserting role, so the INSERT fails
   without it), and **column-level** `SELECT` on exactly four columns of
-  `public.users`. `hhm_credentials` and the rest of `public` stay unreachable.
+  `public.users`. Widened again 2026-10-19 (DEV merge, site groups):
+  `SELECT` on `public.site_groups`, `site_group_sites`, `user_site_groups`,
+  and four more `users` columns (`first_name`, `last_name`,
+  `last_logged_in`, `system_list_config`) — eight in all.
+  `get-system-identity.sql` joins the site-group tables for every system, so
+  **without these grants every `sme_report` run fails**. `hhm_credentials`,
+  the users columns `phone_number`/`roles`/`notify_sms`/`alert_list_config`,
+  and the rest of `public` stay unreachable.
   **Run `sql/sme_reports_config.sql` BEFORE `db/setup-role.sql`** — the grants
   name those tables directly and the script is non-transactional (DB-03).
   The script also now sweeps `archive_*` schemas on every run: odd-jobs'

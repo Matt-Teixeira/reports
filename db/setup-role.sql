@@ -21,7 +21,9 @@
 --   READS   alert.* , mag.* , config.* , edu.*  (report queries join broadly here)
 --           util.ip_sec                          (VPN IP lookups)
 --           public.customers / sites / systems   (entity joins)
---           public.users — FOUR COLUMNS ONLY, column-level (see below)
+--           public.site_groups / site_group_sites / user_site_groups
+--                                                 (site groups, 2026-10-19)
+--           public.users — EIGHT COLUMNS ONLY, column-level (see below)
 --   WRITES  alert.models              UPDATE  (sql/schedule_matrix.sql)
 --           alert.notifications       UPDATE  (email/sms status updates)
 --           alert.sme_report_sends    INSERT  (sme_reports/sql/insert-send.sql)
@@ -105,19 +107,29 @@ GRANT USAGE  ON SCHEMA util                  TO reports_rw;
 GRANT SELECT ON util.ip_sec                  TO reports_rw;
 GRANT INSERT ON util.app_run_logs            TO reports_rw;
 
--- public: exactly the three entity tables. hhm_credentials, users, etc. stay
--- unreachable (verified by the audit below).
+-- public: exactly the three entity tables plus the three site-group tables.
+-- hhm_credentials, users, etc. stay unreachable (verified by the audit below).
 REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM reports_rw;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM reports_rw;
 GRANT SELECT ON public.customers, public.sites, public.systems TO reports_rw;
--- public.users, COLUMN-LEVEL ON PURPOSE. The sme_reports derived-recipient
--- path reads exactly these four columns (sme_reports/sql/audience-users.sql
--- and user-caches.sql). A full-table grant would also expose roles, phone
--- numbers and anything added to this table later; the column list keeps the
--- original "nothing else in public" posture as tight as the feature allows.
--- public.hhm_credentials and every other public table remain unreachable
--- (verified by the audit below).
-GRANT SELECT (email_address, status, notify_email, system_list_cache)
+-- Site groups (added 2026-10-19, DEV merge). sql/get-system-identity.sql
+-- LEFT-joins site_group_sites + site_groups for EVERY system of EVERY brief,
+-- so without these the whole sme_report family fails, not just the new
+-- section; sql/site-group-users.sql adds user_site_groups.
+GRANT SELECT ON public.site_groups, public.site_group_sites, public.user_site_groups
+  TO reports_rw;
+-- public.users, COLUMN-LEVEL ON PURPOSE. The first four columns serve the
+-- derived-recipient path (sme_reports/sql/audience-users.sql, user-caches.sql);
+-- the second four the SITE GROUP USERS / customer-users sections
+-- (sql/site-group-users.sql, sql/customer-users.sql) and the anomaly report's
+-- recipients (incident/sql/recipients.sql). A full-table grant would also
+-- expose roles, phone numbers and anything added to this table later; the
+-- column list keeps the original "nothing else in public" posture as tight
+-- as the features allow — phone_number, roles, notify_sms and
+-- alert_list_config stay unreachable. public.hhm_credentials and every other
+-- public table remain unreachable (verified by the audit below).
+GRANT SELECT (email_address, status, notify_email, system_list_cache,
+              first_name, last_name, last_logged_in, system_list_config)
   ON public.users TO reports_rw;
 
 -- ---------------------------------------------------------------------------
@@ -204,10 +216,11 @@ BEGIN
     OR (e.nspname, e.relname, e.priv) = ('alert', 'sme_report_sends_id_seq', 'USAGE')
     OR (e.nspname, e.relname, e.priv) = ('util', 'ip_sec', 'SELECT')
     OR (e.nspname, e.relname, e.priv) = ('util', 'app_run_logs', 'INSERT')
-    OR (e.nspname = 'public' AND e.relname IN ('customers','sites','systems')
+    OR (e.nspname = 'public' AND e.relname IN ('customers','sites','systems',
+          'site_groups','site_group_sites','user_site_groups')
         AND e.priv = 'SELECT')
     -- column-level grant: has_any_column_privilege reports SELECT here, which
-    -- is why this reads the same as a table grant. The four-column scope is
+    -- is why this reads the same as a table grant. The eight-column scope is
     -- enforced by the GRANT above, not by this clause.
     OR (e.nspname, e.relname, e.priv) = ('public', 'users', 'SELECT')
     -- extension defaults granted to PUBLIC (read-only; query text masked for
