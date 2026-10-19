@@ -34,6 +34,7 @@ to fire while you are deciding what it should say.
 | `--system <SME#####>` | repeatable, comma lists accepted; narrows a brief job's systems (or a customer-scoped job to an explicit set) |
 | `--out-dir <path>` | where documents are written |
 | `--email` / `--no-email` | send, or don't (default) |
+| `--system-pages` | customer_summary and fleet_summary jobs — also build a System Activity page per flagged system (see below) |
 | `--config <path>` | a different job config file |
 | `--list` | list configured jobs and exit |
 
@@ -68,9 +69,9 @@ for instance — and run them by name.
 
 | Job kind | What it produces | Extra keys |
 |---|---|---|
-| `customer_summary` | one scoped Magnet Health Summary PDF (customer-facing wording, scope stated on the cover) | exactly one of `customer_id`, `site_ids`, `system_ids`; `exclude`, `exclude_note` |
+| `customer_summary` | one scoped Magnet Health Summary PDF (customer-facing wording, scope stated on the cover) | exactly one of `customer_id`, `site_ids`, `system_ids`; `exclude`, `exclude_note`, `system_pages` |
 | `sme_brief` | one Magnet Health Brief PDF + HTML per system | exactly one of `customer_id` (every mag system under the customer), `system_ids`; `zip` (bundle an emailed batch into one archive at any size — batches over 4 PDFs zip regardless) |
-| `fleet_summary` | the internal fleet document over every mag-processed system | `exclude`, `exclude_note` |
+| `fleet_summary` | the internal fleet document over every mag-processed system | `exclude`, `exclude_note`, `system_pages` |
 
 Common settings: `period`, `recipients`, `cc_list`, `email`, `out_dir`,
 `archive` (keep a dated copy of a brief in `archive/`), `summary_pdf` (add
@@ -125,8 +126,29 @@ analyzed at 6 months where they fail at 30 days** — Piedmont's 30-day run
 records four "no monitor data in the requested period" failures that the
 6-month run analyzes normally.
 
+## System Activity pages (`system_pages` / `--system-pages`)
+
+On a summary job, also build one interactive HTML page for every system
+that needs attention, has a data issue, or could not be analyzed: its
+alert detections, notifications and readings over the summary's period,
+with the timeline, filters and slot table of the Anomaly Report and none
+of its interpretation (`incident/system_pages.js`,
+`PLAN-FLEET-SYSTEM-PAGES.md`). Pages are customer-facing: every Avante
+user is scrubbed before anything is counted. They land in the out dir;
+with `--email` they are zipped and ride on the summary email, split into
+"part n/N" follow-up emails when one zip would exceed the message limit.
+
+```bash
+npm run report:customer -- --customer C0137 --system-pages            # build only
+npm run report:customer -- --customer C0137 --system-pages --email    # + send
+```
+
+A 6-month customer summary (43 systems, 21 pages) takes ~30 s on top of
+the summary; pages are ~0.9–2.4 MB each and zip ~3× smaller.
+
 ## Checks
 
 ```bash
 npm run check:oneoff     # periods, job config, composed requests (no database)
+npm run check:system-pages   # activity pages (no database; launches Chromium)
 ```

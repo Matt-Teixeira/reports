@@ -376,7 +376,14 @@ const analyze_system = ({
   facts.offline_kind =
     last_suspect && !quenched ? null : offline.offline_kind;
 
-  return { facts, views: { mode, p_points, he_points } };
+  // compressor_rows: the stateful readings from the source chosen above
+  // (EDU vs the vendor channel, implausible-coldhead inference blanked) —
+  // exposed so the per-system activity page plots the same compressor
+  // state this analysis judged, never a second derivation of it.
+  return {
+    facts,
+    views: { mode, p_points, he_points, compressor_rows: stateful, compressor_source }
+  };
 };
 
 module.exports = { analyze_system, build_edu_facts };

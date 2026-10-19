@@ -139,7 +139,11 @@ const normalize_batch_email = (raw) => {
     // the archived PDFs whenever the summary document is built. This is
     // deliberate history capture — "changes since last report" needs weeks
     // of these to exist before it can be built. Probe runs set it false.
-    archive_records: raw.archive_records !== false
+    archive_records: raw.archive_records !== false,
+    // system_pages: also build one interactive System Activity page per
+    // system that needs attention, has a data issue or failed, zip them,
+    // and deliver them with the summary email (incident/system_pages.js).
+    system_pages: raw.system_pages === true
   };
 };
 

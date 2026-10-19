@@ -24,7 +24,9 @@ const USAGE = `usage: npm run report -- <job> [options]
   --system <SME#####>    override the job's system list (repeatable)
   --out-dir <path>       write documents here instead of sme_reports/out
   --email                send the job's email
-  --no-email             build the documents, send nothing (the default)`;
+  --no-email             build the documents, send nothing (the default)
+  --system-pages         also build a System Activity page per flagged system
+                         (fleet_summary, customer_summary)`;
 
 const parse_oneoff_args = (args) => {
   const out = {
@@ -35,6 +37,7 @@ const parse_oneoff_args = (args) => {
     system_ids: [],
     out_dir: null,
     email: null, // null = leave the config's setting alone
+    system_pages: null,
     list: false
   };
   const value_of = (args, i, flag) => {
@@ -87,6 +90,10 @@ const parse_oneoff_args = (args) => {
         if (out.email === true) fail("--email and --no-email are contradictory");
         out.email = false;
         break;
+      case "--system-pages":
+        if (out.system_pages) fail("--system-pages given twice");
+        out.system_pages = true;
+        break;
       default:
         fail(`unknown argument "${a}"`);
     }
@@ -103,6 +110,7 @@ const overrides_of = (args) => {
   if (args.period !== null) o.period = args.period;
   if (args.out_dir !== null) o.out_dir = args.out_dir;
   if (args.email !== null) o.email = args.email;
+  if (args.system_pages !== null) o.system_pages = args.system_pages;
   return o;
 };
 

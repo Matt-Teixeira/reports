@@ -233,6 +233,9 @@ const build_render_model = ({
         : "");
 
   return {
+    // The analysis views ride along for consumers beyond the brief page
+    // (run_one's activity-page input); build_page ignores them.
+    views,
     title: `Avante — ${identity.system_id} Magnet Health`,
     analyzed_date: analyzed,
     h1_text: `${identity.system_id} — ${identity.site_name} ${identity.modality || ""}`.trim(),

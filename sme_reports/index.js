@@ -41,7 +41,11 @@ const {
 // EXACT facts object this run computed, so a witness can never disagree
 // with the artifacts of its own run (a re-fetch against the same window is
 // not a database snapshot). Production callers never pass it.
-const run_one = async (run_log, job_id, request, on_facts = null) => {
+// opts.activity: also return the screened readings the analysis judged
+// (result.activity) so run_batch can build per-system activity pages
+// (incident/system_page.js). Off by default: a 6-month fleet sweep must not
+// hold every system's series in memory unless the pages were asked for.
+const run_one = async (run_log, job_id, request, on_facts = null, opts = {}) => {
   let note = { job_id, system_id: request.system_id };
   await addLogEvent(I, run_log, "run_sme_report", cal, note, null);
 
@@ -124,6 +128,7 @@ const run_one = async (run_log, job_id, request, on_facts = null) => {
   const renders =
     request.output.html || request.output.pdf || request.output.email;
   let facts;
+  let views;
   let html = null;
   if (renders) {
     const vm = build_render_model({
@@ -138,9 +143,10 @@ const run_one = async (run_log, job_id, request, on_facts = null) => {
       units
     });
     facts = vm.facts;
+    views = vm.views;
     if (request.output.html || request.output.pdf) html = build_page(vm);
   } else {
-    ({ facts } = analyze_system({
+    ({ facts, views } = analyze_system({
       system_id: request.system_id,
       vendor,
       series,
@@ -205,7 +211,22 @@ const run_one = async (run_log, job_id, request, on_facts = null) => {
     modality: identity.modality,
     // The distilled per-system state. Without this every metric computed
     // above dies here and the fleet summary has nothing but an archetype.
-    summary: build_summary_facts(facts, identity)
+    summary: build_summary_facts(facts, identity),
+    ...(opts.activity
+      ? {
+          activity: {
+            vendor_key: vendor.key,
+            primary_name: vendor.primary.name,
+            units: facts.units,
+            decimals: { pressure: vendor.pressure.decimals, helium: vendor.helium.decimals },
+            sources: { mag: source, edu: edu_source },
+            compressor_source: views.compressor_source,
+            pressure: views.p_points,
+            helium: views.he_points,
+            compressor: views.compressor_rows.map((r) => ({ t: r.t, on: r.compressor_on }))
+          }
+        }
+      : {})
   };
 };
 
@@ -374,6 +395,9 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
     // --facts). Cache HITS skip run_one and therefore the observer — fine
     // for the harness, which never passes a cache.
     const { concurrency = 1, cache = null, on_facts = null } = opts;
+    // Activity pages need each system's screened readings carried out of
+    // run_one; only ask for them when the pages were requested.
+    const want_pages = !!(batch_email && batch_email.system_pages);
     // Null = explicit-date windows: no chosen period, no tag (F3).
     const batch_period_tag = period_tag_of(lookback_days);
     const slots = new Array(requests.length);
@@ -393,7 +417,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
         let out;
         // Per-report try/catch so one failure doesn't kill a bulk batch.
         try {
-          out = { ok: true, result: await run_one(run_log, job_id, request, on_facts) };
+          out = { ok: true, result: await run_one(run_log, job_id, request, on_facts, { activity: want_pages }) };
         } catch (error) {
           out = { ok: false, message: error.message };
           const note = { job_id, system_id: request.system_id };
@@ -418,6 +442,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
 
     let fleet_pdf_path = null;
     let fleet_error = null;
+    let activity = null;
     if (batch_email) {
       // The summary covers every system that produced facts. Only the
       // attachment email needs a PDF on disk, so that filter belongs to it
@@ -455,23 +480,67 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
           );
       }
 
-      if (batch_email.summary && has_content) {
-        const send_summary_email = require("./output/send_summary_email");
-        await send_summary_email(
-          run_log,
-          job_id,
-          batch_email,
+      // Per-system activity pages (PLAN-FLEET-SYSTEM-PAGES.md): built after
+      // the summary document, delivered with the summary email.
+      if (want_pages && has_content) {
+        const { build_system_pages } = require("./incident/system_pages");
+        const { period_label: label_of } = require("./periods");
+        const scope_tag = scope_resolution && scope_resolution.label
+          ? scope_resolution.label.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "")
+          : "Fleet";
+        activity = await build_system_pages(run_log, job_id, {
           results,
           failures,
-          fleet_pdf_path,
-          {
-            scope_label: scope_resolution ? scope_resolution.label : null,
-            lookback_days,
-            // A requested-but-failed summary document must be STATED in the
-            // email, never just an absent attachment (round-2 F1).
-            fleet_error
+          requests,
+          out_dir,
+          scope_tag,
+          period_tag: batch_period_tag,
+          period_label: label_of(lookback_days)
+        });
+      }
+
+      if (batch_email.summary && has_content) {
+        const send_summary_email = require("./output/send_summary_email");
+        const subject_scope = scope_resolution ? scope_resolution.label : null;
+        try {
+          await send_summary_email(
+            run_log,
+            job_id,
+            batch_email,
+            results,
+            failures,
+            fleet_pdf_path,
+            {
+              scope_label: subject_scope,
+              lookback_days,
+              // A requested-but-failed summary document must be STATED in the
+              // email, never just an absent attachment (round-2 F1).
+              fleet_error,
+              activity: activity
+                ? { pages: activity.pages.length, zips: activity.zips, page_failures: activity.page_failures }
+                : null
+            }
+          );
+          if (activity && activity.zips.length > 1) {
+            const { send_activity_parts } = require("./output/send_activity_parts");
+            await send_activity_parts(run_log, job_id, batch_email, activity.zips.slice(1), {
+              subject_base: `Magnet Health Summary${subject_scope ? ` — ${subject_scope}` : ""}`
+            });
           }
-        );
+        } finally {
+          // Emailed zips live at private per-run paths (fresh_zip.js F1);
+          // once sent they are removed, like send_batch_email's. The HTML
+          // pages stay in out_dir beside the PDFs.
+          if (activity)
+            for (const z of activity.zips) {
+              try {
+                fs.rmSync(z.path, { force: true });
+                z.removed = true;
+              } catch (cleanup_error) {
+                console.error(`activity zip cleanup failed (send outcome unaffected): ${cleanup_error.message}`);
+              }
+            }
+        }
       }
       if (!summary_only && batch_email.attachments && attachable.length) {
         const send_batch_email = require("./output/send_batch_email");
@@ -493,7 +562,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
         );
       }
     }
-    return { results, failures, fleet_pdf_path, fleet_error, lookback_days };
+    return { results, failures, fleet_pdf_path, fleet_error, lookback_days, activity };
 };
 
 // One entry path for every request-driven run, whatever produced the

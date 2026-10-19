@@ -41,7 +41,7 @@ const send_summary_email = async (
   results,
   failures,
   fleet_pdf_path,
-  { scope_label = null, lookback_days = null, fleet_error = null } = {}
+  { scope_label = null, lookback_days = null, fleet_error = null, activity = null } = {}
 ) => {
   const date = new Date().toISOString().slice(0, 10);
   // Scoped runs lead with WHO the summary covers; non-default periods say
@@ -132,6 +132,28 @@ const send_summary_email = async (
     body_html = fleet_failure_note(scope_label, fleet_error) + body_html;
   }
 
+  // Per-system activity pages (incident/system_pages.js): part 1 of the zip
+  // rides here; later parts follow as their own emails. A page that could
+  // not be built is NAMED, never just absent from the zip.
+  if (activity) {
+    const first = activity.zips[0];
+    if (first) attachments.push({ filename: first.filename, path: first.path });
+    const n = activity.pages;
+    const parts = activity.zips.length;
+    let note =
+      n
+        ? `The attached <b>System Activity</b> zip holds ${n} interactive page${n === 1 ? "" : "s"}, one for each system below that needs attention, has a data issue, or could not be analyzed: its alert detections, notifications and readings over this period. Open them in a web browser.` +
+          (parts > 1 ? ` The pages are split into ${parts} zips; this email carries part 1 and parts 2–${parts} follow in separate emails.` : "")
+        : "";
+    if (activity.page_failures.length) {
+      const ids = activity.page_failures.map((f) => esc(f.system_id)).join(", ");
+      note += `${note ? " " : ""}An activity page could not be produced for ${ids}.`;
+    }
+    if (note)
+      body_html =
+        `<p style="${FONT}font-size:13px;color:${COLORS.navy};margin:0 0 12px 0;">${note}</p>` + body_html;
+  }
+
   const message = {
     from: process.env.OUTLOOK_USER,
     to: batch_email.recipients.join(","),
@@ -158,6 +180,7 @@ const send_summary_email = async (
       urgent: urgent.map((r) => r.system_id),
       data_issues: data_issues.map((r) => r.system_id),
       fleet_pdf: fleet_pdf_path || null,
+      activity_zip: activity && activity.zips[0] ? activity.zips[0].filename : null,
       failures: (failures || []).length,
       status,
       accepted,

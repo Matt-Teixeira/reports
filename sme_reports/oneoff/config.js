@@ -43,9 +43,9 @@ const COMMON_KEYS = [
   "summary_pdf"
 ];
 const KIND_KEYS = {
-  customer_summary: ["customer_id", "site_ids", "system_ids", "exclude", "exclude_note"],
+  customer_summary: ["customer_id", "site_ids", "system_ids", "exclude", "exclude_note", "system_pages"],
   sme_brief: ["customer_id", "system_ids", "zip"],
-  fleet_summary: ["exclude", "exclude_note"]
+  fleet_summary: ["exclude", "exclude_note", "system_pages"]
 };
 
 // Comment keys: hand-edited JSON has no comment syntax, so any key
@@ -91,7 +91,10 @@ const DEFAULT_SETTINGS = {
   // records series is the scheduled product's history, and an operator
   // exploring a 6-month window should not silently deposit rows in it.
   archive_records: false,
-  summary_pdf: false
+  summary_pdf: false,
+  // Summary kinds only (KIND_KEYS): per-system activity pages with the
+  // summary email. Off unless the job or --system-pages asks.
+  system_pages: false
 };
 
 const resolve_settings = (raw, at) => {
@@ -104,6 +107,7 @@ const resolve_settings = (raw, at) => {
   if (raw.archive_records !== undefined)
     s.archive_records = as_bool(raw.archive_records, `${at}.archive_records`);
   if (raw.summary_pdf !== undefined) s.summary_pdf = as_bool(raw.summary_pdf, `${at}.summary_pdf`);
+  if (raw.system_pages !== undefined) s.system_pages = as_bool(raw.system_pages, `${at}.system_pages`);
   if (raw.out_dir !== undefined) {
     if (raw.out_dir !== null && (typeof raw.out_dir !== "string" || !raw.out_dir.trim()))
       fail(`${at}.out_dir must be a path string or null`);
@@ -218,6 +222,8 @@ const validate_job = (name, raw, defaults) => {
 // config would have rejected — and a flag that does not apply to the
 // job's kind is an error rather than a silently ignored argument.
 const apply_overrides = (job, overrides = {}) => {
+  if (overrides.system_pages && !KIND_KEYS[job.kind].includes("system_pages"))
+    fail(`--system-pages does not apply to a ${job.kind} job (summary kinds only)`);
   const next = { ...job, ...resolve_settings(overrides, "command line") };
   if (overrides.customer_id !== undefined && overrides.customer_id !== null) {
     if (job.kind === "fleet_summary")
@@ -263,7 +269,8 @@ const batch_email_block = (job, { summary_pdf }) => ({
   summary: job.email,
   summary_pdf,
   attachments: false,
-  archive_records: job.archive_records
+  archive_records: job.archive_records,
+  system_pages: job.system_pages === true
 });
 
 // Job (+ resolved fleet system ids, for the fleet kind) -> the raw request

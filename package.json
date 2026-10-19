@@ -16,7 +16,8 @@
     "check:config": "node sme_reports/dev/check_config.js",
     "check:compute": "node sme_reports/dev/check_compute.js",
     "check:fleet": "node sme_reports/dev/check_fleet.js",
-    "check:chart": "node sme_reports/dev/check_chart.js"
+    "check:chart": "node sme_reports/dev/check_chart.js",
+    "check:system-pages": "node sme_reports/dev/check_system_pages.js"
   },
   "keywords": [],
   "author": "",
