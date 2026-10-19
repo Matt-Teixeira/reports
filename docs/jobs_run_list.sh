@@ -19,9 +19,9 @@ npm run report -- customer                               # same thing, generic f
 # ---------------------------------------------------------------------------
 # Customer summary — one customer's Magnet Health Summary PDF
 # ---------------------------------------------------------------------------
-# C009816 Trinity Health · C0051 INTELAS
+# C009816 Trinity Health · C0051 INTELAS · Piedmont C0137
 npm run report:customer -- --customer C0051 --period 6mo
-npm run report:customer -- --customer C009816 --period 6mo --email
+npm run report:customer -- --customer C0137 --period 6mo --email
 npm run report:customer -- --customer C0137 --period 30d
 npm run report:customer -- --customer C0137 --period 7d --email
 
@@ -76,6 +76,31 @@ npm run report:fleet -- --period 30d --email
 # so give it several minutes.
 
 # ---------------------------------------------------------------------------
+# System Activity pages — add-on to customer and fleet summaries
+# ---------------------------------------------------------------------------
+
+npm run report:customer -- --customer C0137 --period 6mo --system-pages            # build only
+npm run report:customer -- --customer C0137 --period 6mo --system-pages --email    # + send
+npm run report:fleet -- --period 6mo --system-pages
+
+# --system-pages adds one interactive HTML page per flagged system (needs
+# attention, data issue, or could not be analyzed): its alert detections,
+# notifications and readings over the summary's period. Healthy and
+# limited-coverage systems get no page. Customer-facing: every Avante user is
+# scrubbed from the pages. Open them in a web browser.
+#
+# Pages land in sme_reports/out/ as Avante-SME#####-Activity-<period>-<date>.html.
+# With --email they are zipped; part 1 of the zip rides on the summary email,
+# and any further parts (12 MB each) follow as their own emails to the same
+# recipients. Summary jobs only — not sme_brief / customer-briefs.
+#
+# Rough size, 6mo: Piedmont (C0137) 23 pages, one ~7.5 MB zip, ~30 s.
+# Fleet 108 pages, 4 zips (summary email + 3 follow-ups), ~1.5 min.
+#
+# Set "system_pages": true on a job in jobs.config.json to make it the
+# default for that job. Scheduled runs (--slot) don't build pages yet.
+
+# ---------------------------------------------------------------------------
 # Flags
 # ---------------------------------------------------------------------------
 
@@ -86,6 +111,8 @@ npm run report:fleet -- --period 30d --email
 #   --email              send it (to defaults.recipients in the config)
 #   --no-email           build only — the default, useful to override a job
 #                        whose config sets "email": true
+#   --system-pages       customer_summary and fleet_summary jobs — add a System
+#                        Activity page per flagged system (see above)
 #   --config <path>      a different job config file
 #   --list               list jobs and exit
 #
@@ -135,3 +162,4 @@ npm run check:config
 npm run check:compute
 npm run check:fleet      # renders and MEASURES real page geometry (Chromium)
 npm run check:chart
+npm run check:system-pages   # activity pages + Avante scrub — no database (Chromium)
