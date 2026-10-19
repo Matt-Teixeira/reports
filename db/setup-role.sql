@@ -50,6 +50,15 @@
   \echo 'ERROR: set pw first, e.g.  psql -v pw=secret -f db/setup-role.sql'
   \quit
 \endif
+-- ...and require it to be NON-EMPTY. -v pw="$(cat /root/reports_rw_pw)" run
+-- WITHOUT root defines pw as '' (the cat fails, the substitution is empty),
+-- which sailed past the check above and CLEARED the role's password
+-- (2026-10-19). Abort before any statement runs.
+SELECT length(:'pw') = 0 AS pw_empty \gset
+\if :pw_empty
+  \echo 'ERROR: pw is empty — did the password-file read fail? Nothing was changed.'
+  \quit
+\endif
 
 SELECT format('CREATE ROLE reports_rw LOGIN PASSWORD %L', :'pw')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'reports_rw')
