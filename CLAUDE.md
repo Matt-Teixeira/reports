@@ -70,8 +70,10 @@ than falling through to the live slot batch, and an argument error exits **3**
 (usage), not 1 — same grading as an unknown report family.
 
 `alert.sme_reports` rows are inert until **both** gates open (`enabled=true`
-AND `dry_run=false`). The table is currently empty on this host, so the
-scheduled mode is a no-op until rows exist. Config rows are written by the
+AND `dry_run=false`). On this host it holds two rows (ids 1–2, both
+`enabled=false`, `dry_run=false`, scheduled `mon-08:00` — checked
+2026-10-19), so the scheduled mode is a no-op until someone flips `enabled`
+— **which alone would make them send**. Config rows are written by the
 frontend; this app only reads them, and writes one
 `alert.sme_report_sends` row per envelope recipient per delivery attempt.
 
