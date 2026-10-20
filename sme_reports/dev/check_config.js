@@ -318,6 +318,10 @@ const { parse_sme_args } = require("../cli_args");
   validate_config({ ...customer_row, options: { system_pages: "internal" } }); // internal copy, Avante mailbox
   validate_config(fleet_row);
   validate_config({ ...customer_row, options: { system_pages: false } });
+  // The Friday C0137 pilot rows, as inserted (2026-10-20): one per person,
+  // spelled as given.
+  for (const who of ["matt.teixeira@avantehs.com", "joe.anello@AvanteHS.com", "jonathan.pope@avantehs.com"])
+    validate_config({ ...customer_row, scope: { customer_id: "C0137" }, recipients: [who], dry_run: true });
 
   const bad = [
     [{ ...customer_row, recipients: ["ops@example.com"] }, /pilot.*not ops@example\.com/],

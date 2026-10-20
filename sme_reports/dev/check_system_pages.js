@@ -87,7 +87,13 @@ const H = 3600e3;
   assert.strictEqual(pages_audience("external", { scoped: false }), "external");
   assert.strictEqual(pages_audience(false, { scoped: true }), null);
 
-  assert.deepStrictEqual(PILOT_RECIPIENTS, ["matt.teixeira@avantehs.com"], "pilot: pages go to Matt only");
+  assert.deepStrictEqual(
+    PILOT_RECIPIENTS,
+    ["matt.teixeira@avantehs.com", "joe.anello@avantehs.com", "jonathan.pope@avantehs.com"],
+    "pilot: pages go to these three only"
+  );
+  assert.ok(PILOT_RECIPIENTS.every((e) => /@avantehs\.com$/.test(e) && e === e.toLowerCase()), "pilot list: lowercase Avante mailboxes");
+  assert.strictEqual(page_envelope_error("internal", ["joe.anello@AvanteHS.com"], ["Jonathan.Pope@avantehs.com"]), null, "pilot match is case-insensitive");
   assert.strictEqual(page_envelope_error("external", ["Matt.Teixeira@avantehs.com"], []), null);
   assert.strictEqual(page_envelope_error("internal", ["matt.teixeira@avantehs.com"], []), null);
   assert.strictEqual(page_envelope_error(null, ["anyone@example.com"], []), null, "no pages, no gate");

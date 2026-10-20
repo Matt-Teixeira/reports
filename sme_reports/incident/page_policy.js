@@ -16,11 +16,13 @@
 const AUDIENCES = ["internal", "external"];
 
 // PILOT GATE (2026-10-20): while the pages are being proven on real
-// schedules, every run that builds them may address ONLY these people —
+// schedules, every run that emails them may address ONLY these people —
 // To and CC alike. A run aimed anywhere else fails at validation, before
 // any work. Widen this list deliberately, in code review, when the pages
-// are cleared for customers.
-const PILOT_RECIPIENTS = ["matt.teixeira@avantehs.com"];
+// are cleared for customers. Lowercase; matching is case-insensitive.
+// 2026-10-20: Joe Anello and Jonathan Pope added for the Friday C0137
+// pilot rows.
+const PILOT_RECIPIENTS = ["matt.teixeira@avantehs.com", "joe.anello@avantehs.com", "jonathan.pope@avantehs.com"];
 
 // PERMANENT: an internal page names Avante staff, so it only ever goes to
 // Avante mailboxes — strictly the company domain, not the broad /avante/i

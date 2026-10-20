@@ -97,7 +97,8 @@ npm run report:fleet -- --period 6mo --system-pages
 #              on the fleet job.
 # --pages-audience internal|external picks one instead of the default.
 #
-# PILOT: emailing pages is only allowed to matt.teixeira@avantehs.com —
+# PILOT: emailing pages is only allowed to matt.teixeira@, joe.anello@ and
+# jonathan.pope@avantehs.com (the list is in incident/page_policy.js) —
 # anything else is refused before the run starts. Internal pages only ever
 # go to @avantehs.com addresses. Build-only runs (no --email) are not gated.
 #

@@ -149,7 +149,9 @@ default; `--pages-audience internal|external` (job key
 `"system_pages": "internal"`) names one.
 
 **Pilot gate:** while the pages are in pilot, a run that EMAILS them may
-address only `matt.teixeira@avantehs.com` (To and CC); anything else is
+address only the pilot list in `incident/page_policy.js` — today
+`matt.teixeira@`, `joe.anello@` and `jonathan.pope@avantehs.com` (To and
+CC); anything else is
 refused before any work. Internal pages may only ever go to
 `@avantehs.com` addresses. Build-only runs are not gated.
 

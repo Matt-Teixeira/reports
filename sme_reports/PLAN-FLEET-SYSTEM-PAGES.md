@@ -183,7 +183,9 @@ Decided with the owner:
   the summary's sends rows. `user_summary` rows reject the option
   ("not implemented") — per-subscriber digests are a separate build.
 - **Pilot gate:** any run that emails pages may address only
-  `PILOT_RECIPIENTS` (`matt.teixeira@avantehs.com`), To and CC alike —
+  `PILOT_RECIPIENTS` (`matt.teixeira@avantehs.com`; Joe Anello and
+  Jonathan Pope added the same day for the Friday C0137 rows), To and CC
+  alike —
   checked by the request loader (one-off/file runs that send), by
   `validate_config` on every row (dry rows too, so flipping `dry_run`
   cannot unlock a send), and again at send time (a refusal withholds the
