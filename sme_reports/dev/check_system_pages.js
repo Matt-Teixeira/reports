@@ -4,12 +4,14 @@
 //
 //   node sme_reports/dev/check_system_pages.js
 //
-// Asserts: the Avante scrub; page selection (attention ∪ data issue ∪
-// failed, never healthy or limited); zip chunking; GE / Philips / Siemens
-// non-TIM / failed-system pages render, carry their own labels, contain no
-// Avante user and none of the Anomaly Report's interpretive sections;
-// byte-identical output for identical input; and every page loads in
-// Chromium with zero page errors.
+// Asserts: the Avante scrub (address, name, staff role); the audience and
+// recipient rules (incident/page_policy.js); page selection (attention ∪
+// data issue ∪ failed, never healthy or limited); zip chunking; GE /
+// Philips / Siemens non-TIM / failed-system pages render, carry their own
+// labels, contain no Avante user and none of the Anomaly Report's
+// interpretive sections; the INTERNAL copy keeps Avante staff, grouped and
+// marked; the downscaled logo; byte-identical output for identical input;
+// and every page loads in Chromium with zero page errors.
 
 const assert = require("assert");
 const fs = require("fs");
@@ -20,7 +22,8 @@ const path = require("path");
 // where the env comes from the container).
 require("dotenv").config({ path: path.join(__dirname, "..", "..", ".env") });
 
-const { scrub_avante, is_avante_user } = require("../incident/scrub");
+const { scrub_avante, avante_keys, is_avante_user } = require("../incident/scrub");
+const { normalize_system_pages, pages_audience, page_envelope_error, PILOT_RECIPIENTS } = require("../incident/page_policy");
 const { analyze_activity, SLOT_MS } = require("../incident/activity");
 const { build_system_page, system_page_name } = require("../incident/system_page");
 const { select_page_systems, chunk_pages } = require("../incident/system_pages");
@@ -44,6 +47,12 @@ const H = 3600e3;
   assert.ok(is_avante_user("pat@hospital.org", { first_name: "AVANTE Service", last_name: "Desk" }), "Avante first name");
   assert.ok(!is_avante_user("pat@hospital.org", { first_name: "Pat", last_name: "Smith" }), "customer user kept");
   assert.ok(!is_avante_user("tech@crothall.com", null), "contractor kept");
+  // Staff roles catch an Avante account whose address and name do not say so;
+  // customer roles ("admin", "site-admin", "basic") never do.
+  for (const role of ["superuser", "network", "developer", "Network"])
+    assert.ok(is_avante_user("ops.tech@gmail.com", { first_name: "Sam", last_name: "Staff", roles: ["basic", role] }), `${role} role is staff`);
+  for (const roles of [["admin"], ["site-admin"], ["basic", "admin"], [], undefined])
+    assert.ok(!is_avante_user("pat@hospital.org", { first_name: "Pat", last_name: "Smith", roles }), `${JSON.stringify(roles)} is a customer`);
 
   const r = scrub_avante({
     notifications: [{ user_id: "Jane@AvanteHS.com" }, { user_id: "pat@hospital.org" }, { user_id: "desk@hospital.org" }],
@@ -55,6 +64,35 @@ const H = 3600e3;
   assert.deepStrictEqual(r.notifications.map((n) => n.user_id), ["pat@hospital.org"]);
   assert.deepStrictEqual(r.recipients.map((u) => u.email_address), ["pat@hospital.org"]);
   assert.strictEqual(r.dropped_addresses, 2);
+  const staff = avante_keys({
+    notifications: [{ user_id: "Ops.Tech@gmail.com" }, { user_id: "pat@hospital.org" }],
+    recipients: [
+      { email_address: "ops.tech@gmail.com", first_name: "Sam", last_name: "Staff", roles: ["superuser"] },
+      { email_address: "pat@hospital.org", first_name: "Pat", last_name: "Smith", roles: ["admin"] }
+    ]
+  });
+  assert.deepStrictEqual([...staff], ["ops.tech@gmail.com"], "keys are lowercased; only the staff role matches");
+}
+
+// --- audience and recipient rules ----------------------------------------------
+{
+  const fail = (m) => {
+    throw new Error(m);
+  };
+  for (const v of [undefined, null, false]) assert.strictEqual(normalize_system_pages(v, "x", fail), false);
+  for (const v of [true, "internal", "external"]) assert.strictEqual(normalize_system_pages(v, "x", fail), v);
+  for (const v of ["both", "yes", 1, "Internal"]) assert.throws(() => normalize_system_pages(v, "x", fail), /must be true, false/);
+  assert.strictEqual(pages_audience(true, { scoped: false }), "internal", "fleet summary -> internal copy");
+  assert.strictEqual(pages_audience(true, { scoped: true }), "external", "customer summary -> customer copy");
+  assert.strictEqual(pages_audience("external", { scoped: false }), "external");
+  assert.strictEqual(pages_audience(false, { scoped: true }), null);
+
+  assert.deepStrictEqual(PILOT_RECIPIENTS, ["matt.teixeira@avantehs.com"], "pilot: pages go to Matt only");
+  assert.strictEqual(page_envelope_error("external", ["Matt.Teixeira@avantehs.com"], []), null);
+  assert.strictEqual(page_envelope_error("internal", ["matt.teixeira@avantehs.com"], []), null);
+  assert.strictEqual(page_envelope_error(null, ["anyone@example.com"], []), null, "no pages, no gate");
+  assert.match(page_envelope_error("external", ["pat@hospital.org"], []), /pilot.*pat@hospital\.org/);
+  assert.match(page_envelope_error("external", ["matt.teixeira@avantehs.com"], ["boss@avantehs.com"]), /pilot.*boss@avantehs\.com/);
 }
 
 // --- selection -----------------------------------------------------------------
@@ -152,7 +190,7 @@ const alert_rows = (primary_alias, primary_threshold, units) => {
       capture_datetime: new Date(t)
     });
   const at = new Date(T0 + 86400e3 + 10 * 60e3);
-  const notifications = ["pat@testhealth.org", "jane@avantehs.com", "tech@crothall.com"].map((user_id) => ({
+  const notifications = ["pat@testhealth.org", "jane@avantehs.com", "tech@crothall.com", "ops.tech@gmail.com"].map((user_id) => ({
     last_update: at,
     user_id,
     customer_id: "C0001",
@@ -164,7 +202,9 @@ const alert_rows = (primary_alias, primary_threshold, units) => {
   const recipients = [
     { email_address: "pat@testhealth.org", first_name: "Pat", last_name: "Smith", status: "active", customer_ids: ["C0001"] },
     { email_address: "jane@avantehs.com", first_name: "Jane", last_name: "Doe", status: "active", customer_ids: ["C0001", "C0002"] },
-    { email_address: "tech@crothall.com", first_name: "Tech", last_name: "Contractor", status: "active", customer_ids: ["C0001", "C0002"] }
+    { email_address: "tech@crothall.com", first_name: "Tech", last_name: "Contractor", status: "active", customer_ids: ["C0001", "C0002"], roles: ["basic"] },
+    // Avante staff by ROLE only: neither address nor name says so.
+    { email_address: "ops.tech@gmail.com", first_name: "Sam", last_name: "Staff", status: "active", customer_ids: ["C0001"], roles: ["superuser", "network", "basic"] }
   ];
   return { models, detections, notifications, recipients };
 };
@@ -192,16 +232,20 @@ const fixture = (system_id, vendor) => {
   return { data, readings };
 };
 
-const render = ({ data, readings }, notice = null) => {
-  const scrubbed = scrub_avante(data);
-  const a = analyze_activity({ ...data, ...scrubbed }, readings, { from: T0, to: T1 });
-  const html = build_system_page(a, { identity: data.identity, meta: data.meta, model_count: data.models.length, period_label: "6 months", notice });
+const render = ({ data, readings }, notice = null, audience = "external") => {
+  const internal = audience === "internal";
+  const rows = internal ? data : { ...data, ...scrub_avante(data) };
+  const a = analyze_activity(rows, readings, { from: T0, to: T1, avante_keys: internal ? avante_keys(data) : null });
+  const html = build_system_page(a, { identity: data.identity, meta: data.meta, model_count: data.models.length, period_label: "6 months", notice, audience });
   return { a, html };
 };
 
 // Strings that must never appear on a customer page (outside branding).
-const AVANTE_USER = /[\w.+-]*avante[\w.+-]*@|@[\w.-]*avante|\bJane\b|someone@/i;
+const AVANTE_USER = /[\w.+-]*avante[\w.+-]*@|@[\w.-]*avante|\bJane\b|someone@|ops\.tech@/i;
 const BANNED_SECTIONS = ["Hypothesis", "What the data shows", "Steps for improvement", "Re-create this timeline", "Expected, not detected", "Start where the compressor stopped"];
+
+const LOGO_SMALL = require("../render/assets/logo_small");
+const LOGO_FULL = require("../render/assets/logo");
 
 const pages = [];
 for (const [id, vendor] of [["SME10001", "GE"], ["SME10002", "PHILIPS"], ["SME10003", "SIEMENS_NON_TIM"]]) {
@@ -210,7 +254,7 @@ for (const [id, vendor] of [["SME10001", "GE"], ["SME10002", "PHILIPS"], ["SME10
   // facts
   assert.strictEqual(a.slots.length, DAYS * 48, `${vendor}: one slot per half hour`);
   assert.strictEqual(a.counts.detections, 48, `${vendor}: every detection placed`);
-  assert.strictEqual(a.counts.recipients, 2, `${vendor}: Avante recipient scrubbed, customer + contractor kept`);
+  assert.strictEqual(a.counts.recipients, 2, `${vendor}: Avante recipients (by address and by role) scrubbed, customer + contractor kept`);
   assert.ok(!Object.keys(a.users).some((u) => /avante/i.test(u)), `${vendor}: no Avante user key`);
   assert.deepStrictEqual(a.org_order, ["Test Health", "Other recipients"]);
   assert.strictEqual(a.orgs["pat@testhealth.org"], "Test Health");
@@ -227,7 +271,11 @@ for (const [id, vendor] of [["SME10001", "GE"], ["SME10002", "PHILIPS"], ["SME10
     assert.ok(!html.includes(b), `${vendor}: "${b}" must not be on the page`);
   assert.ok(html.includes(`${id} System Activity`), `${vendor}: title`);
   assert.ok(!html.includes("Anomaly Report"), `${vendor}: not branded as an Anomaly Report`);
+  assert.ok(!/Internal/.test(html), `${vendor}: the customer copy carries no Internal marking`);
+  assert.ok(html.includes(LOGO_SMALL) && !html.includes(LOGO_FULL.slice(0, 4000)), `${vendor}: the downscaled logo, not the full-size one`);
+  assert.ok(html.length < 400e3, `${vendor}: a 3-day page stays small (${html.length} bytes)`);
   const payload = JSON.parse(html.match(/<script type="application\/json" id="timeline-data">([\s\S]*?)<\/script>/)[1].replace(/\\u003c/g, "<"));
+  assert.strictEqual(payload.audience, "external");
   assert.strictEqual(payload.show_missed, false);
   assert.strictEqual(payload.shade, null);
   assert.strictEqual(payload.jump, null);
@@ -251,7 +299,32 @@ for (const [id, vendor] of [["SME10001", "GE"], ["SME10002", "PHILIPS"], ["SME10
   pages.push({ id: "SME10004", vendor: "failed", html, primary: "He pressure" });
 }
 
+// The INTERNAL copy: every recipient, Avante staff (by address and by role)
+// grouped first under "Avante", and marked Internal wherever it could be
+// mistaken for the customer copy.
+{
+  const f = fixture("SME10005", "GE");
+  const { a, html } = render(f, null, "internal");
+  assert.strictEqual(a.counts.recipients, 4, "internal keeps every recipient");
+  assert.deepStrictEqual(a.org_order, ["Avante", "Test Health", "Other recipients"]);
+  assert.strictEqual(a.orgs["jane@avantehs.com"], "Avante");
+  assert.strictEqual(a.orgs["ops.tech@gmail.com"], "Avante", "staff role groups with Avante");
+  assert.strictEqual(a.orgs["pat@testhealth.org"], "Test Health");
+  assert.ok(html.includes("<title>SME10005 System Activity (Internal)</title>"));
+  assert.ok(html.includes('<span class="internal-tag">Internal</span>'));
+  assert.ok(html.includes("Avante staff recipients are included"));
+  const payload = JSON.parse(html.match(/<script type="application\/json" id="timeline-data">([\s\S]*?)<\/script>/)[1].replace(/\\u003c/g, "<"));
+  assert.strictEqual(payload.audience, "internal");
+  assert.strictEqual(payload.show_missed, false, "internal is still conjecture-free");
+  for (const b of BANNED_SECTIONS.filter((x) => x !== "Expected, not detected" && x !== "Start where the compressor stopped"))
+    assert.ok(!html.includes(b), `internal: "${b}" must not be on the page`);
+  assert.strictEqual(render(f, null, "internal").html, html, "internal: deterministic");
+  assert.throws(() => build_system_page(a, { identity: f.data.identity, audience: "both" }), /unknown audience/);
+  pages.push({ id: "SME10005", vendor: "internal", html, primary: "He pressure", internal: true });
+}
+
 assert.strictEqual(system_page_name("SME10001", T1, "-6mo"), "Avante-SME10001-Activity-6mo-2026-10-03.html");
+assert.strictEqual(system_page_name("SME10001", T1, "-6mo", "internal"), "Avante-SME10001-Activity-Internal-6mo-2026-10-03.html");
 
 // --- every page loads in Chromium with zero page errors --------------------------
 (async () => {
@@ -278,7 +351,13 @@ assert.strictEqual(system_page_name("SME10001", T1, "-6mo"), "Avante-SME10001-Ac
       await page.click('.seg button[data-clock="12"]');
       const text = await page.evaluate(() => document.body.innerText);
       assert.deepStrictEqual(errors, [], `${p.id} (${p.vendor}): page errors`);
-      assert.ok(!AVANTE_USER.test(text), `${p.id}: Avante user in rendered text`);
+      if (p.internal) {
+        const groups = await page.$$eval("#rgrid .rorg", (els) => els.map((e) => e.textContent));
+        assert.deepStrictEqual(groups, ["Avante", "Test Health"], `${p.id}: recipient groups`);
+        assert.ok(/jane@avantehs\.com/.test(await page.$eval("#rgrid", (e) => e.textContent)), `${p.id}: Avante staff listed`);
+      } else {
+        assert.ok(!AVANTE_USER.test(text), `${p.id}: Avante user in rendered text`);
+      }
       for (const b of BANNED_SECTIONS) assert.ok(!text.includes(b), `${p.id}: "${b}" rendered`);
       assert.ok(text.includes(p.primary), `${p.id}: primary metric label "${p.primary}" rendered`);
       const lanes = await page.$$eval("#lanes svg", (s) => s.length);

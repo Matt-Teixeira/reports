@@ -143,6 +143,7 @@ const send_summary_email = async (
     let note =
       n
         ? `The attached <b>System Activity</b> zip holds ${n} interactive page${n === 1 ? "" : "s"}, one for each system below that needs attention, has a data issue, or could not be analyzed: its alert detections, notifications and readings over this period. Open them in a web browser.` +
+          (activity.audience === "internal" ? " These are the <b>internal</b> copies: Avante staff recipients are included." : "") +
           (parts > 1 ? ` The pages are split into ${parts} zips; this email carries part 1 and parts 2–${parts} follow in separate emails.` : "")
         : "";
     if (activity.page_failures.length) {

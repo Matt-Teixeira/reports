@@ -6,7 +6,7 @@ const { v4: uuidv4 } = require("uuid");
 const { is_attention, is_data_issue } = require("../conditions");
 const { build_fresh_zip } = require("../output/fresh_zip");
 const { load_activity_data } = require("./activity_data");
-const { scrub_avante } = require("./scrub");
+const { scrub_avante, avante_keys } = require("./scrub");
 const { analyze_activity } = require("./activity");
 const { build_system_page, system_page_name } = require("./system_page");
 
@@ -64,11 +64,15 @@ const chunk_pages = (pages, budget = CHUNK_BYTES) => {
 // requests: the batch's request list (each system's window). out_dir: where
 // the pages and zips land. scope_tag: filename-safe scope label ("fleet" or
 // a customer slug). period_tag / period_label: periods.js wording.
+// audience: "external" (scrubbed, for the customer) or "internal" (Avante
+// staff kept and labelled) — incident/page_policy.js decides which.
 const build_system_pages = async (
   run_log,
   job_id,
-  { results, failures, requests, out_dir, scope_tag = "fleet", period_tag = "", period_label = null }
+  { results, failures, requests, out_dir, scope_tag = "fleet", period_tag = "", period_label = null, audience }
 ) => {
+  if (!["internal", "external"].includes(audience)) throw new Error(`build_system_pages: unknown audience ${audience}`);
+  const internal = audience === "internal";
   const db = require("../../utils/db/pg-pool");
   const { customer_failure_reason } = require("../render/fleet_model");
   const window_of = new Map(requests.map((r) => [r.system_id, r.window]));
@@ -84,11 +88,14 @@ const build_system_pages = async (
       const from = w.start.toMillis();
       const to = w.end.toMillis();
       const raw = await load_activity_data(db, { system_id: sel.system_id, from: new Date(from), to: new Date(to) });
-      const scrubbed = scrub_avante(raw);
-      const data = { ...raw, notifications: scrubbed.notifications, recipients: scrubbed.recipients };
+      // External: Avante rows removed before analysis. Internal: kept whole,
+      // with the same test marking who is Avante's.
+      const scrubbed = internal ? null : scrub_avante(raw);
+      const data = internal ? raw : { ...raw, notifications: scrubbed.notifications, recipients: scrubbed.recipients };
+      const staff = internal ? avante_keys(raw) : null;
       const readings = sel.result ? sel.result.activity || null : null;
       if (sel.result && !readings) throw new Error(`no activity readings on the result for ${sel.system_id} (run_one opts.activity off?)`);
-      const a = analyze_activity(data, readings, { from, to });
+      const a = analyze_activity(data, readings, { from, to, avante_keys: staff });
       const notice = sel.result
         ? null
         : `This system could not be analyzed for this period (${customer_failure_reason(sel.message)}), so no readings are shown. Its alert detections and notifications are below.`;
@@ -97,9 +104,10 @@ const build_system_pages = async (
         meta: raw.meta,
         model_count: raw.models.length,
         period_label,
-        notice
+        notice,
+        audience
       });
-      const file = path.join(out_dir, system_page_name(sel.system_id, to, period_tag));
+      const file = path.join(out_dir, system_page_name(sel.system_id, to, period_tag, audience));
       fs.writeFileSync(file, html);
       const buf = Buffer.from(html);
       pages.push({ system_id: sel.system_id, path: file, bytes: buf.length, deflated: zlib.deflateRawSync(buf).length });
@@ -107,12 +115,13 @@ const build_system_pages = async (
       await addLogEvent(I, run_log, "build_system_pages", det, {
         job_id,
         system_id: sel.system_id,
+        audience,
         analyzed: !!readings,
         slots: a.slots.length,
         detections: a.counts.detections,
         notifications: a.counts.notifications,
         recipients: a.counts.recipients,
-        avante_addresses_dropped: scrubbed.dropped_addresses,
+        ...(internal ? { avante_addresses_kept: staff.size } : { avante_addresses_dropped: scrubbed.dropped_addresses }),
         bytes: buf.length
       }, null);
     } catch (error) {
@@ -129,7 +138,7 @@ const build_system_pages = async (
   const zips = [];
   for (let i = 0; i < parts.length; i++) {
     const suffix = parts.length > 1 ? `-part-${i + 1}-of-${parts.length}` : "";
-    const filename = `Avante-${scope_tag}-System-Activity${period_tag}-${date}${suffix}.zip`;
+    const filename = `Avante-${scope_tag}-System-Activity${internal ? "-Internal" : ""}${period_tag}-${date}${suffix}.zip`;
     const zip_path = path.join(out_dir, `activity-${uuidv4().slice(0, 8)}-${filename}`);
     await build_fresh_zip(zip_path, parts[i].map((p) => p.path));
     zips.push({
@@ -141,7 +150,7 @@ const build_system_pages = async (
       bytes: fs.statSync(zip_path).size
     });
   }
-  return { selected: selected.map((s) => s.system_id), pages, page_failures, zips };
+  return { audience, selected: selected.map((s) => s.system_id), pages, page_failures, zips };
 };
 
 module.exports = { build_system_pages, select_page_systems, chunk_pages, CHUNK_BYTES };

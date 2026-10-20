@@ -113,8 +113,9 @@ const normalize_request = (raw) => {
 // Optional top-level batch_email: send ONE email carrying every generated
 // PDF, instead of one email per report. When present, member reports get
 // pdf forced on and their individual email send forced off, and they may
-// omit recipients (the batch recipients apply).
-const normalize_batch_email = (raw) => {
+// omit recipients (the batch recipients apply). scoped: whether the request
+// is customer-scoped, which decides the default activity-page audience.
+const normalize_batch_email = (raw, { scoped = false } = {}) => {
   if (!raw) return null;
   if (!Array.isArray(raw.recipients) || raw.recipients.length === 0)
     fail("batch_email.recipients must be a non-empty array");
@@ -143,15 +144,29 @@ const normalize_batch_email = (raw) => {
     // system_pages: also build one interactive System Activity page per
     // system that needs attention, has a data issue or failed, zip them,
     // and deliver them with the summary email (incident/system_pages.js).
-    system_pages: raw.system_pages === true
+    // Normalized to the AUDIENCE — false, "internal" or "external" — here,
+    // once, under the recipient rules (incident/page_policy.js).
+    system_pages: page_audience_of(raw, cc_list, scoped)
   };
+};
+
+// The envelope is checked only when THIS run sends the summary email: a
+// build-only run addresses nobody, and a scheduled run (summary: false —
+// its send loop delivers) is checked on its config row by fanout.js and
+// again at send time by run_scheduled.js.
+const page_audience_of = (raw, cc_list, scoped) => {
+  const { normalize_system_pages, pages_audience, page_envelope_error } = require("./incident/page_policy");
+  const audience = pages_audience(normalize_system_pages(raw.system_pages, "batch_email.system_pages", fail), { scoped });
+  const refused = raw.summary === true ? page_envelope_error(audience, raw.recipients, cc_list) : null;
+  if (refused) fail(refused);
+  return audience || false;
 };
 
 // The batch-assembly half, shared by explicit reports[] requests and
 // scope-synthesized ones: exclusions, batch-email defaults, summary-only
 // guards, per-report normalization, out_dir.
 const assemble = (raw, list) => {
-  const batch_email = normalize_batch_email(raw.batch_email);
+  const batch_email = normalize_batch_email(raw.batch_email, { scoped: raw.scope !== undefined });
   const summary_only = raw.summary_only === true;
 
   // Top-level lookback_days (or its named spelling, "period": "6mo"): the

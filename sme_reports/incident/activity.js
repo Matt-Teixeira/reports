@@ -49,11 +49,12 @@ const mode_of = (xs) => {
 
 const fixed = (v, d) => (v === null || v === undefined ? null : Number(v).toFixed(d));
 
-// data: incident/activity_data.js rows, ALREADY SCRUBBED (incident/scrub.js).
+// data: incident/activity_data.js rows — ALREADY SCRUBBED (incident/scrub.js)
+// for an external page; whole for an internal one, which passes avante_keys.
 // readings: run_one's result.activity, or null for a system the batch could
 // not analyze (its page carries alerts only and says so).
 // window: { from, to } epoch ms, half-open.
-const analyze_activity = (data, readings, { from, to }) => {
+const analyze_activity = (data, readings, { from, to, avante_keys = null }) => {
   const { identity, models: model_rows, detections, notifications, recipients } = data;
   const r = readings || null;
   const primary_alias = r && r.vendor_key === "SIEMENS_NON_TIM" ? "Shield Temp" : "He Pressure";
@@ -182,10 +183,13 @@ const analyze_activity = (data, readings, { from, to }) => {
     .filter((x) => x.dets.length && x.slot >= first_slot && x.slot <= last_slot);
 
   // --- recipients and notification batches ---------------------------------
-  // Grouped by whether the user's access names this system's customer. No
-  // "Avante" group exists: the scrub already removed every Avante user.
+  // Grouped by whether the user's access names this system's customer. On
+  // an external page no "Avante" group exists: the scrub already removed
+  // every Avante user. An internal page passes avante_keys (scrub.js) and
+  // keeps them, grouped first under "Avante".
   const customer_org = identity.customer_name;
   const OTHER = "Other recipients";
+  const AVANTE_ORG = "Avante";
   const user_by_email = new Map(recipients.map((u) => [String(u.email_address).toLowerCase(), u]));
   const users = {};
   const orgs = {};
@@ -194,7 +198,9 @@ const analyze_activity = (data, readings, { from, to }) => {
     if (users[key]) continue;
     users[key] = n.user_id;
     const u = user_by_email.get(key);
-    orgs[key] = u && (u.customer_ids || []).includes(identity.customer_id) ? customer_org : OTHER;
+    orgs[key] = avante_keys && avante_keys.has(key)
+      ? AVANTE_ORG
+      : u && (u.customer_ids || []).includes(identity.customer_id) ? customer_org : OTHER;
   }
   const by_run = new Map();
   for (const n of notifications) {
@@ -262,7 +268,7 @@ const analyze_activity = (data, readings, { from, to }) => {
     notes,
     users,
     orgs,
-    org_order: [customer_org, OTHER],
+    org_order: avante_keys ? [AVANTE_ORG, customer_org, OTHER] : [customer_org, OTHER],
     customer_org,
     scales,
     counts: {

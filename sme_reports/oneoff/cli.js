@@ -69,7 +69,7 @@ const print_outcome = (job, batch) => {
   for (const f of batch.failures) lines.push(`FAILED ${f.system_id}: ${f.message}`);
   if (batch.activity) {
     const a = batch.activity;
-    lines.push(`activity pages: ${a.pages.length} of ${a.selected.length} flagged systems`);
+    lines.push(`activity pages (${a.audience}): ${a.pages.length} of ${a.selected.length} flagged systems`);
     for (const p of a.pages) lines.push(`  ${p.system_id}: ${p.path}`);
     for (const f of a.page_failures) lines.push(`  PAGE FAILED ${f.system_id}: ${f.message}`);
     for (const z of a.zips) lines.push(`  zip ${z.part}/${z.parts}: ${z.removed ? `${z.filename} (sent, removed)` : z.path}`);

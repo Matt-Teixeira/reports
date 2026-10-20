@@ -133,18 +133,36 @@ that needs attention, has a data issue, or could not be analyzed: its
 alert detections, notifications and readings over the summary's period,
 with the timeline, filters and slot table of the Anomaly Report and none
 of its interpretation (`incident/system_pages.js`,
-`PLAN-FLEET-SYSTEM-PAGES.md`). Pages are customer-facing: every Avante
-user is scrubbed before anything is counted. They land in the out dir;
-with `--email` they are zipped and ride on the summary email, split into
-"part n/N" follow-up emails when one zip would exceed the message limit.
+`PLAN-FLEET-SYSTEM-PAGES.md`). They land in the out dir; with `--email`
+they are zipped and ride on the summary email, split into "part n/N"
+follow-up emails when one zip would exceed the message limit.
+
+Two audiences (`incident/page_policy.js`):
+
+| Audience | What it shows | Default for |
+|---|---|---|
+| `external` | the customer copy — every Avante user (address, name, or staff role) scrubbed before anything is counted | `customer_summary` |
+| `internal` | every recipient, Avante staff grouped under "Avante"; marked Internal in the header, title and file name (`…-Activity-Internal-…`) | `fleet_summary` |
+
+`--system-pages` (job key `"system_pages": true`) takes the summary's
+default; `--pages-audience internal|external` (job key
+`"system_pages": "internal"`) names one.
+
+**Pilot gate:** while the pages are in pilot, a run that EMAILS them may
+address only `matt.teixeira@avantehs.com` (To and CC); anything else is
+refused before any work. Internal pages may only ever go to
+`@avantehs.com` addresses. Build-only runs are not gated.
 
 ```bash
-npm run report:customer -- --customer C0137 --system-pages            # build only
-npm run report:customer -- --customer C0137 --system-pages --email    # + send
+npm run report:customer -- --customer C0137 --system-pages                         # customer copies, build only
+npm run report:customer -- --customer C0137 --system-pages --email                 # + send
+npm run report:customer -- --customer C0137 --pages-audience internal --email      # internal copies
+npm run report:fleet -- --system-pages --email                                     # fleet: internal copies
 ```
 
-A 6-month customer summary (43 systems, 21 pages) takes ~30 s on top of
-the summary; pages are ~0.9–2.4 MB each and zip ~3× smaller.
+A 6-month customer summary (Piedmont, 43 systems, 23 pages) takes ~25 s on
+top of the summary and zips to ~2.3 MB; the 6-month fleet (108 pages) fits
+in 2 zips.
 
 ## Checks
 

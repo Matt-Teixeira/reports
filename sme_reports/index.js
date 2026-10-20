@@ -396,7 +396,8 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
     // for the harness, which never passes a cache.
     const { concurrency = 1, cache = null, on_facts = null } = opts;
     // Activity pages need each system's screened readings carried out of
-    // run_one; only ask for them when the pages were requested.
+    // run_one; only ask for them when the pages were requested. The loader
+    // has already resolved system_pages to the audience (page_policy.js).
     const want_pages = !!(batch_email && batch_email.system_pages);
     // Null = explicit-date windows: no chosen period, no tag (F3).
     const batch_period_tag = period_tag_of(lookback_days);
@@ -495,7 +496,8 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
           out_dir,
           scope_tag,
           period_tag: batch_period_tag,
-          period_label: label_of(lookback_days)
+          period_label: label_of(lookback_days),
+          audience: batch_email.system_pages
         });
       }
 
@@ -517,14 +519,15 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
               // email, never just an absent attachment (round-2 F1).
               fleet_error,
               activity: activity
-                ? { pages: activity.pages.length, zips: activity.zips, page_failures: activity.page_failures }
+                ? { audience: activity.audience, pages: activity.pages.length, zips: activity.zips, page_failures: activity.page_failures }
                 : null
             }
           );
           if (activity && activity.zips.length > 1) {
             const { send_activity_parts } = require("./output/send_activity_parts");
             await send_activity_parts(run_log, job_id, batch_email, activity.zips.slice(1), {
-              subject_base: `Magnet Health Summary${subject_scope ? ` — ${subject_scope}` : ""}`
+              subject_base: `Magnet Health Summary${subject_scope ? ` — ${subject_scope}` : ""}`,
+              audience: activity.audience
             });
           }
         } finally {

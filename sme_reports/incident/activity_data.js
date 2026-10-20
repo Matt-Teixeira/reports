@@ -10,14 +10,15 @@ const sql_queries = require("../sql/sql");
 //
 // Same queries as the Anomaly Report (incident/data.js), minus its GE MM3 /
 // EDU v3 readings pair, and with notifications narrowed to the default
-// models (sql/activity-notifications.sql — 50x faster, same rows).
+// models (sql/activity-notifications.sql — 50x faster, same rows) and
+// recipients carrying app roles for the scrub (sql/activity-recipients.sql).
 
 const sql = (file) => new QueryFile(join(__dirname, "sql", file), { minify: true });
 const Q = {
   models: sql("alert-models.sql"),
   detections: sql("detections.sql"),
   notifications: sql("activity-notifications.sql"),
-  recipients: sql("recipients.sql"),
+  recipients: sql("activity-recipients.sql"),
   meta: sql("system-meta.sql")
 };
 

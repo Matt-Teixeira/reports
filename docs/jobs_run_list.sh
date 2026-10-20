@@ -81,24 +81,39 @@ npm run report:fleet -- --period 30d --email
 
 npm run report:customer -- --customer C0137 --period 6mo --system-pages            # build only
 npm run report:customer -- --customer C0137 --period 6mo --system-pages --email    # + send
+npm run report:customer -- --customer C0137 --period 6mo --pages-audience internal # internal copies
 npm run report:fleet -- --period 6mo --system-pages
 
 # --system-pages adds one interactive HTML page per flagged system (needs
 # attention, data issue, or could not be analyzed): its alert detections,
 # notifications and readings over the summary's period. Healthy and
-# limited-coverage systems get no page. Customer-facing: every Avante user is
-# scrubbed from the pages. Open them in a web browser.
+# limited-coverage systems get no page. Open them in a web browser.
 #
-# Pages land in sme_reports/out/ as Avante-SME#####-Activity-<period>-<date>.html.
-# With --email they are zipped; part 1 of the zip rides on the summary email,
-# and any further parts (12 MB each) follow as their own emails to the same
-# recipients. Summary jobs only — not sme_brief / customer-briefs.
+# Two copies:
+#   external — the customer copy: every Avante user scrubbed (by address,
+#              name, or staff role). Default on a customer job.
+#   internal — Avante staff kept and grouped under "Avante", marked Internal
+#              everywhere (file names: ...-Activity-Internal-...). Default
+#              on the fleet job.
+# --pages-audience internal|external picks one instead of the default.
 #
-# Rough size, 6mo: Piedmont (C0137) 23 pages, one ~7.5 MB zip, ~30 s.
-# Fleet 108 pages, 4 zips (summary email + 3 follow-ups), ~1.5 min.
+# PILOT: emailing pages is only allowed to matt.teixeira@avantehs.com —
+# anything else is refused before the run starts. Internal pages only ever
+# go to @avantehs.com addresses. Build-only runs (no --email) are not gated.
 #
-# Set "system_pages": true on a job in jobs.config.json to make it the
-# default for that job. Scheduled runs (--slot) don't build pages yet.
+# Pages land in sme_reports/out/. With --email they are zipped; part 1 rides
+# on the summary email, and any further parts (12 MB each) follow as their
+# own emails. Summary jobs only — not sme_brief / customer-briefs.
+#
+# Rough size, 6mo: Piedmont (C0137) 23 pages, one ~2.3 MB zip, ~25 s.
+# Fleet 108 pages, 2 zips (summary email + 1 follow-up), ~1.5 min.
+#
+# Set "system_pages": true (or "internal" / "external") on a job in
+# jobs.config.json to make it the default for that job.
+#
+# Scheduled runs: set options on the alert.sme_reports row (customer_summary
+# or fleet_summary only), e.g. {"system_pages": true}. Try it first with:
+npm start sme_report -- --config 1 --dry-run
 
 # ---------------------------------------------------------------------------
 # Flags
@@ -113,6 +128,7 @@ npm run report:fleet -- --period 6mo --system-pages
 #                        whose config sets "email": true
 #   --system-pages       customer_summary and fleet_summary jobs — add a System
 #                        Activity page per flagged system (see above)
+#   --pages-audience <a> internal | external copies (implies --system-pages)
 #   --config <path>      a different job config file
 #   --list               list jobs and exit
 #

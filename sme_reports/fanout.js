@@ -1,4 +1,5 @@
 const { validate_scope, scope_set_hash, scope_set_key } = require("./scope");
+const { normalize_system_pages, pages_audience, page_envelope_error } = require("./incident/page_policy");
 
 // Pure fan-out logic for DB-config (scheduled) runs — PLAN-SCOPED-WEEKLY.md
 // B3. Everything here operates on plain rows handed in by the caller, so
@@ -14,8 +15,9 @@ const KINDS = ["user_summary", "customer_summary", "fleet_summary", "briefs"];
 // options is a contract, not a suggestion (the DDL comment promises unknown
 // keys are rejected, not ignored). include_briefs / exception_only are
 // designed-in but ship disabled; exclude carries the internal fleet run's
-// service-station list.
-const KNOWN_OPTIONS = ["include_briefs", "exception_only", "exclude"];
+// service-station list; system_pages adds the per-system activity pages
+// (true | "internal" | "external" — incident/page_policy.js).
+const KNOWN_OPTIONS = ["include_briefs", "exception_only", "exclude", "system_pages"];
 
 // Row (alert.sme_reports) -> canonical config, or a loud error naming the
 // row id. Validation the DDL CHECKs cannot express lives here.
@@ -37,6 +39,11 @@ const validate_config = (row) => {
     fail(`${at}: options.exception_only is not implemented yet`);
   if (options.exclude !== undefined && !Array.isArray(options.exclude))
     fail(`${at}: options.exclude must be an array of system ids`);
+  const system_pages = normalize_system_pages(options.system_pages, `${at}: options.system_pages`, fail);
+  // user_summary delivers per-user digests to subscribers through its own
+  // loop; pages there are a separate build, rejected loudly until it exists.
+  if (system_pages && row.report_kind === "user_summary")
+    fail(`${at}: options.system_pages is not implemented for user_summary yet`);
 
   if (!Number.isInteger(row.lookback_days) || row.lookback_days <= 0)
     fail(`${at}: lookback_days must be a positive integer`);
@@ -109,6 +116,15 @@ const validate_config = (row) => {
     }
     if (row.report_kind === "fleet_summary" && row.scope !== null && row.scope !== undefined)
       fail(`${at}: fleet_summary takes no scope (it is the whole fleet)`);
+    // Pages ride the row's own email: its whole envelope must pass the
+    // pilot gate and, for internal pages, the Avante-mailbox rule. Checked
+    // on dry-run rows too — flipping dry_run must not be what unlocks a send.
+    const refused = page_envelope_error(
+      pages_audience(system_pages, { scoped: row.report_kind === "customer_summary" }),
+      recipients,
+      cc_list
+    );
+    if (refused) fail(`${at}: ${refused}`);
   }
 
   return {
@@ -282,10 +298,13 @@ const config_to_raw = (cfg, { recipients }) => ({
   summary_only: true,
   batch_email: {
     recipients,
+    cc_list: cfg.cc_list || [],
     summary: false, // the send loop delivers; run_batch must not
     summary_pdf: true,
     attachments: false,
-    archive_records: !cfg.dry_run
+    archive_records: !cfg.dry_run,
+    // Built by run_batch, delivered by run_scheduled's send loop.
+    ...(cfg.options.system_pages ? { system_pages: cfg.options.system_pages } : {})
   }
 });
 

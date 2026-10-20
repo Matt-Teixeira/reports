@@ -54,6 +54,7 @@ this event; customer contacts are identified from `users.system_list_config`
 naming exactly this customer.
 
 **System Activity pages** (`activity.js`, `system_page.js`,
-`system_pages.js`, `scrub.js`) reuse this page's client and styling for a
-no-interpretation, any-vendor, customer-facing page per flagged system on
-fleet and customer summaries — see `../PLAN-FLEET-SYSTEM-PAGES.md`.
+`system_pages.js`, `scrub.js`, `page_policy.js`) reuse this page's client
+and styling for a no-interpretation, any-vendor page per flagged system on
+fleet and customer summaries — in an internal and an external (customer)
+copy, one-off and scheduled — see `../PLAN-FLEET-SYSTEM-PAGES.md`.

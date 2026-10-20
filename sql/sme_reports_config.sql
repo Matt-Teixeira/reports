@@ -72,8 +72,10 @@ CREATE TABLE IF NOT EXISTS alert.sme_reports (
                  CONSTRAINT sme_reports_lookback_chk
                  CHECK (lookback_days > 0),
   -- Free-form options consumed by the runner, e.g.
-  -- {"include_briefs": true, "exception_only": true}. Unknown keys are
-  -- rejected by the runner, not silently ignored.
+  -- {"include_briefs": true, "exception_only": true}, or
+  -- {"system_pages": true | "internal" | "external"} on a customer_summary /
+  -- fleet_summary row (per-system activity pages with the summary email).
+  -- Unknown keys are rejected by the runner, not silently ignored.
   options        JSONB NOT NULL DEFAULT '{}',
   -- derived  = recipients resolved at run time from public.users (active,
   --            notify_email, >=1 mag system in scope)

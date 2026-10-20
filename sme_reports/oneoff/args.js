@@ -26,7 +26,10 @@ const USAGE = `usage: npm run report -- <job> [options]
   --email                send the job's email
   --no-email             build the documents, send nothing (the default)
   --system-pages         also build a System Activity page per flagged system
-                         (fleet_summary, customer_summary)`;
+                         (fleet_summary, customer_summary) — internal copies
+                         on a fleet job, customer copies on a customer job
+  --pages-audience <a>   internal | external: build the pages for this
+                         audience instead (implies --system-pages)`;
 
 const parse_oneoff_args = (args) => {
   const out = {
@@ -37,7 +40,7 @@ const parse_oneoff_args = (args) => {
     system_ids: [],
     out_dir: null,
     email: null, // null = leave the config's setting alone
-    system_pages: null,
+    system_pages: null, // null | true | "internal" | "external"
     list: false
   };
   const value_of = (args, i, flag) => {
@@ -45,6 +48,7 @@ const parse_oneoff_args = (args) => {
     if (v === undefined || v.startsWith("--")) fail(`${flag} requires a value`);
     return v;
   };
+  let seen_pages_flag = false;
   for (let i = 0; i < (args || []).length; i++) {
     const a = args[i];
     if (!a.startsWith("--")) {
@@ -91,9 +95,18 @@ const parse_oneoff_args = (args) => {
         out.email = false;
         break;
       case "--system-pages":
-        if (out.system_pages) fail("--system-pages given twice");
-        out.system_pages = true;
+        if (seen_pages_flag) fail("--system-pages given twice");
+        seen_pages_flag = true;
+        if (!out.system_pages) out.system_pages = true;
         break;
+      case "--pages-audience": {
+        if (typeof out.system_pages === "string") fail("--pages-audience given twice");
+        const v = value_of(args, ++i, "--pages-audience");
+        if (v !== "internal" && v !== "external")
+          fail(`--pages-audience must be internal or external, got "${v}"`);
+        out.system_pages = v;
+        break;
+      }
       default:
         fail(`unknown argument "${a}"`);
     }

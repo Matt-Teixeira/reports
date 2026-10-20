@@ -1,5 +1,7 @@
 const { DateTime } = require("luxon");
-const logo_base64 = require("../render/assets/logo");
+// The downscaled logo (dev/gen_logo_small.js): the full-size one was ~240 KB
+// of every zipped page.
+const logo_base64 = require("../render/assets/logo_small");
 const { esc } = require("../render/fleet_page");
 const { CSS, CLIENT_JS } = require("./timeline");
 
@@ -10,8 +12,11 @@ const { CSS, CLIENT_JS } = require("./timeline");
 // detected", no inferred delivery status, no re-create queries. It states
 // what the database holds for the system over the summary's window.
 //
-// Customer-facing: built only from scrubbed rows (incident/scrub.js), so no
-// Avante user, address or count reaches it. Avante's own branding stays.
+// Two audiences (incident/page_policy.js). External (customer-facing): built
+// only from scrubbed rows (incident/scrub.js), so no Avante user, address or
+// count reaches it. Internal: every recipient, Avante staff grouped under
+// "Avante", marked Internal in the header, title and file name so it cannot
+// pass for the customer copy. Avante's own branding stays on both.
 // Deterministic: the date comes from the window end, never the clock.
 
 const TZ_DEFAULT = "America/New_York";
@@ -23,10 +28,16 @@ const ZONES = [
 ];
 
 // a: incident/activity.js output. ctx: { identity, meta, model_count,
-// period_label, notice } — notice is the one plain sentence a system that
-// could not be analyzed carries instead of readings.
-const build_system_page = (a, { identity: id, meta = {}, model_count, period_label = null, notice = null }) => {
+// period_label, notice, audience } — notice is the one plain sentence a
+// system that could not be analyzed carries instead of readings.
+const build_system_page = (
+  a,
+  { identity: id, meta = {}, model_count, period_label = null, notice = null, audience = "external" }
+) => {
+  if (!["internal", "external"].includes(audience)) throw new Error(`unknown audience ${audience}`);
+  const internal = audience === "internal";
   const sys = id.system_id;
+  const title = `${sys} System Activity${internal ? " (Internal)" : ""}`;
   const date = DateTime.fromMillis(a.window.to, { zone: TZ_DEFAULT }).toFormat("yyyy-MM-dd");
 
   // Where the compressor state came from: the EDU vibration sensor, or the
@@ -38,7 +49,7 @@ const build_system_page = (a, { identity: id, meta = {}, model_count, period_lab
 
   const payload = {
     system_id: sys,
-    audience: "external",
+    audience,
     show_missed: false,
     tz_default: TZ_DEFAULT,
     zones: ZONES,
@@ -79,19 +90,20 @@ const build_system_page = (a, { identity: id, meta = {}, model_count, period_lab
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>${esc(sys)} System Activity</title>
+<title>${esc(title)}</title>
 <style>${CSS}
 .notice{padding:14px 18px;border:1.5px solid var(--light);border-left:5px solid var(--blue);color:var(--ink)}
+.internal-tag{display:inline-block;margin-left:8px;padding:1px 7px;border:1.5px solid currentColor;border-radius:3px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;vertical-align:1px}
 </style>
 </head>
 <body>
 <header class="brandbar"><div class="wrap">
-  <div class="hdr"><img class="logo" alt="Avante" src="data:image/png;base64,${logo_base64}"><div class="r">System Activity${period_label ? ` · ${esc(period_label)}` : ""}<br><b>${esc(date)}</b></div></div>
+  <div class="hdr"><img class="logo" alt="Avante" src="data:image/png;base64,${logo_base64}"><div class="r">System Activity${period_label ? ` · ${esc(period_label)}` : ""}${internal ? `<span class="internal-tag">Internal</span>` : ""}<br><b>${esc(date)}</b></div></div>
   <div class="brandband"></div>
 </div></header>
 <div class="wrap">
   <header class="title">
-    <h1>${esc(sys)} System Activity</h1>
+    <h1>${esc(title)}</h1>
     <div class="sub">${esc(id.site_name)} · ${esc(id.customer_name)} · ${esc(span)}</div>
   </header>
   <div class="tiles" aria-label="System">
@@ -162,7 +174,7 @@ ${notice ? `
     </div>
   </section>
 
-  <p class="method">Each row is a 30-minute capture slot. Readings are the values used for this period's Magnet Health Summary. Detections are tagged to the slot their alert check evaluated, and notifications to the check just before them. A detection does not always produce a notification: notification frequency limits and suppression rules decide what is sent. A notification counts as reached when it was sent by email or SMS.</p>
+  <p class="method">Each row is a 30-minute capture slot. Readings are the values used for this period's Magnet Health Summary. Detections are tagged to the slot their alert check evaluated, and notifications to the check just before them. A detection does not always produce a notification: notification frequency limits and suppression rules decide what is sent. A notification counts as reached when it was sent by email or SMS.${internal ? " Internal copy: Avante staff recipients are included and grouped under Avante; the customer copy leaves them out." : ""}</p>
 </div>
 <footer class="foot"><div class="wrap"><span>Avante · Moving Healthcare Forward</span><span>${esc(sys)} · ${esc(id.site_name)} · Prepared by Remote Solutions</span></div></footer>
 <script type="application/json" id="timeline-data">${JSON.stringify(payload).replace(/</g, "\\u003c")}</script>
@@ -172,8 +184,10 @@ ${notice ? `
 `;
 };
 
-// Artifact name: Avante-<system>-Activity[-<period tag>]-<window end date>.html
-const system_page_name = (system_id, window_to, period_tag = "") =>
-  `Avante-${system_id}-Activity${period_tag}-${DateTime.fromMillis(window_to, { zone: TZ_DEFAULT }).toFormat("yyyy-MM-dd")}.html`;
+// Artifact name: Avante-<system>-Activity[-Internal][-<period tag>]-<window end date>.html
+// The customer copy keeps the plain name; the internal copy says so, and
+// the two never overwrite each other.
+const system_page_name = (system_id, window_to, period_tag = "", audience = "external") =>
+  `Avante-${system_id}-Activity${audience === "internal" ? "-Internal" : ""}${period_tag}-${DateTime.fromMillis(window_to, { zone: TZ_DEFAULT }).toFormat("yyyy-MM-dd")}.html`;
 
 module.exports = { build_system_page, system_page_name };

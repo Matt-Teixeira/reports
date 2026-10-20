@@ -93,7 +93,9 @@ const DEFAULT_SETTINGS = {
   archive_records: false,
   summary_pdf: false,
   // Summary kinds only (KIND_KEYS): per-system activity pages with the
-  // summary email. Off unless the job or --system-pages asks.
+  // summary email. Off unless the job or --system-pages asks. true = the
+  // summary's own audience (fleet internal, customer external), or name
+  // one: "internal" / "external" (incident/page_policy.js).
   system_pages: false
 };
 
@@ -107,7 +109,8 @@ const resolve_settings = (raw, at) => {
   if (raw.archive_records !== undefined)
     s.archive_records = as_bool(raw.archive_records, `${at}.archive_records`);
   if (raw.summary_pdf !== undefined) s.summary_pdf = as_bool(raw.summary_pdf, `${at}.summary_pdf`);
-  if (raw.system_pages !== undefined) s.system_pages = as_bool(raw.system_pages, `${at}.system_pages`);
+  if (raw.system_pages !== undefined)
+    s.system_pages = require("../incident/page_policy").normalize_system_pages(raw.system_pages, `${at}.system_pages`, fail);
   if (raw.out_dir !== undefined) {
     if (raw.out_dir !== null && (typeof raw.out_dir !== "string" || !raw.out_dir.trim()))
       fail(`${at}.out_dir must be a path string or null`);
@@ -223,7 +226,7 @@ const validate_job = (name, raw, defaults) => {
 // job's kind is an error rather than a silently ignored argument.
 const apply_overrides = (job, overrides = {}) => {
   if (overrides.system_pages && !KIND_KEYS[job.kind].includes("system_pages"))
-    fail(`--system-pages does not apply to a ${job.kind} job (summary kinds only)`);
+    fail(`--system-pages / --pages-audience do not apply to a ${job.kind} job (summary kinds only)`);
   const next = { ...job, ...resolve_settings(overrides, "command line") };
   if (overrides.customer_id !== undefined && overrides.customer_id !== null) {
     if (job.kind === "fleet_summary")
@@ -270,7 +273,7 @@ const batch_email_block = (job, { summary_pdf }) => ({
   summary_pdf,
   attachments: false,
   archive_records: job.archive_records,
-  system_pages: job.system_pages === true
+  system_pages: job.system_pages || false
 });
 
 // Job (+ resolved fleet system ids, for the fleet kind) -> the raw request
@@ -361,7 +364,8 @@ const describe_job = (job) => {
             .join(" ");
   return (
     `job "${job.name}" — ${job.kind} · ${target} · ${job.period.label} period ` +
-    `(${job.period.days} days) · ${job.email ? `email -> ${job.recipients.join(", ")}` : "no email"}`
+    `(${job.period.days} days) · ${job.email ? `email -> ${job.recipients.join(", ")}` : "no email"}` +
+    (job.system_pages ? ` · activity pages: ${job.system_pages === true ? (job.kind === "fleet_summary" ? "internal" : "external") : job.system_pages}` : "")
   );
 };
 

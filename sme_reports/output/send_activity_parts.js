@@ -14,20 +14,21 @@ const {
 
 const SEND_THROTTLE_MS = 1500;
 
-const send_activity_parts = async (run_log, job_id, batch_email, zips, { subject_base }) => {
+const send_activity_parts = async (run_log, job_id, batch_email, zips, { subject_base, audience = "external" }) => {
   const date = new Date().toISOString().slice(0, 10);
+  const label = `System Activity${audience === "internal" ? " (Internal)" : ""}`;
   for (const z of zips) {
     await new Promise((r) => setTimeout(r, SEND_THROTTLE_MS));
     const part_tag = `part ${z.part}/${z.parts}`;
     const body_html =
       `<p style="${FONT}font-size:14px;color:${COLORS.navy};margin:0 0 10px 0;">` +
-      `System Activity pages, ${part_tag}: <b>${z.systems.length}</b> system${z.systems.length === 1 ? "" : "s"} (${z.systems.map(esc).join(", ")}). ` +
+      `${label} pages, ${part_tag}: <b>${z.systems.length}</b> system${z.systems.length === 1 ? "" : "s"} (${z.systems.map(esc).join(", ")}). ` +
       `Open the pages in a web browser.</p>`;
     const message = {
       from: process.env.OUTLOOK_USER,
       to: batch_email.recipients.join(","),
-      subject: `${subject_base} — System Activity ${part_tag} — ${date}`,
-      html: wrap_email({ title: `System Activity — ${part_tag}`, date, body_html }),
+      subject: `${subject_base} — ${label} ${part_tag} — ${date}`,
+      html: wrap_email({ title: `${label} — ${part_tag}`, date, body_html }),
       attachments: [logo_attachment(), { filename: z.filename, path: z.path }]
     };
     if (batch_email.cc_list.length) message.cc = batch_email.cc_list.join(",");

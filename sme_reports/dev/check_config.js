@@ -296,6 +296,58 @@ const { parse_sme_args } = require("../cli_args");
   assert.deepStrictEqual(fleet_loaded.excluded, { ids: ["SME00002"], note: "excluded by report config" });
 }
 
+// --- options.system_pages: audience, pilot gate, delivery wiring -------------
+{
+  const PILOT = "matt.teixeira@avantehs.com";
+  const customer_row = {
+    id: 21,
+    report_kind: "customer_summary",
+    scope: { customer_id: "C027932" },
+    lookback_days: 7,
+    options: { system_pages: true },
+    recipient_mode: "explicit",
+    recipients: [PILOT],
+    cc_list: null,
+    dry_run: false
+  };
+  const fleet_row = { ...customer_row, id: 22, report_kind: "fleet_summary", scope: null };
+
+  const cust = validate_config(customer_row);
+  assert.strictEqual(cust.options.system_pages, true);
+  validate_config({ ...customer_row, recipients: ["Matt.Teixeira@AvanteHS.com"] }); // case-insensitive
+  validate_config({ ...customer_row, options: { system_pages: "internal" } }); // internal copy, Avante mailbox
+  validate_config(fleet_row);
+  validate_config({ ...customer_row, options: { system_pages: false } });
+
+  const bad = [
+    [{ ...customer_row, recipients: ["ops@example.com"] }, /pilot.*not ops@example\.com/],
+    [{ ...customer_row, recipients: [PILOT, "ops@example.com"] }, /pilot/],
+    [{ ...customer_row, cc_list: ["boss@avantehs.com"] }, /pilot.*boss@avantehs\.com/],
+    // Dry-run rows are gated too: flipping dry_run must not unlock a send.
+    [{ ...customer_row, recipients: ["ops@example.com"], dry_run: true }, /pilot/],
+    [{ ...customer_row, options: { system_pages: "both" } }, /must be true, false, "internal" or "external"/],
+    [{ ...customer_row, options: { system_pages: "yes" } }, /must be true/],
+    [
+      { ...customer_row, report_kind: "user_summary", scope: null, author: PILOT, recipient_mode: "derived", recipients: null },
+      /not implemented for user_summary/
+    ]
+  ];
+  for (const [row, re] of bad)
+    assert.throws(() => validate_config(row), re, JSON.stringify({ r: row.recipients, cc: row.cc_list, o: row.options }));
+
+  // The row's option reaches run_batch through the REAL loader, resolved to
+  // the audience: a customer scope gets the customer copy, the fleet the
+  // internal one, and an explicit audience wins.
+  const loaded_of = (row) => materialize_scoped_requests(config_to_raw(validate_config(row), { recipients: row.recipients }), ["SME00001"]);
+  assert.strictEqual(loaded_of(customer_row).batch_email.system_pages, "external");
+  assert.strictEqual(loaded_of(fleet_row).batch_email.system_pages, "internal");
+  assert.strictEqual(loaded_of({ ...customer_row, options: { system_pages: "internal" } }).batch_email.system_pages, "internal");
+  assert.strictEqual(loaded_of({ ...fleet_row, options: { system_pages: "external" } }).batch_email.system_pages, "external");
+  assert.strictEqual(loaded_of({ ...customer_row, options: {} }).batch_email.system_pages, false, "no option, no pages");
+  const raw = config_to_raw(validate_config(customer_row), { recipients: customer_row.recipients });
+  assert.strictEqual(raw.batch_email.summary, false, "pages are delivered by the send loop, not run_batch");
+}
+
 // --- users-scope pilot variant + per-customer document plan ------------------
 {
   // The pilot scope: named users only.

@@ -92,10 +92,35 @@ const backfill_errors = async (outcomes, base, intended, message) => {
   }
 };
 
+// Emailed activity zips live at private per-run paths (fresh_zip.js F1) and
+// are removed once delivery is over — sent, dry, or failed. The HTML pages
+// stay in out/ beside the PDF.
+const remove_activity_zips = (activity) => {
+  if (!activity) return;
+  for (const z of activity.zips) {
+    try {
+      fs.rmSync(z.path, { force: true });
+    } catch (error) {
+      console.error(`activity zip cleanup failed (send outcome unaffected): ${error.message}`);
+    }
+  }
+};
+
 // Explicit-audience delivery (customer_summary / fleet_summary): one email
-// to the To list with CC, every envelope recipient recorded (F6).
+// to the To list with CC, every envelope recipient recorded (F6). With
+// options.system_pages, part 1 of the activity zip rides on that email and
+// parts 2..N follow to the same envelope (PLAN-FLEET-SYSTEM-PAGES.md).
 const deliver_explicit = async (run_log, job_id, cfg, slot, ctx, outcomes, counts) => {
+  try {
+    await deliver_explicit_inner(run_log, job_id, cfg, slot, ctx, outcomes, counts);
+  } finally {
+    remove_activity_zips(ctx.activity);
+  }
+};
+
+const deliver_explicit_inner = async (run_log, job_id, cfg, slot, ctx, outcomes, counts) => {
   const { results, failures, fleet_pdf_path, resolution } = ctx;
+  let { activity } = ctx;
   const doc = cfg.dry_run
     ? path.basename(fleet_pdf_path)
     : archive_delivered(fleet_pdf_path, cfg.id);
@@ -114,6 +139,19 @@ const deliver_explicit = async (run_log, job_id, cfg, slot, ctx, outcomes, count
       await record_outcome(outcomes, counts, { ...base, recipient: email, recipient_role: role, status: "dry_run" });
     return;
   }
+  // Send-time re-check of the page envelope (validate_config already
+  // enforced it on the row): fail CLOSED on the pages only — the summary
+  // still goes out, the pages do not, and the run is marked failed.
+  if (activity) {
+    const { page_envelope_error } = require("./incident/page_policy");
+    const refused = page_envelope_error(activity.audience, cfg.recipients, cfg.cc_list);
+    if (refused) {
+      counts.page_errors += 1;
+      await addLogEvent(E, run_log, "run_scheduled_pages", cat, { job_id, config_id: cfg.id }, new Error(refused)).catch(() => {});
+      console.error(`config ${cfg.id}: activity pages withheld — ${refused}`);
+      activity = null;
+    }
+  }
   // Per-recipient SMTP truth (round-2 F1): nodemailer resolves on PARTIAL
   // rejection, so each envelope address is graded from the returned
   // accepted list, never from "the promise resolved".
@@ -129,7 +167,10 @@ const deliver_explicit = async (run_log, job_id, cfg, slot, ctx, outcomes, count
       fleet_pdf_path,
       {
         scope_label: resolution ? resolution.label : null,
-        lookback_days: cfg.lookback_days
+        lookback_days: cfg.lookback_days,
+        activity: activity
+          ? { audience: activity.audience, pages: activity.pages.length, zips: activity.zips, page_failures: activity.page_failures }
+          : null
       }
     );
     const { smtp_outcomes } = require("./fanout");
@@ -137,6 +178,28 @@ const deliver_explicit = async (run_log, job_id, cfg, slot, ctx, outcomes, count
   } catch (error) {
     per_recipient = new Map(envelope.map((e) => [e.email, "error"]));
     per_recipient.error_message = error.message;
+  }
+  // Parts 2..N, only after the summary (carrying part 1) reached someone.
+  // A failed part is logged and fails the run; the sends rows stay about
+  // the summary document they name.
+  const reached = envelope.some((e) => per_recipient.get(e.email) === "sent");
+  if (activity && activity.zips.length > 1 && reached) {
+    try {
+      const { send_activity_parts } = require("./output/send_activity_parts");
+      await send_activity_parts(
+        run_log,
+        job_id,
+        { recipients: cfg.recipients, cc_list: cfg.cc_list },
+        activity.zips.slice(1),
+        {
+          subject_base: `Magnet Health Summary${resolution ? ` — ${resolution.label}` : ""}`,
+          audience: activity.audience
+        }
+      );
+    } catch (error) {
+      counts.page_errors += 1;
+      console.error(`config ${cfg.id}: activity zip follow-up failed (summary delivered): ${error.message}`);
+    }
   }
   for (const { email, role } of envelope) {
     const status = per_recipient.get(email);
@@ -179,8 +242,17 @@ const run_customer_or_fleet = async (run_log, job_id, cfg, slot, counts) => {
     const raw = config_to_raw(cfg, { recipients: cfg.recipients });
     const loaded = materialize_scoped_requests(raw, system_ids);
     const batch = await run_batch(run_log, job_id, loaded, resolution);
-    if (!batch.fleet_pdf_path)
+    if (!batch.fleet_pdf_path) {
+      remove_activity_zips(batch.activity);
       throw new Error("run produced no summary document; nothing to deliver");
+    }
+    if (batch.activity) {
+      const a = batch.activity;
+      console.log(
+        `config ${cfg.id}: activity pages (${a.audience}): ${a.pages.length} of ${a.selected.length} flagged systems in ${a.zips.length} zip${a.zips.length === 1 ? "" : "s"}` +
+          (a.page_failures.length ? `; FAILED ${a.page_failures.map((f) => f.system_id).join(", ")}` : "")
+      );
+    }
     await deliver_explicit(run_log, job_id, cfg, slot, { ...batch, resolution }, outcomes, counts);
   } catch (error) {
     // Pre-delivery failures (resolution, render) still owe the intended
@@ -193,9 +265,9 @@ const run_customer_or_fleet = async (run_log, job_id, cfg, slot, counts) => {
     );
     throw error;
   }
-  if (counts.send_errors || counts.persist_errors)
+  if (counts.send_errors || counts.persist_errors || counts.page_errors)
     throw new Error(
-      `${counts.send_errors} send failure(s), ${counts.persist_errors} record failure(s)`
+      `${counts.send_errors} send failure(s), ${counts.persist_errors} record failure(s), ${counts.page_errors} activity page delivery failure(s)`
     );
 };
 
@@ -541,7 +613,7 @@ const run_scheduled = async (run_log, opts = {}) => {
           user_cfgs.push(cfg); // coalesced below
           continue;
         }
-        const counts = { sent: 0, send_errors: 0, persist_errors: 0 };
+        const counts = { sent: 0, send_errors: 0, persist_errors: 0, page_errors: 0 };
         await run_customer_or_fleet(run_log, job_id, cfg, slot, counts);
       } catch (error) {
         row_failures.push({ id: row.id, message: error.message });

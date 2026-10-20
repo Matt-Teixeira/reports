@@ -341,6 +341,48 @@ const CONFIG = {
   throws(() => apply_overrides(jobs.get("sme"), { period: "6m" }), /invalid/);
 }
 
+// --- System Activity pages: flags, audience, pilot gate ----------------------
+{
+  const pages_of = (args) => parse_oneoff_args(args).system_pages;
+  assert.strictEqual(pages_of(["customer"]), null);
+  assert.strictEqual(pages_of(["customer", "--system-pages"]), true);
+  assert.strictEqual(pages_of(["customer", "--pages-audience", "internal"]), "internal");
+  assert.strictEqual(pages_of(["customer", "--pages-audience", "external", "--system-pages"]), "external", "the named audience wins");
+  assert.strictEqual(pages_of(["customer", "--system-pages", "--pages-audience", "internal"]), "internal");
+  assert.deepStrictEqual(overrides_of(parse_oneoff_args(["fleet", "--pages-audience", "external"])), { system_pages: "external" });
+  throws(() => parse_oneoff_args(["customer", "--pages-audience", "both"]), /internal or external/);
+  throws(() => parse_oneoff_args(["customer", "--pages-audience"]), /requires a value/);
+  throws(() => parse_oneoff_args(["customer", "--pages-audience", "internal", "--pages-audience", "external"]), /given twice/);
+  throws(() => parse_oneoff_args(["customer", "--system-pages", "--system-pages"]), /given twice/);
+
+  const { jobs } = load_job_config(CONFIG);
+  throws(() => apply_overrides(jobs.get("sme"), { system_pages: "internal" }), /do not apply to a sme_brief job/);
+  throws(() => load_job_config({ ...CONFIG, jobs: { c: { kind: "customer_summary", customer_id: "C1", system_pages: "yes" } } }), /must be true, false/);
+
+  const PILOT = ["matt.teixeira@avantehs.com"];
+  const audience_of = (job, opts) => {
+    const loaded = load_raw_request(build_request(job, opts));
+    return (loaded.scoped ? materialize_scoped_requests(loaded.raw, ["SME01096"]) : loaded).batch_email.system_pages;
+  };
+  const fleet_ids = { fleet_system_ids: ["SME01096"] };
+  // Audience follows the summary unless named: customer copy for a customer
+  // job, internal copy for the fleet.
+  assert.strictEqual(audience_of(apply_overrides(jobs.get("customer"), { system_pages: true })), "external");
+  assert.strictEqual(audience_of(apply_overrides(jobs.get("fleet"), { system_pages: true }), fleet_ids), "internal");
+  assert.strictEqual(audience_of(apply_overrides(jobs.get("customer"), { system_pages: "internal" })), "internal");
+  assert.strictEqual(audience_of(jobs.get("customer")), false, "off unless asked");
+  // Build-only runs address nobody, so the pilot gate does not apply...
+  assert.strictEqual(audience_of(apply_overrides(jobs.get("customer"), { system_pages: true, email: false })), "external");
+  // ...but emailing pages anywhere outside the pilot list is refused.
+  throws(
+    () => audience_of(apply_overrides(jobs.get("customer"), { system_pages: true, email: true })),
+    /pilot.*not ops@example\.com/
+  );
+  const piloted = { ...jobs.get("fleet"), recipients: PILOT };
+  assert.strictEqual(audience_of(apply_overrides(piloted, { system_pages: true, email: true }), fleet_ids), "internal");
+  assert.ok(/activity pages: internal/.test(describe_job(apply_overrides(piloted, { system_pages: true }))));
+}
+
 // --- the shipped config file itself loads ------------------------------------
 {
   const shipped = require("../oneoff/jobs.config.json");
