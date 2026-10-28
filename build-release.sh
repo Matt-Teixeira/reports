@@ -9,7 +9,7 @@
 #   1. Clean-tree guard      — refuse to release a dirty tree (untracked counts)
 #   2. Mirror via tar-pipe   — working tree -> $DEST, with excludes
 #   3. Transform .env        — apply #RELEASE:KEY=VALUE, strip markers
-#   4. Stamp RELEASE_SHA     — into the DEPLOYED .env only (idempotent)
+#   4. Stamp RELEASE_SHA     — + RELEASE_AT, into the DEPLOYED .env only (idempotent)
 #   5. chown + build as svc  — image becomes reports:svc
 set -euo pipefail
 
@@ -131,14 +131,18 @@ sudo awk '
 sudo cp "$tmp_env" "$DEST/.env"
 rm -f "$tmp_env"
 
-# --- 4. Stamp RELEASE_SHA (idempotent: delete then append) ---------------------
-# index.js logs this in the boot env_note (verbose_log->0->note->>'RELEASE_SHA'
+# --- 4. Stamp RELEASE_SHA + RELEASE_AT (idempotent: delete then append) --------
+# index.js logs RELEASE_SHA in the boot env_note (verbose_log->0->note->>'RELEASE_SHA'
 # in util.app_run_logs) and prints it on the boot console line, so both the
 # run record and any captured console output identify the commit that produced
-# them. Never set by hand; a dev tree has no key and records 'dev-tree'.
-sudo sed -i '/^# Injected by build-release.sh/d; /^RELEASE_SHA=/d' "$DEST/.env"
-printf '\n# Injected by build-release.sh — do not edit by hand.\nRELEASE_SHA=%s\n' \
-    "$GIT_SHA" | sudo tee -a "$DEST/.env" >/dev/null
+# them. RELEASE_AT is the release time (UTC) for the orchestrator's
+# release-drift view — stamped explicitly because the .env's mtime moves on any
+# edit, copy or restore; it is not logged. Never set either by hand; a dev tree
+# has neither (index.js records 'dev-tree').
+RELEASE_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+sudo sed -i '/^# Injected by build-release.sh/d; /^RELEASE_SHA=/d; /^RELEASE_AT=/d' "$DEST/.env"
+printf '\n# Injected by build-release.sh — do not edit by hand.\nRELEASE_SHA=%s\nRELEASE_AT=%s\n' \
+    "$GIT_SHA" "$RELEASE_AT" | sudo tee -a "$DEST/.env" >/dev/null
 
 # --- 5. Ownership + build as svc ----------------------------------------------
 sudo chown -R "${RELEASE_USER}:docker" "$DEST"
@@ -161,5 +165,5 @@ sudo -u "$RELEASE_USER" env HOME="$SVC_HOME" bash -c "cd '$DEST' && ./build.sh"
 
 sudo chown -R "${RELEASE_USER}:docker" "$DEST"
 
-echo "==> release complete: $DEST  commit: $GIT_SHA  image: reports:svc"
-echo "    verify: grep '^RELEASE_SHA=' $DEST/.env ; (cd $DEST && bash preflight-check.sh)"
+echo "==> release complete: $DEST  commit: $GIT_SHA  at: $RELEASE_AT  image: reports:svc"
+echo "    verify: grep -E '^RELEASE_(SHA|AT)=' $DEST/.env ; (cd $DEST && bash preflight-check.sh)"

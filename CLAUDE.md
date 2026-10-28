@@ -154,7 +154,7 @@ bash build.sh                           # in-tree npm install + image reports:<y
 RUN_USER=<you> docker compose run --rm app node index.js <family>   # avoid :00/:30!
 
 # Release — mirrors the clean tree to /opt/apps/reports as reports:svc
-bash build-release.sh                   # refuses a dirty tree; stamps RELEASE_SHA
+bash build-release.sh                   # refuses a dirty tree; stamps RELEASE_SHA + RELEASE_AT
 
 # Run the released copy — from /opt/apps/reports, RUN_USER omitted (svc)
 cd /opt/apps/reports && docker compose run --rm app node index.js <family>
@@ -174,7 +174,10 @@ The Part 1 pattern, adapted; each item verified at cutover:
 - [x] `build.sh` — in-tree `npm install` as the host user + compose build;
       shared `/opt/resources/node_mod_cache/reports` mount retired
 - [x] `build-release.sh` — clean-tree guard above the wipe, `#RELEASE:`
-      transforms, `RELEASE_SHA` stamp into the deployed `.env`
+      transforms, `RELEASE_SHA` + `RELEASE_AT` stamp into the deployed `.env`
+      (`RELEASE_AT` added 2026-10-28, fleet change — data_acquisition 2edd63a;
+      preflight warns when a release `.env` has `RELEASE_SHA` but no or a
+      malformed `RELEASE_AT`)
 - [x] boot provenance — `env_note` (USER_ID, LOGGER_MODE,
       RELEASE_SHA|`dev-tree`, report family) + boot console line
 - [x] logger on the fleet `LOG_DIR` pattern — constant in-container path,
@@ -229,8 +232,10 @@ cleanup (owner sign-off).
 `OUTLOOK_USER`, `OUTLOOK_PW`, `MONDAY_API_TOKEN`, `MONDAY_BOARD_ID`,
 host-identity args (`DOCKER_GID`, `UID_0..2`). Optional, both with working
 fallbacks: `PUPPETEER_EXECUTABLE_PATH` (set by the image — leave unset) and
-`SME_REPORT_AUTHOR` (PDF byline, defaults to "Remote Solutions"). `RELEASE_SHA` is injected by
-`build-release.sh` into the deployed `.env` only — never set by hand.
+`SME_REPORT_AUTHOR` (PDF byline, defaults to "Remote Solutions"). `RELEASE_SHA` and
+`RELEASE_AT` (UTC, `YYYY-MM-DDTHH:MM:SSZ`, for the orchestrator's release-drift view;
+not logged in the boot `env_note`) are injected by `build-release.sh` into the deployed
+`.env` only — never set them by hand; a dev `.env` has neither.
 Retired 2026-08-26: `LOGGER`/`RUN_ENV` (→ `LOGGER_MODE`/`LOG_DIR`),
 `IMAGE_TAG` (→ `USER_ID` tag), `RUN_USER` in `.env` (entrypoint defaults to
 svc; dev runs pass it on the command line).
