@@ -25,7 +25,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", "..", ".env") });
 const { scrub_avante, avante_keys, is_avante_user } = require("../incident/scrub");
 const { normalize_system_pages, pages_audience, page_envelope_error, PILOT_RECIPIENTS } = require("../incident/page_policy");
 const { analyze_activity, SLOT_MS } = require("../incident/activity");
-const { build_system_page, system_page_name } = require("../incident/system_page");
+const { build_system_page, system_section, system_page_name } = require("../incident/system_page");
 const { select_page_systems, chunk_pages } = require("../incident/system_pages");
 
 const T0 = Date.UTC(2026, 9, 1, 0, 0); // window start (Oct 1 2026, 00:00Z)
@@ -329,7 +329,26 @@ for (const [id, vendor] of [["SME10001", "GE"], ["SME10002", "PHILIPS"], ["SME10
   pages.push({ id: "SME10005", vendor: "internal", html, primary: "He pressure", internal: true });
 }
 
-assert.strictEqual(system_page_name("SME10001", T1, "-6mo"), "Avante-SME10001-Activity-6mo-2026-10-03.html");
+// The section the standalone page and the app share: markup with no shell,
+// and the dashboard row counted as the view counts it.
+{
+  const f = fixture("SME10006", "GE");
+  const a = analyze_activity({ ...f.data, ...scrub_avante(f.data) }, f.readings, { from: T0, to: T1, avante_keys: null });
+  const s = system_section(a, { identity: f.data.identity, meta: f.data.meta, model_count: f.data.models.length, audience: "external" });
+  assert.ok(s.body.startsWith('  <header class="title">') && !/<script|<html|<footer|brandbar/.test(s.body), "section: markup only, no shell");
+  assert.strictEqual(s.title, "SME10006 System Activity");
+  assert.strictEqual(s.internal, false);
+  assert.deepStrictEqual(
+    { detections: s.summary.detections, notifications: s.summary.notifications, reached: s.summary.reached, recipients: s.summary.recipients },
+    { detections: 48, notifications: 2, reached: 2, recipients: 2 },
+    "section: dashboard figures, Avante rows already scrubbed"
+  );
+  assert.strictEqual(s.summary.last_detection, T0 + 2 * 86400e3 - SLOT_MS, "section: last detection is the last run's slot");
+  assert.ok(!AVANTE_USER.test(JSON.stringify(s)), "section: no Avante user anywhere in it");
+  assert.throws(() => system_section(a, { identity: f.data.identity, audience: "both" }), /unknown audience/);
+}
+
+assert.strictEqual(system_page_name("SME10001", T1, "-6mo"),"Avante-SME10001-Activity-6mo-2026-10-03.html");
 assert.strictEqual(system_page_name("SME10001", T1, "-6mo", "internal"), "Avante-SME10001-Activity-Internal-6mo-2026-10-03.html");
 
 // --- every page loads in Chromium with zero page errors --------------------------

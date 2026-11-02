@@ -17,6 +17,9 @@ const { esc } = require("../render/fleet_page");
 // Both show only recipients associated with the system's customer.
 
 const CLIENT_JS = fs.readFileSync(path.join(__dirname, "timeline.client.js"), "utf8");
+// A standalone page's one payload, mounted on load. The System Activity app
+// (system_app.js) mounts per view instead.
+const MOUNT_JS = "mountTimeline(JSON.parse(document.getElementById('timeline-data').textContent));";
 const AVANTE = /avante/i;
 const ORG_BY_DOMAIN = { "crothall.com": "Crothall", "intelashealth.com": "Intelas" };
 const SOURCES = { mag: "mag.ge_mm3", edu: "edu.v3" };
@@ -499,7 +502,8 @@ ${queries
 </div>
 <footer class="foot"><div class="wrap"><span>Avante · Moving Healthcare Forward</span><span>${esc(sys)} · ${esc(id.site_name)} · Prepared by Remote Solutions</span></div></footer>
 <script type="application/json" id="timeline-data">${JSON.stringify(payload).replace(/</g, "\\u003c")}</script>
-<script>${CLIENT_JS}</script>
+<script>${CLIENT_JS}
+${MOUNT_JS}</script>
 </body>
 </html>
 `;
@@ -712,5 +716,5 @@ tr.day:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 @media (max-width:640px){.wrap{padding:0 14px}.hdr .logo{height:36px}}
 `;
 
-// CSS and CLIENT_JS are shared with the activity page (system_page.js).
-module.exports = { build_timeline, CSS, CLIENT_JS };
+// CSS, CLIENT_JS and MOUNT_JS are shared with the activity page (system_page.js).
+module.exports = { build_timeline, CSS, CLIENT_JS, MOUNT_JS };

@@ -2,9 +2,15 @@
    Ported from the hand-built SME21284 timeline: same views, filters, table,
    detail pane and controls. What the seed hard-coded (model codes, threshold
    values, the window, the Crothall/Intelas grouping) now comes from the DATA
-   payload the server embeds. Plain browser JS, no build step. */
-(function(){
-const DATA = JSON.parse(document.getElementById('timeline-data').textContent);
+   payload the server embeds. Plain browser JS, no build step.
+
+   Defines mountTimeline(DATA) and does not run it: a standalone page mounts
+   its one payload on load (timeline.js MOUNT_JS), the System Activity app
+   mounts one per view, into fresh markup each time. Every listener below
+   binds to an element inside that markup, so swapping the markup out drops
+   them and a remount needs no teardown. Keep it so: a listener on document
+   or window here would outlive its view. */
+window.mountTimeline = function(DATA){
 
 /* ---------- models ---------- */
 const MODELS = Object.fromEntries(DATA.models.map(m => [m.code, m]));
@@ -538,4 +544,4 @@ document.querySelectorAll('.copy').forEach(b => b.addEventListener('click', asyn
   catch { const r = document.createRange(); r.selectNodeContents(document.getElementById(b.dataset.copy)); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); b.textContent = 'Selected, press Ctrl+C'; }
   setTimeout(() => b.textContent = 'Copy', 2000);
 }));
-})();
+};

@@ -3,7 +3,7 @@ const { DateTime } = require("luxon");
 // of every zipped page.
 const logo_base64 = require("../render/assets/logo_small");
 const { esc } = require("../render/fleet_page");
-const { CSS, CLIENT_JS } = require("./timeline");
+const { CSS, CLIENT_JS, MOUNT_JS } = require("./timeline");
 
 // The per-system ACTIVITY page: the Anomaly Report's interactive timeline
 // (lanes, model and recipient filters, day-grouped slot table, detail pane,
@@ -27,12 +27,17 @@ const ZONES = [
   { tz: "UTC", label: "UTC", abbr: "UTC" }
 ];
 
+// One system's part of a page: everything inside the page's .wrap, its
+// timeline payload, and the figures the System Activity app's dashboard
+// lists. The standalone page (build_system_page) wraps one section in the
+// shell; the app (system_app.js) carries many.
+//
 // a: incident/activity.js output. ctx: { identity, meta, model_count,
-// period_label, notice, audience } — notice is the one plain sentence a
-// system that could not be analyzed carries instead of readings.
-const build_system_page = (
+// notice, audience } — notice is the one plain sentence a system that could
+// not be analyzed carries instead of readings.
+const system_section = (
   a,
-  { identity: id, meta = {}, model_count, period_label = null, notice = null, audience = "external" }
+  { identity: id, meta = {}, model_count, notice = null, audience = "external" }
 ) => {
   if (!["internal", "external"].includes(audience)) throw new Error(`unknown audience ${audience}`);
   const internal = audience === "internal";
@@ -85,24 +90,7 @@ const build_system_page = (
   const p_head = `${esc(a.labels.primary)}${a.labels.p_units ? ` (${esc(a.labels.p_units)})` : ""}`;
   const l_head = `${esc(a.labels.level)}${a.labels.l_units && a.labels.l_units !== "%" ? ` (${esc(a.labels.l_units)})` : ""}`;
 
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>${esc(title)}</title>
-<style>${CSS}
-.notice{padding:14px 18px;border:1.5px solid var(--light);border-left:5px solid var(--blue);color:var(--ink)}
-.internal-tag{display:inline-block;margin-left:8px;padding:1px 7px;border:1.5px solid currentColor;border-radius:3px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;vertical-align:1px}
-</style>
-</head>
-<body>
-<header class="brandbar"><div class="wrap">
-  <div class="hdr"><img class="logo" alt="Avante" src="data:image/png;base64,${logo_base64}"><div class="r">System Activity${period_label ? ` · ${esc(period_label)}` : ""}${internal ? `<span class="internal-tag">Internal</span>` : ""}<br><b>${esc(date)}</b></div></div>
-  <div class="brandband"></div>
-</div></header>
-<div class="wrap">
-  <header class="title">
+  const body = `  <header class="title">
     <h1>${esc(title)}</h1>
     <div class="sub">${esc(id.site_name)} · ${esc(id.customer_name)} · ${esc(span)}</div>
   </header>
@@ -174,11 +162,64 @@ ${notice ? `
     </div>
   </section>
 
-  <p class="method">Each row is a 30-minute capture slot. Readings are the values used for this period's Magnet Health Summary. Detections are tagged to the slot their alert check evaluated, and notifications to the check just before them. A detection does not always produce a notification: notification frequency limits and suppression rules decide what is sent. A notification counts as reached when it was sent by email or SMS.${internal ? " Internal copy: Avante staff recipients are included and grouped under Avante; the customer copy leaves them out." : ""}</p>
+  <p class="method">Each row is a 30-minute capture slot. Readings are the values used for this period's Magnet Health Summary. Detections are tagged to the slot their alert check evaluated, and notifications to the check just before them. A detection does not always produce a notification: notification frequency limits and suppression rules decide what is sent. A notification counts as reached when it was sent by email or SMS.${internal ? " Internal copy: Avante staff recipients are included and grouped under Avante; the customer copy leaves them out." : ""}</p>`;
+
+  // What the app's dashboard lists for this system: the period's figures as
+  // the view itself counts them, nothing it does not show.
+  const rows = a.notes.flatMap((n) => n.rows);
+  const summary = {
+    system_id: sys,
+    cus_sys_id: id.cus_sys_id || null,
+    site_name: id.site_name,
+    customer_name: id.customer_name,
+    equipment: `${id.manufacturer} ${id.model || ""}`.trim(),
+    detections: a.counts.detections,
+    notifications: a.counts.notifications,
+    reached: rows.filter((r) => r.email === "SENT" || r.sms === "SENT").length,
+    recipients: a.counts.recipients,
+    last_detection: a.runs.length ? a.runs[a.runs.length - 1].slot : null
+  };
+  return { system_id: sys, internal, title, date, site_name: id.site_name, body, payload, summary };
+};
+
+// Shell rules beside timeline.js's CSS.
+const PAGE_CSS = `.notice{padding:14px 18px;border:1.5px solid var(--light);border-left:5px solid var(--blue);color:var(--ink)}
+.internal-tag{display:inline-block;margin-left:8px;padding:1px 7px;border:1.5px solid currentColor;border-radius:3px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;vertical-align:1px}`;
+
+const brandbar = ({ period_label, internal, date }) => `<header class="brandbar"><div class="wrap">
+  <div class="hdr"><img class="logo" alt="Avante" src="data:image/png;base64,${logo_base64}"><div class="r">System Activity${period_label ? ` · ${esc(period_label)}` : ""}${internal ? `<span class="internal-tag">Internal</span>` : ""}<br><b>${esc(date)}</b></div></div>
+  <div class="brandband"></div>
+</div></header>`;
+
+const footer = (right) =>
+  `<footer class="foot"><div class="wrap"><span>Avante · Moving Healthcare Forward</span><span>${right}</span></div></footer>`;
+
+// A payload inside <script type="application/json">: no "<" can close it.
+const json_script = (v) => JSON.stringify(v).replace(/</g, "\\u003c");
+
+// The standalone page: one system's section in the shell, mounted on load.
+// ctx: system_section's, plus period_label for the brand header.
+const build_system_page = (a, ctx) => {
+  const s = system_section(a, ctx);
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>${esc(s.title)}</title>
+<style>${CSS}
+${PAGE_CSS}
+</style>
+</head>
+<body>
+${brandbar({ period_label: ctx.period_label || null, internal: s.internal, date: s.date })}
+<div class="wrap">
+${s.body}
 </div>
-<footer class="foot"><div class="wrap"><span>Avante · Moving Healthcare Forward</span><span>${esc(sys)} · ${esc(id.site_name)} · Prepared by Remote Solutions</span></div></footer>
-<script type="application/json" id="timeline-data">${JSON.stringify(payload).replace(/</g, "\\u003c")}</script>
-<script>${CLIENT_JS}</script>
+${footer(`${esc(s.system_id)} · ${esc(s.site_name)} · Prepared by Remote Solutions`)}
+<script type="application/json" id="timeline-data">${json_script(s.payload)}</script>
+<script>${CLIENT_JS}
+${MOUNT_JS}</script>
 </body>
 </html>
 `;
@@ -190,4 +231,4 @@ ${notice ? `
 const system_page_name = (system_id, window_to, period_tag = "", audience = "external") =>
   `Avante-${system_id}-Activity${audience === "internal" ? "-Internal" : ""}${period_tag}-${DateTime.fromMillis(window_to, { zone: TZ_DEFAULT }).toFormat("yyyy-MM-dd")}.html`;
 
-module.exports = { build_system_page, system_page_name };
+module.exports = { build_system_page, system_section, system_page_name, brandbar, footer, json_script, PAGE_CSS, ZONES, TZ_DEFAULT };
