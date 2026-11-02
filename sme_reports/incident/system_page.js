@@ -179,7 +179,7 @@ ${notice ? `
     recipients: a.counts.recipients,
     last_detection: a.runs.length ? a.runs[a.runs.length - 1].slot : null
   };
-  return { system_id: sys, internal, title, date, site_name: id.site_name, body, payload, summary };
+  return { system_id: sys, internal, title, date, span, site_name: id.site_name, body, payload, summary };
 };
 
 // Shell rules beside timeline.js's CSS.

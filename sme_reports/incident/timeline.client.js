@@ -10,7 +10,11 @@
    binds to an element inside that markup, so swapping the markup out drops
    them and a remount needs no teardown. Keep it so: a listener on document
    or window here would outlive its view. */
-window.mountTimeline = function(DATA){
+window.mountTimeline = function(DATA, prefs){
+// prefs: the app's { tz, h24 }, read here and written by the toggles so the
+// reader's choice carries from system to system. A standalone page passes
+// none and starts on the defaults its markup already shows.
+const PREFS = prefs || {};
 
 /* ---------- models ---------- */
 const MODELS = Object.fromEntries(DATA.models.map(m => [m.code, m]));
@@ -23,14 +27,14 @@ const LBL = Object.assign({primary:'He pressure', p_units:'PSI', p_dec:3, level:
 const RECIPS = DATA.recipients_label || `${CUST} users`;
 
 /* ---------- formatting ---------- */
-let TZ = DATA.tz_default;
+let TZ = DATA.zones.some(z => z.tz === PREFS.tz) ? PREFS.tz : DATA.tz_default;
 const fcache = {};
 function fmt(d, opts, tz = TZ){
   const k = tz + JSON.stringify(opts);
   if(!fcache[k]) fcache[k] = new Intl.DateTimeFormat('en-US', {timeZone:tz, ...opts});
   return fcache[k].format(d);
 }
-let H24 = true;
+let H24 = PREFS.h24 !== undefined ? PREFS.h24 : true;
 const timeSec = d => fmt(d, H24 ? {hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'} : {hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
 const timeMin = d => fmt(d, H24 ? {hour:'2-digit',minute:'2-digit',hourCycle:'h23'} : {hour:'numeric',minute:'2-digit',hour12:true});
 const dayLabel = d => fmt(d,{weekday:'short',month:'short',day:'numeric'});
@@ -463,7 +467,7 @@ function renderAll(){ renderSummary(); renderLanes(); renderFilters(); renderRec
 
 /* ---------- events ---------- */
 document.querySelectorAll('.seg button[data-tz]').forEach(b => b.addEventListener('click', () => {
-  TZ = b.dataset.tz;
+  TZ = PREFS.tz = b.dataset.tz;
   document.querySelectorAll('.seg button[data-tz]').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderAll();
 }));
@@ -524,10 +528,15 @@ document.getElementById('detail').addEventListener('click', e => {
   if(x){ const id = +x.dataset.expand; openGroups.has(id) ? openGroups.delete(id) : openGroups.add(id); refresh(); }
 });
 document.querySelectorAll('.seg button[data-clock]').forEach(b => b.addEventListener('click', () => {
-  H24 = b.dataset.clock === '24';
+  H24 = PREFS.h24 = b.dataset.clock === '24';
   document.querySelectorAll('.seg button[data-clock]').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderAll();
 }));
+// Carried prefs may differ from the defaults the markup was built with.
+if(prefs){
+  document.querySelectorAll('.seg button[data-tz]').forEach(x => x.setAttribute('aria-pressed', x.dataset.tz === TZ));
+  document.querySelectorAll('.seg button[data-clock]').forEach(x => x.setAttribute('aria-pressed', (x.dataset.clock === '24') === H24));
+}
 const allDays = () => [...new Set(slots.map(sl => dayLabel(sl.t)))];
 const allOpen = () => allDays().every(d => expandedDays.has(d));
 function syncToggle(){ const b = document.getElementById('toggleDays'); const open = allOpen();

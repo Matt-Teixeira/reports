@@ -27,6 +27,7 @@ const { normalize_system_pages, pages_audience, page_envelope_error, PILOT_RECIP
 const { analyze_activity, SLOT_MS } = require("../incident/activity");
 const { build_system_page, system_section, system_page_name } = require("../incident/system_page");
 const { select_page_systems, chunk_pages } = require("../incident/system_pages");
+const { build_system_app, system_app_name } = require("../incident/system_app");
 
 const T0 = Date.UTC(2026, 9, 1, 0, 0); // window start (Oct 1 2026, 00:00Z)
 const DAYS = 3;
@@ -348,7 +349,84 @@ for (const [id, vendor] of [["SME10001", "GE"], ["SME10002", "PHILIPS"], ["SME10
   assert.throws(() => system_section(a, { identity: f.data.identity, audience: "both" }), /unknown audience/);
 }
 
-assert.strictEqual(system_page_name("SME10001", T1, "-6mo"),"Avante-SME10001-Activity-6mo-2026-10-03.html");
+// --- the System Activity app (PLAN-SYSTEM-ACTIVITY-APP.md) ----------------------
+const section_of = (f, audience = "external", readings = f.readings, notice = null) => {
+  const internal = audience === "internal";
+  const rows = internal ? f.data : { ...f.data, ...scrub_avante(f.data) };
+  const a = analyze_activity(rows, readings, { from: T0, to: T1, avante_keys: internal ? avante_keys(f.data) : null });
+  return system_section(a, { identity: f.data.identity, meta: f.data.meta, model_count: f.data.models.length, notice, audience });
+};
+// Dashboard order, as the summary would rank them. part_of: system -> part.
+const app_entries = (audience, part_of = () => 1) =>
+  [
+    { system_id: "SME10001", group: "attention", status: { label: "PEAK OVER LIMIT", color: "#E50B14", strong: true }, vendor: "GE" },
+    { system_id: "SME10002", group: "attention", status: { label: "pressure rising", color: "#C25E00", strong: false }, vendor: "PHILIPS" },
+    { system_id: "SME10003", group: "data_issue", status: { label: "sensor data suspect", color: "#57585A", strong: false }, vendor: "SIEMENS_NON_TIM" },
+    { system_id: "SME10004", group: "failed", status: { label: "could not be analyzed", color: "#57585A", strong: false }, vendor: "GE", unanalyzed: true },
+    // Its page failed to build: listed, never linked.
+    { system_id: "SME10008", group: "failed", status: { label: "could not be analyzed", color: "#57585A", strong: false }, vendor: null }
+  ].map(({ vendor, unanalyzed, ...e }) => {
+    if (!vendor) return { ...e, summary: null, part: null, section: null };
+    const f = fixture(e.system_id, vendor);
+    const section = unanalyzed ? section_of(f, audience, null, "This system could not be analyzed for this period.") : section_of(f, audience);
+    return { ...e, summary: section.summary, part: part_of(e.system_id), section };
+  });
+const app_opts = (audience, part = 1, parts = 1) => ({ scope_label: "Test Health", period_label: "6 months", audience, date: "2026-10-03", span: "Oct 1 – Oct 3, 2026", part, parts });
+const for_part = (entries, part) => entries.map((e) => (e.part === part ? e : { ...e, section: null }));
+
+const apps = [];
+{
+  const entries = app_entries("external");
+  const html = build_system_app(entries, app_opts("external"));
+  assert.ok(!AVANTE_USER.test(html), "app: an Avante user or address leaked into the external app");
+  assert.ok(!/Internal/.test(html), "app: the customer copy carries no Internal marking");
+  assert.ok(html.includes("<title>Test Health System Activity</title>"));
+  assert.strictEqual(build_system_app(app_entries("external"), app_opts("external")), html, "app: deterministic");
+  for (const id of ["SME10001", "SME10002", "SME10003", "SME10004"]) {
+    assert.ok(html.includes(`<template id="view-${id}">`) && html.includes(`id="data-${id}"`), `app: ${id} view and data`);
+    assert.ok(html.includes(`<tr data-sys="${id}"`), `app: ${id} linked from the dashboard`);
+  }
+  assert.ok(!html.includes('id="view-SME10008"') && /<tr class="other" data-q="sme10008[^"]*">[\s\S]*?activity not available/.test(html), "app: a failed page is listed, not linked");
+  assert.ok(html.includes('<div class="v">5</div>') && html.includes("2 need attention · 1 data issue · 2 could not be analyzed"), "app: flagged-system tile");
+  assert.ok(html.includes('<div class="k">Detections</div><div class="v">192</div><div class="s">across 4 systems</div>'), "app: detections summed over systems with a page");
+  for (const b of BANNED_SECTIONS.filter((x) => x !== "Expected, not detected" && x !== "Start where the compressor stopped"))
+    assert.ok(!html.includes(b), `app: "${b}" must not be in the app`);
+  // An internal section can never reach an external app, nor the reverse.
+  const mixed = entries.map((e) => (e.system_id === "SME10002" ? { ...e, section: section_of(fixture("SME10002", "PHILIPS"), "internal") } : e));
+  assert.throws(() => build_system_app(mixed, app_opts("external")), /SME10002 section is not external/);
+  assert.throws(() => build_system_app(entries, app_opts("both")), /unknown audience/);
+  apps.push({ name: "app.html", html, title: "Test Health System Activity", rows: 5, linked: ["SME10001", "SME10002", "SME10003", "SME10004"] });
+}
+// Internal: marked, Avante staff in the views.
+{
+  const html = build_system_app(app_entries("internal"), app_opts("internal"));
+  assert.ok(html.includes("<title>Test Health System Activity (Internal)</title>") && html.includes('<span class="internal-tag">Internal</span>'));
+  assert.ok(html.includes("Avante staff recipients are included in every count and view"));
+  assert.ok(/jane@avantehs\.com/.test(html), "internal app keeps Avante staff");
+}
+// Two parts: each lists every system and links only its own.
+{
+  const part_of = (id) => (id === "SME10001" || id === "SME10002" ? 1 : 2);
+  const entries = app_entries("external", part_of);
+  const p1 = build_system_app(for_part(entries, 1), app_opts("external", 1, 2));
+  const p2 = build_system_app(for_part(entries, 2), app_opts("external", 2, 2));
+  assert.ok(p1.includes('id="view-SME10001"') && !p1.includes('id="view-SME10003"'), "part 1 carries its own views only");
+  assert.ok(p2.includes('id="view-SME10003"') && !p2.includes('id="view-SME10001"'), "part 2 carries its own views only");
+  assert.ok(/data-q="sme10003[^"]*">[\s\S]*?in part 2 of 2/.test(p1) && /data-q="sme10001[^"]*">[\s\S]*?in part 1 of 2/.test(p2), "the other part's systems say where they are");
+  assert.ok(p1.includes("This is part 1 of 2.") && p1.includes("part 1 of 2 · Prepared by Remote Solutions"));
+  assert.throws(() => build_system_app(entries.map((e) => (e.part === 1 ? { ...e, section: null } : e)), app_opts("external", 1, 2)), /in part 1 with no section/);
+  apps.push({ name: "app-part-1.html", html: p1, title: "Test Health System Activity", rows: 5, linked: ["SME10001", "SME10002"], foreign: "SME10003" });
+}
+assert.strictEqual(
+  system_app_name({ scope_tag: "Piedmont-HealthCare", period_tag: "-6mo", date: "2026-10-03" }),
+  "Avante-Piedmont-HealthCare-System-Activity-6mo-2026-10-03.html"
+);
+assert.strictEqual(
+  system_app_name({ scope_tag: "Fleet", period_tag: "-6mo", date: "2026-10-03", audience: "internal", part: 2, parts: 2 }),
+  "Avante-Fleet-System-Activity-Internal-6mo-2026-10-03-part-2-of-2.html"
+);
+
+assert.strictEqual(system_page_name("SME10001", T1, "-6mo"), "Avante-SME10001-Activity-6mo-2026-10-03.html");
 assert.strictEqual(system_page_name("SME10001", T1, "-6mo", "internal"), "Avante-SME10001-Activity-Internal-6mo-2026-10-03.html");
 
 // --- every page loads in Chromium with zero page errors --------------------------
@@ -389,11 +467,77 @@ assert.strictEqual(system_page_name("SME10001", T1, "-6mo", "internal"), "Avante
       assert.strictEqual(lanes, 1, `${p.id}: timeline drawn`);
       await page.close();
     }
+
+    // The app: dashboard, filter, open by row, next/prev, back, the reader's
+    // zone and clock carried across systems, a remount identical to a fresh
+    // open, and a system in another part falling back to the dashboard.
+    for (const app of apps) {
+      const file = path.join(dir, app.name);
+      fs.writeFileSync(file, app.html);
+      const page = await browser.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+      const at = (hash) => page.waitForFunction((h) => location.hash === h, {}, hash);
+      const app_html = () => page.$eval("#app", (e) => e.innerHTML);
+      const [first, second] = app.linked;
+
+      // A system opened straight from its link, before any toggles: the reference.
+      await page.goto(`file://${file}#${first}`, { waitUntil: "load" });
+      const fresh = await app_html();
+
+      await page.goto(`file://${file}`, { waitUntil: "load" });
+      assert.strictEqual(await page.title(), app.title, `${app.name}: dashboard title`);
+      assert.strictEqual(await page.$$eval("#systems tbody tr", (r) => r.length), app.rows, `${app.name}: every flagged system listed`);
+      assert.deepStrictEqual(await page.$$eval("#systems tbody tr[data-sys]", (r) => r.map((x) => x.dataset.sys)), app.linked, `${app.name}: linked systems`);
+      await page.type("#dfilter", "philips");
+      assert.strictEqual(await page.$$eval("#systems tbody tr:not([hidden])", (r) => r.length), 1, `${app.name}: filter`);
+      assert.strictEqual(await page.$eval("#dshown", (e) => e.textContent), `1 of ${app.rows} shown`);
+      await page.$eval("#dfilter", (e) => { e.value = ""; e.dispatchEvent(new Event("input")); });
+
+      await page.click(`#systems tr[data-sys="${first}"] td:nth-child(2)`);
+      await at(`#${first}`);
+      assert.strictEqual(await page.title(), `${first} System Activity`, `${app.name}: system title`);
+      assert.strictEqual(await page.$$eval("#lanes svg", (s) => s.length), 1, `${app.name}: ${first} timeline drawn`);
+      await page.click(".appnav .step a");                       // the first system has only "next"
+      await at(`#${second}`);
+      assert.strictEqual(await page.$$eval("#lanes svg", (s) => s.length), 1, `${app.name}: ${second} timeline drawn`);
+      await page.evaluate(() => history.back());
+      await at(`#${first}`);
+      assert.strictEqual(await app_html(), fresh, `${app.name}: ${first} after ${second} is identical to a fresh open`);
+
+      await page.click('.seg button[data-tz="UTC"]');
+      await page.click('.seg button[data-clock="12"]');
+      await page.click("#toggleDays");
+      await page.click("#rows tr.run");
+      await page.click(".appnav .step a");
+      await at(`#${second}`);
+      assert.deepStrictEqual(
+        await page.$$eval('.seg button[aria-pressed="true"]', (b) => b.map((x) => x.dataset.tz || x.dataset.clock)),
+        ["UTC", "12"],
+        `${app.name}: zone and clock carried to the next system`
+      );
+      assert.ok((await page.$eval("#th-time", (e) => e.textContent)).includes("UTC"), `${app.name}: table in the carried zone`);
+
+      await page.click('.appnav a[href="#"]');
+      await page.waitForSelector("#systems");
+      assert.strictEqual(await page.title(), app.title, `${app.name}: back on the dashboard`);
+      if (app.foreign) {
+        await page.evaluate((id) => { location.hash = id; }, app.foreign);
+        await at(`#${app.foreign}`);
+        assert.ok(await page.$("#systems"), `${app.name}: a system in another part shows the dashboard`);
+      }
+      const text = await page.evaluate(() => document.body.innerText);
+      assert.ok(!AVANTE_USER.test(text), `${app.name}: Avante user in rendered text`);
+      for (const b of BANNED_SECTIONS) assert.ok(!text.includes(b), `${app.name}: "${b}" rendered`);
+      assert.deepStrictEqual(errors, [], `${app.name}: page errors`);
+      await page.close();
+    }
   } finally {
     await browser.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
-  console.log(`check_system_pages: all assertions passed (${pages.length} pages)`);
+  console.log(`check_system_pages: all assertions passed (${pages.length} pages, ${apps.length} apps)`);
 })().catch((e) => {
   console.error(e.stack || e.message);
   process.exit(1);

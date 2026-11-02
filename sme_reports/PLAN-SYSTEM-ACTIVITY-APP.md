@@ -12,7 +12,35 @@ Nothing about *what* a system's view shows changes: same data, same
 external scrub, same internal marking, same selection rule
 (`select_page_systems`: attention ∪ data issue ∪ failed).
 
-## Proposed decisions (confirm before building)
+## Status (2026-11-02)
+
+- **Steps 1–2 done** (aab3a35). The client is mountable, and the page is
+  split into section + shell. Verified against pre-change builds: the
+  check's pages and the SME21284 Anomaly Report (real data) are identical
+  outside the script block, with identical rendered DOM in Chromium.
+- **Step 3 done.** Built in `incident/system_app.js` and
+  `incident/system_app.client.js`. The client takes `prefs`, so the time
+  zone and clock carry across systems. Covered in
+  `dev/check_system_pages.js`.
+- **Real-data trial.** Apps were reassembled from the pages already in
+  `out/`: Piedmont 6mo external (23 systems) and fleet 6mo (108, the
+  10-19 v1 build). Measured in headless Chromium on the DEV VM:
+
+  | | File | Deflated | Parts | Dashboard ready | Open a system | JS heap after 10 largest |
+  |---|---|---|---|---|---|---|
+  | Piedmont | 26.0 MB | 1.84 MB | 1 | 0.9 s | 0.2–0.8 s | 6 MB |
+  | Fleet | 129.5 MB | 9.59 MB | **1** | 3.1 s | 0.4–2.6 s (largest 5.1 MB) | 11 MB |
+
+  The fleet fits one part once the shell is shared, and its largest
+  system opens about as fast as its standalone page (3.3 s). Step 6 is not
+  needed for now.
+- **Known, pre-existing:** a system view overflows sideways at phone width
+  (564 px at 390 px), the same as the standalone page. The dashboard does
+  not. Fix separately.
+- **Next:** step 4 (chunk into app parts in `build_system_pages`, with
+  status from `conditions.js`) and step 5 (flags, wording).
+
+## Proposed decisions (confirmed 2026-11-02)
 
 1. **The app replaces the per-system files on both summary kinds.**
    Customer and fleet jobs both deliver the app. The per-system builder
@@ -22,7 +50,7 @@ external scrub, same internal marking, same selection rule
    compressed budget (`CHUNK_BYTES`). Each part is a complete app whose
    dashboard lists *every* flagged system in the batch. Systems in
    another part are listed but not linked ("in part 2 of 2"). Piedmont
-   is one part. Fleet is two today.
+   is one part, and so is fleet (measured).
 3. **Offline, single file, no server.** Hash routing (`#SME15807`,
    empty hash = dashboard), so it opens from a zip or an attachment, and
    back/forward and bookmarks work.
@@ -34,7 +62,7 @@ external scrub, same internal marking, same selection rule
 | Batch | Systems | One HTML, uncompressed | Zipped | Parts at 12 MB |
 |---|---|---|---|---|
 | Piedmont (C0137), external | 23 | ~26 MB | ~2.3 MB | 1 |
-| Fleet, internal | 108 | ~135 MB | ~12.6 MB | 2 (~65 MB each) |
+| Fleet, internal | 108 | ~130 MB | ~9.6 MB | 1 (measured; see Status) |
 
 The shared shell (CSS, client JS, logo) is under 100 KB, so sharing it
 saves almost nothing. The size is the per-system data. In the largest page
