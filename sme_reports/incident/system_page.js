@@ -28,7 +28,8 @@ const ZONES = [
 ];
 
 // One system's part of a page: everything inside the page's .wrap, its
-// timeline payload, and the figures the System Activity app's dashboard
+// timeline payload (serialized once, script-safe: a fleet batch holds every
+// section until its app is written), and the figures the System Activity app's dashboard
 // lists. The standalone page (build_system_page) wraps one section in the
 // shell; the app (system_app.js) carries many.
 //
@@ -179,7 +180,7 @@ ${notice ? `
     recipients: a.counts.recipients,
     last_detection: a.runs.length ? a.runs[a.runs.length - 1].slot : null
   };
-  return { system_id: sys, internal, title, date, span, site_name: id.site_name, body, payload, summary };
+  return { system_id: sys, internal, title, date, span, site_name: id.site_name, body, payload_json: json_script(payload), summary };
 };
 
 // Shell rules beside timeline.js's CSS.
@@ -217,7 +218,7 @@ ${brandbar({ period_label: ctx.period_label || null, internal: s.internal, date:
 ${s.body}
 </div>
 ${footer(`${esc(s.system_id)} · ${esc(s.site_name)} · Prepared by Remote Solutions`)}
-<script type="application/json" id="timeline-data">${json_script(s.payload)}</script>
+<script type="application/json" id="timeline-data">${s.payload_json}</script>
 <script>${CLIENT_JS}
 ${MOUNT_JS}</script>
 </body>

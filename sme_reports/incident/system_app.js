@@ -144,7 +144,7 @@ ${entries.map(row).join("\n")}
   </nav>
 ${e.section.body}
 </template>
-<script type="application/json" id="data-${esc(e.system_id)}">${json_script(e.section.payload)}</script>`;
+<script type="application/json" id="data-${esc(e.system_id)}">${e.section.payload_json}</script>`;
   });
 
   const index = { title, systems: here.map((e) => ({ id: e.system_id, title: e.section.title })) };

@@ -495,6 +495,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
           requests,
           out_dir,
           scope_tag,
+          scope_label: scope_resolution && scope_resolution.label ? scope_resolution.label : "Fleet",
           period_tag: batch_period_tag,
           period_label: label_of(lookback_days),
           audience: batch_email.system_pages

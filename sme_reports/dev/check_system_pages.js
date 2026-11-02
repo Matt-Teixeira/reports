@@ -26,7 +26,7 @@ const { scrub_avante, avante_keys, is_avante_user } = require("../incident/scrub
 const { normalize_system_pages, pages_audience, page_envelope_error, PILOT_RECIPIENTS } = require("../incident/page_policy");
 const { analyze_activity, SLOT_MS } = require("../incident/activity");
 const { build_system_page, system_section, system_page_name } = require("../incident/system_page");
-const { select_page_systems, chunk_pages } = require("../incident/system_pages");
+const { select_page_systems, dashboard_order, status_of, chunk_pages } = require("../incident/system_pages");
 const { build_system_app, system_app_name } = require("../incident/system_app");
 
 const T0 = Date.UTC(2026, 9, 1, 0, 0); // window start (Oct 1 2026, 00:00Z)
@@ -123,6 +123,24 @@ const H = 3600e3;
   );
   assert.strictEqual(sel[5].result, null);
   assert.ok(sel[5].message);
+
+  // The app dashboard: attention worst first (quench, then the summary's
+  // severity), then data issues, then failed; each with the summary's words.
+  const order = dashboard_order(sel);
+  assert.deepStrictEqual(
+    order.map((s) => [s.system_id, s.group, status_of(s).label]),
+    [
+      ["SME00006", "attention", "QUENCH"],
+      ["SME00007", "attention", "compressor stop, recovered"],
+      ["SME00002", "attention", "pressure rising"],
+      ["SME00003", "data_issue", "sensor data suspect"],
+      ["SME00004", "data_issue", "no compressor signal"],
+      ["SME00008", "failed", "could not be analyzed"]
+    ]
+  );
+  assert.deepStrictEqual(status_of(order[0]), { label: "QUENCH", color: "#E50B14", strong: true, mark: false });
+  assert.strictEqual(status_of(order[1]).color, "#C25E00");
+  assert.deepStrictEqual(sel.map((s) => s.system_id), ["SME00002", "SME00003", "SME00004", "SME00006", "SME00007", "SME00008"], "ordering leaves the selection as it was");
 }
 
 // --- zip chunking ------------------------------------------------------------------

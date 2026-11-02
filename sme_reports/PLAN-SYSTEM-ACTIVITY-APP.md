@@ -39,8 +39,22 @@ external scrub, same internal marking, same selection rule
   the slot table's min-width held the grid column open. Now `minmax(0,1fr)`,
   so wide charts and tables scroll inside their panels. The check asserts
   no sideways scroll at 390 px for every page, app view and dashboard.
-- **Next:** step 4 (chunk into app parts in `build_system_pages`, with
-  status from `conditions.js`) and step 5 (flags, wording).
+- **Step 4 done.** `build_system_pages(..., { format: "app" | "pages",
+  scope_label })`. The default stays `"pages"` until step 5 flips it,
+  along with the flag and the email wording. Status comes from
+  `conditions.js` `condition_status`, the same data
+  `condition_cell_record` renders (identical output on all 756 field
+  combinations). Dashboard order is attention by the summary's
+  `attention_sort`, then data issues, then failed. Sections carry
+  `payload_json` (serialized once), so a fleet batch does not hold every
+  parsed payload.
+  - Real run, Piedmont 6mo external, build-only (2026-11-02): 25 systems,
+    31 MB, one 2.2 MB zip, 40 s end to end, zero Avante addresses,
+    statuses and order identical to the summary document from the same
+    run. Dashboard 0.9 s, systems 0.25–0.6 s, zero page errors. The default
+    `pages` format on the same run: 25 files, one zip, as before.
+- **Next:** step 5 (`--pages-format`, scheduled option, email and CLI
+  wording, run list), switching the default to `app`.
 
 ## Proposed decisions (confirmed 2026-11-02)
 

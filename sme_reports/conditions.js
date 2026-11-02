@@ -157,22 +157,32 @@ const STATUS_LABELS = {
 const STATUS_COLOR = (key) =>
   key === "warm_offline" ? COLORS.amber : COLORS.grey;
 
-// Record-aware variant of condition_cell for the emails.
-const condition_cell_record = (r) => {
+// What a record's condition says, as data: { label, color, strong, mark },
+// mark being the "c" conclusion marker. The emails render it with
+// condition_cell_record; the System Activity app's dashboard
+// (incident/system_app.js) shows the same words in the same colors.
+const condition_status = (r) => {
   // Limited coverage first: the record carries NO archetype, and without
   // this branch the cell would render the literal string "undefined".
   // Grey and unmarked — "limited coverage" is a statement about our data
   // adapter, not a conclusion about the magnet.
-  if (is_limited(r)) return `<span style="color:${COLORS.grey};">limited coverage</span>`;
+  if (is_limited(r)) return { label: "limited coverage", color: COLORS.grey, strong: false, mark: false };
   // A quench overrides every label. It is already counted as attention and
   // urgent by the functions above — if the cell then says "stable / healthy"
   // the email calls a quenched magnet healthy while its own headline counts
   // it as urgent. Unmarked: a recorded quench is a reading, not a conclusion.
-  if (r.quenched === true) return `<b style="color:${COLORS.red};">QUENCH</b>`;
+  if (r.quenched === true) return { label: "QUENCH", color: COLORS.red, strong: true, mark: false };
   const status = effective_status(r);
   if (!status)
-    return condition_cell(r.archetype);
-  return `<span style="color:${STATUS_COLOR(status)};">${STATUS_LABELS[status]}<sup>c</sup></span>`;
+    return { label: condition_label(r.archetype), color: condition_color(r.archetype), strong: URGENT.has(r.archetype), mark: false };
+  return { label: STATUS_LABELS[status], color: STATUS_COLOR(status), strong: false, mark: true };
+};
+
+// Record-aware variant of condition_cell for the emails.
+const condition_cell_record = (r) => {
+  const s = condition_status(r);
+  const tag = s.strong ? "b" : "span";
+  return `<${tag} style="color:${s.color};">${s.label}${s.mark ? "<sup>c</sup>" : ""}</${tag}>`;
 };
 
 const condition_label = (archetype) => CONDITION_LABELS[archetype] || archetype;
@@ -208,6 +218,7 @@ module.exports = {
   effective_status,
   STATUS_LABELS,
   STATUS_COLOR,
+  condition_status,
   condition_cell_record,
   condition_label,
   condition_color,
