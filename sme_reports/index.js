@@ -498,7 +498,8 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
           scope_label: scope_resolution && scope_resolution.label ? scope_resolution.label : "Fleet",
           period_tag: batch_period_tag,
           period_label: label_of(lookback_days),
-          audience: batch_email.system_pages
+          audience: batch_email.system_pages,
+          format: batch_email.system_pages_format
         });
       }
 
@@ -520,7 +521,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
               // email, never just an absent attachment (round-2 F1).
               fleet_error,
               activity: activity
-                ? { audience: activity.audience, pages: activity.pages.length, zips: activity.zips, page_failures: activity.page_failures }
+                ? { audience: activity.audience, format: activity.format, pages: activity.pages.length, zips: activity.zips, page_failures: activity.page_failures }
                 : null
             }
           );
@@ -528,7 +529,8 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
             const { send_activity_parts } = require("./output/send_activity_parts");
             await send_activity_parts(run_log, job_id, batch_email, activity.zips.slice(1), {
               subject_base: `Magnet Health Summary${subject_scope ? ` — ${subject_scope}` : ""}`,
-              audience: activity.audience
+              audience: activity.audience,
+              format: activity.format
             });
           }
         } finally {

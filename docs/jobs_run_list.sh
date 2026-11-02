@@ -81,13 +81,16 @@ npm run report:fleet -- --period 30d --email
 
 npm run report:customer -- --customer C0137 --period 6mo --system-pages            # build only
 npm run report:customer -- --customer C0137 --period 6mo --system-pages --email    # + send
-npm run report:customer -- --customer C0137 --period 6mo --pages-audience internal # internal copies
+npm run report:customer -- --customer C0137 --period 6mo --pages-audience internal # internal copy
+npm run report:customer -- --customer C0137 --period 6mo --pages-format pages      # one file per system
 npm run report:fleet -- --period 6mo --system-pages
 
-# --system-pages adds one interactive HTML page per flagged system (needs
-# attention, data issue, or could not be analyzed): its alert detections,
-# notifications and readings over the summary's period. Healthy and
-# limited-coverage systems get no page. Open them in a web browser.
+# --system-pages adds ONE interactive HTML file covering every flagged
+# system (needs attention, data issue, or could not be analyzed): a
+# dashboard listing them with the summary's status, and for each its alert
+# detections, notifications and readings over the summary's period. Healthy
+# and limited-coverage systems are not listed. Open it in a web browser.
+# --pages-format pages gives the old one-file-per-system form instead.
 #
 # Two copies:
 #   external — the customer copy: every Avante user scrubbed (by address,
@@ -102,12 +105,13 @@ npm run report:fleet -- --period 6mo --system-pages
 # anything else is refused before the run starts. Internal pages only ever
 # go to @avantehs.com addresses. Build-only runs (no --email) are not gated.
 #
-# Pages land in sme_reports/out/. With --email they are zipped; part 1 rides
-# on the summary email, and any further parts (12 MB each) follow as their
-# own emails. Summary jobs only — not sme_brief / customer-briefs.
+# The file lands in sme_reports/out/. With --email it is zipped and rides on
+# the summary email; a batch over one email's 12 MB is split into parts, each
+# its own file listing every system, parts 2..N as follow-up emails. Summary
+# jobs only — not sme_brief / customer-briefs.
 #
-# Rough size, 6mo: Piedmont (C0137) 23 pages, one ~2.3 MB zip, ~25 s.
-# Fleet 108 pages, 2 zips (summary email + 1 follow-up), ~1.5 min.
+# Rough size, 6mo: Piedmont (C0137) 25 systems, one 31 MB file, ~2.2 MB zip,
+# ~40 s. Fleet 108 systems, one ~130 MB file, ~10 MB zip.
 #
 # Set "system_pages": true (or "internal" / "external") on a job in
 # jobs.config.json to make it the default for that job.
@@ -180,3 +184,5 @@ npm run check:compute
 npm run check:fleet      # renders and MEASURES real page geometry (Chromium)
 npm run check:chart
 npm run check:system-pages   # activity pages + Avante scrub — no database (Chromium)
+
+## -- INTELAS: C0051 -- LEE HEALTH: C027932 --  Piedmont HealthCare: C0137 -- Trinity Health: C009816

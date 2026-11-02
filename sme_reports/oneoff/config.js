@@ -43,9 +43,9 @@ const COMMON_KEYS = [
   "summary_pdf"
 ];
 const KIND_KEYS = {
-  customer_summary: ["customer_id", "site_ids", "system_ids", "exclude", "exclude_note", "system_pages"],
+  customer_summary: ["customer_id", "site_ids", "system_ids", "exclude", "exclude_note", "system_pages", "system_pages_format"],
   sme_brief: ["customer_id", "system_ids", "zip"],
-  fleet_summary: ["exclude", "exclude_note", "system_pages"]
+  fleet_summary: ["exclude", "exclude_note", "system_pages", "system_pages_format"]
 };
 
 // Comment keys: hand-edited JSON has no comment syntax, so any key
@@ -96,7 +96,10 @@ const DEFAULT_SETTINGS = {
   // summary email. Off unless the job or --system-pages asks. true = the
   // summary's own audience (fleet internal, customer external), or name
   // one: "internal" / "external" (incident/page_policy.js).
-  system_pages: false
+  system_pages: false,
+  // How those pages are packaged: "app" (one file listing every flagged
+  // system) or "pages" (one file per system) — incident/page_policy.js.
+  system_pages_format: "app"
 };
 
 const resolve_settings = (raw, at) => {
@@ -111,6 +114,8 @@ const resolve_settings = (raw, at) => {
   if (raw.summary_pdf !== undefined) s.summary_pdf = as_bool(raw.summary_pdf, `${at}.summary_pdf`);
   if (raw.system_pages !== undefined)
     s.system_pages = require("../incident/page_policy").normalize_system_pages(raw.system_pages, `${at}.system_pages`, fail);
+  if (raw.system_pages_format !== undefined)
+    s.system_pages_format = require("../incident/page_policy").normalize_pages_format(raw.system_pages_format, `${at}.system_pages_format`, fail);
   if (raw.out_dir !== undefined) {
     if (raw.out_dir !== null && (typeof raw.out_dir !== "string" || !raw.out_dir.trim()))
       fail(`${at}.out_dir must be a path string or null`);
@@ -225,8 +230,8 @@ const validate_job = (name, raw, defaults) => {
 // config would have rejected — and a flag that does not apply to the
 // job's kind is an error rather than a silently ignored argument.
 const apply_overrides = (job, overrides = {}) => {
-  if (overrides.system_pages && !KIND_KEYS[job.kind].includes("system_pages"))
-    fail(`--system-pages / --pages-audience do not apply to a ${job.kind} job (summary kinds only)`);
+  if ((overrides.system_pages || overrides.system_pages_format) && !KIND_KEYS[job.kind].includes("system_pages"))
+    fail(`--system-pages / --pages-audience / --pages-format do not apply to a ${job.kind} job (summary kinds only)`);
   const next = { ...job, ...resolve_settings(overrides, "command line") };
   if (overrides.customer_id !== undefined && overrides.customer_id !== null) {
     if (job.kind === "fleet_summary")
@@ -273,7 +278,8 @@ const batch_email_block = (job, { summary_pdf }) => ({
   summary_pdf,
   attachments: false,
   archive_records: job.archive_records,
-  system_pages: job.system_pages || false
+  system_pages: job.system_pages || false,
+  ...(job.system_pages ? { system_pages_format: job.system_pages_format } : {})
 });
 
 // Job (+ resolved fleet system ids, for the fleet kind) -> the raw request
@@ -365,7 +371,10 @@ const describe_job = (job) => {
   return (
     `job "${job.name}" — ${job.kind} · ${target} · ${job.period.label} period ` +
     `(${job.period.days} days) · ${job.email ? `email -> ${job.recipients.join(", ")}` : "no email"}` +
-    (job.system_pages ? ` · activity pages: ${job.system_pages === true ? (job.kind === "fleet_summary" ? "internal" : "external") : job.system_pages}` : "")
+    (job.system_pages
+      ? ` · activity pages: ${job.system_pages === true ? (job.kind === "fleet_summary" ? "internal" : "external") : job.system_pages}` +
+        (job.system_pages_format === "pages" ? ", one file per system" : ", one file")
+      : "")
   );
 };
 

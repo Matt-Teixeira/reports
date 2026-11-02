@@ -146,7 +146,10 @@ const normalize_batch_email = (raw, { scoped = false } = {}) => {
     // and deliver them with the summary email (incident/system_pages.js).
     // Normalized to the AUDIENCE — false, "internal" or "external" — here,
     // once, under the recipient rules (incident/page_policy.js).
-    system_pages: page_audience_of(raw, cc_list, scoped)
+    system_pages: page_audience_of(raw, cc_list, scoped),
+    // system_pages_format: "app" (one file listing every flagged system,
+    // the default) or "pages" (one file per system).
+    system_pages_format: require("./incident/page_policy").normalize_pages_format(raw.system_pages_format, "batch_email.system_pages_format", fail)
   };
 };
 

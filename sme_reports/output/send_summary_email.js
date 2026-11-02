@@ -140,12 +140,18 @@ const send_summary_email = async (
     if (first) attachments.push({ filename: first.filename, path: first.path });
     const n = activity.pages;
     const parts = activity.zips.length;
-    let note =
-      n
-        ? `The attached <b>System Activity</b> zip holds ${n} interactive page${n === 1 ? "" : "s"}, one for each system below that needs attention, has a data issue, or could not be analyzed: its alert detections, notifications and readings over this period. Open them in a web browser.` +
-          (activity.audience === "internal" ? " These are the <b>internal</b> copies: Avante staff recipients are included." : "") +
-          (parts > 1 ? ` The pages are split into ${parts} zips; this email carries part 1 and parts 2–${parts} follow in separate emails.` : "")
-        : "";
+    const internal = activity.audience === "internal";
+    // The app: one file per zip part, opening on a list of every flagged
+    // system. Pages: one file per system.
+    let note = !n
+      ? ""
+      : activity.format === "app"
+        ? `The attached <b>System Activity</b> zip holds one interactive file${first && first.app ? `, <b>${esc(path.basename(first.app))}</b>` : ""}. Open it in a web browser: it lists the ${n} system${n === 1 ? "" : "s"} below that need${n === 1 ? "s" : ""} attention, ${n === 1 ? "has" : "have"} a data issue, or could not be analyzed, and selecting one shows its alert detections, notifications and readings over this period.` +
+          (internal ? " This is the <b>internal</b> copy: Avante staff recipients are included." : "") +
+          (parts > 1 ? ` It is split into ${parts} zips; this email carries part 1 and parts 2–${parts} follow in separate emails. Each part opens on the full list and holds its share of the systems.` : "")
+        : `The attached <b>System Activity</b> zip holds ${n} interactive page${n === 1 ? "" : "s"}, one for each system below that needs attention, has a data issue, or could not be analyzed: its alert detections, notifications and readings over this period. Open them in a web browser.` +
+          (internal ? " These are the <b>internal</b> copies: Avante staff recipients are included." : "") +
+          (parts > 1 ? ` The pages are split into ${parts} zips; this email carries part 1 and parts 2–${parts} follow in separate emails.` : "");
     if (activity.page_failures.length) {
       const ids = activity.page_failures.map((f) => esc(f.system_id)).join(", ");
       note += `${note ? " " : ""}An activity page could not be produced for ${ids}.`;

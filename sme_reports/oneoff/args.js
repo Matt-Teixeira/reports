@@ -29,7 +29,10 @@ const USAGE = `usage: npm run report -- <job> [options]
                          (fleet_summary, customer_summary) — internal copies
                          on a fleet job, customer copies on a customer job
   --pages-audience <a>   internal | external: build the pages for this
-                         audience instead (implies --system-pages)`;
+                         audience instead (implies --system-pages)
+  --pages-format <f>     app | pages: one HTML file listing every flagged
+                         system (the default), or one file per system
+                         (implies --system-pages)`;
 
 const parse_oneoff_args = (args) => {
   const out = {
@@ -41,6 +44,7 @@ const parse_oneoff_args = (args) => {
     out_dir: null,
     email: null, // null = leave the config's setting alone
     system_pages: null, // null | true | "internal" | "external"
+    pages_format: null, // null = the config's (default "app") | "app" | "pages"
     list: false
   };
   const value_of = (args, i, flag) => {
@@ -107,6 +111,14 @@ const parse_oneoff_args = (args) => {
         out.system_pages = v;
         break;
       }
+      case "--pages-format": {
+        if (out.pages_format) fail("--pages-format given twice");
+        const v = value_of(args, ++i, "--pages-format");
+        if (v !== "app" && v !== "pages") fail(`--pages-format must be app or pages, got "${v}"`);
+        out.pages_format = v;
+        if (!out.system_pages) out.system_pages = true;
+        break;
+      }
       default:
         fail(`unknown argument "${a}"`);
     }
@@ -124,6 +136,7 @@ const overrides_of = (args) => {
   if (args.out_dir !== null) o.out_dir = args.out_dir;
   if (args.email !== null) o.email = args.email;
   if (args.system_pages !== null) o.system_pages = args.system_pages;
+  if (args.pages_format !== null) o.system_pages_format = args.pages_format;
   return o;
 };
 

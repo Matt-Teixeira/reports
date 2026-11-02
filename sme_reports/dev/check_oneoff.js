@@ -381,6 +381,31 @@ const CONFIG = {
   const piloted = { ...jobs.get("fleet"), recipients: PILOT };
   assert.strictEqual(audience_of(apply_overrides(piloted, { system_pages: true, email: true }), fleet_ids), "internal");
   assert.ok(/activity pages: internal/.test(describe_job(apply_overrides(piloted, { system_pages: true }))));
+
+  // Format: the app unless "pages" is asked for; the flag implies the pages.
+  const parsed = (args) => { const p = parse_oneoff_args(args); return [p.system_pages, p.pages_format]; };
+  assert.deepStrictEqual(parsed(["customer", "--system-pages"]), [true, null]);
+  assert.deepStrictEqual(parsed(["customer", "--pages-format", "pages"]), [true, "pages"]);
+  assert.deepStrictEqual(parsed(["customer", "--pages-format", "app", "--pages-audience", "internal"]), ["internal", "app"]);
+  assert.deepStrictEqual(parsed(["customer", "--pages-audience", "internal", "--pages-format", "app"]), ["internal", "app"]);
+  assert.deepStrictEqual(parsed(["customer", "--pages-format", "pages", "--system-pages"]), [true, "pages"]);
+  assert.deepStrictEqual(overrides_of(parse_oneoff_args(["customer", "--pages-format", "pages"])), { system_pages: true, system_pages_format: "pages" });
+  throws(() => parse_oneoff_args(["customer", "--pages-format", "zip"]), /app or pages/);
+  throws(() => parse_oneoff_args(["customer", "--pages-format"]), /requires a value/);
+  throws(() => parse_oneoff_args(["customer", "--pages-format", "app", "--pages-format", "pages"]), /given twice/);
+  throws(() => apply_overrides(jobs.get("sme"), { system_pages_format: "pages" }), /--pages-format do not apply to a sme_brief job/);
+  throws(() => load_job_config({ ...CONFIG, jobs: { c: { kind: "customer_summary", customer_id: "C1", system_pages_format: "files" } } }), /must be "app" or "pages"/);
+  const format_of = (job, opts) => {
+    const loaded = load_raw_request(build_request(job, opts));
+    return (loaded.scoped ? materialize_scoped_requests(loaded.raw, ["SME01096"]) : loaded).batch_email.system_pages_format;
+  };
+  assert.strictEqual(format_of(apply_overrides(jobs.get("customer"), { system_pages: true })), "app", "the app by default");
+  assert.strictEqual(format_of(apply_overrides(jobs.get("customer"), { system_pages: true, system_pages_format: "pages" })), "pages");
+  assert.strictEqual(format_of(apply_overrides(jobs.get("fleet"), { system_pages: true }), fleet_ids), "app");
+  const from_file = load_job_config({ ...CONFIG, jobs: { c: { kind: "customer_summary", customer_id: "C1", system_pages: true, system_pages_format: "pages" } } }).jobs.get("c");
+  assert.strictEqual(format_of(from_file), "pages", "the job key reaches the batch");
+  assert.ok(/activity pages: external, one file$/.test(describe_job(apply_overrides(jobs.get("customer"), { system_pages: true }))));
+  assert.ok(/, one file per system$/.test(describe_job(from_file)));
 }
 
 // --- the shipped config file itself loads ------------------------------------

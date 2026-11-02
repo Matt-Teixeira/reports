@@ -14,16 +14,18 @@ const {
 
 const SEND_THROTTLE_MS = 1500;
 
-const send_activity_parts = async (run_log, job_id, batch_email, zips, { subject_base, audience = "external" }) => {
+const send_activity_parts = async (run_log, job_id, batch_email, zips, { subject_base, audience = "external", format = "pages" }) => {
   const date = new Date().toISOString().slice(0, 10);
   const label = `System Activity${audience === "internal" ? " (Internal)" : ""}`;
   for (const z of zips) {
     await new Promise((r) => setTimeout(r, SEND_THROTTLE_MS));
     const part_tag = `part ${z.part}/${z.parts}`;
+    const systems = `<b>${z.systems.length}</b> system${z.systems.length === 1 ? "" : "s"} (${z.systems.map(esc).join(", ")})`;
     const body_html =
       `<p style="${FONT}font-size:14px;color:${COLORS.navy};margin:0 0 10px 0;">` +
-      `${label} pages, ${part_tag}: <b>${z.systems.length}</b> system${z.systems.length === 1 ? "" : "s"} (${z.systems.map(esc).join(", ")}). ` +
-      `Open the pages in a web browser.</p>`;
+      (format === "app"
+        ? `${label}, ${part_tag}: one interactive file holding ${systems}. Open it in a web browser; it lists every flagged system and links the ones in this part.</p>`
+        : `${label} pages, ${part_tag}: ${systems}. Open the pages in a web browser.</p>`);
     const message = {
       from: process.env.OUTLOOK_USER,
       to: batch_email.recipients.join(","),

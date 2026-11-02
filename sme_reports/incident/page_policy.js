@@ -15,6 +15,13 @@
 
 const AUDIENCES = ["internal", "external"];
 
+// How the pages are packaged (PLAN-SYSTEM-ACTIVITY-APP.md):
+//   app   — one HTML file per zip part: a dashboard of every flagged
+//           system, each linking to its view. The default.
+//   pages — one HTML file per system (the original form), kept for one
+//           release as a fallback.
+const PAGE_FORMATS = ["app", "pages"];
+
 // PILOT GATE (2026-10-20): while the pages are being proven on real
 // schedules, every run that emails them may address ONLY these people —
 // To and CC alike. A run aimed anywhere else fails at validation, before
@@ -34,6 +41,13 @@ const normalize_system_pages = (value, at, fail) => {
   if (value === undefined || value === null || value === false) return false;
   if (value === true || AUDIENCES.includes(value)) return value;
   return fail(`${at} must be true, false, "internal" or "external" (got ${JSON.stringify(value)})`);
+};
+
+// raw setting -> "app" | "pages", or throws. Absent means the app.
+const normalize_pages_format = (value, at, fail) => {
+  if (value === undefined || value === null) return "app";
+  if (PAGE_FORMATS.includes(value)) return value;
+  return fail(`${at} must be "app" or "pages" (got ${JSON.stringify(value)})`);
 };
 
 // normalized setting + whether the run is customer-scoped -> null | audience.
@@ -61,9 +75,11 @@ const page_envelope_error = (audience, recipients = [], cc_list = []) => {
 
 module.exports = {
   AUDIENCES,
+  PAGE_FORMATS,
   PILOT_RECIPIENTS,
   AVANTE_MAILBOX,
   normalize_system_pages,
+  normalize_pages_format,
   pages_audience,
   page_envelope_error
 };

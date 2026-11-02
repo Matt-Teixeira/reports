@@ -331,6 +331,7 @@ const { parse_sme_args } = require("../cli_args");
     [{ ...customer_row, recipients: ["ops@example.com"], dry_run: true }, /pilot/],
     [{ ...customer_row, options: { system_pages: "both" } }, /must be true, false, "internal" or "external"/],
     [{ ...customer_row, options: { system_pages: "yes" } }, /must be true/],
+    [{ ...customer_row, options: { system_pages: true, system_pages_format: "zip" } }, /options\.system_pages_format must be "app" or "pages"/],
     [
       { ...customer_row, report_kind: "user_summary", scope: null, author: PILOT, recipient_mode: "derived", recipients: null },
       /not implemented for user_summary/
@@ -348,6 +349,10 @@ const { parse_sme_args } = require("../cli_args");
   assert.strictEqual(loaded_of({ ...customer_row, options: { system_pages: "internal" } }).batch_email.system_pages, "internal");
   assert.strictEqual(loaded_of({ ...fleet_row, options: { system_pages: "external" } }).batch_email.system_pages, "external");
   assert.strictEqual(loaded_of({ ...customer_row, options: {} }).batch_email.system_pages, false, "no option, no pages");
+  // Format: the app unless the row asks for one file per system.
+  assert.strictEqual(loaded_of(customer_row).batch_email.system_pages_format, "app");
+  assert.strictEqual(loaded_of({ ...customer_row, options: { system_pages: true, system_pages_format: "pages" } }).batch_email.system_pages_format, "pages");
+  assert.strictEqual(loaded_of({ ...fleet_row, options: { system_pages: true, system_pages_format: "app" } }).batch_email.system_pages_format, "app");
   const raw = config_to_raw(validate_config(customer_row), { recipients: customer_row.recipients });
   assert.strictEqual(raw.batch_email.summary, false, "pages are delivered by the send loop, not run_batch");
 }

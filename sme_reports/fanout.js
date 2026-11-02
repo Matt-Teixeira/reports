@@ -1,5 +1,5 @@
 const { validate_scope, scope_set_hash, scope_set_key } = require("./scope");
-const { normalize_system_pages, pages_audience, page_envelope_error } = require("./incident/page_policy");
+const { normalize_system_pages, normalize_pages_format, pages_audience, page_envelope_error } = require("./incident/page_policy");
 
 // Pure fan-out logic for DB-config (scheduled) runs — PLAN-SCOPED-WEEKLY.md
 // B3. Everything here operates on plain rows handed in by the caller, so
@@ -16,8 +16,9 @@ const KINDS = ["user_summary", "customer_summary", "fleet_summary", "briefs"];
 // keys are rejected, not ignored). include_briefs / exception_only are
 // designed-in but ship disabled; exclude carries the internal fleet run's
 // service-station list; system_pages adds the per-system activity pages
-// (true | "internal" | "external" — incident/page_policy.js).
-const KNOWN_OPTIONS = ["include_briefs", "exception_only", "exclude", "system_pages"];
+// (true | "internal" | "external" — incident/page_policy.js), packaged as
+// system_pages_format says ("app", the default, or "pages").
+const KNOWN_OPTIONS = ["include_briefs", "exception_only", "exclude", "system_pages", "system_pages_format"];
 
 // Row (alert.sme_reports) -> canonical config, or a loud error naming the
 // row id. Validation the DDL CHECKs cannot express lives here.
@@ -44,6 +45,7 @@ const validate_config = (row) => {
   // loop; pages there are a separate build, rejected loudly until it exists.
   if (system_pages && row.report_kind === "user_summary")
     fail(`${at}: options.system_pages is not implemented for user_summary yet`);
+  normalize_pages_format(options.system_pages_format, `${at}: options.system_pages_format`, fail);
 
   if (!Number.isInteger(row.lookback_days) || row.lookback_days <= 0)
     fail(`${at}: lookback_days must be a positive integer`);
@@ -304,7 +306,9 @@ const config_to_raw = (cfg, { recipients }) => ({
     attachments: false,
     archive_records: !cfg.dry_run,
     // Built by run_batch, delivered by run_scheduled's send loop.
-    ...(cfg.options.system_pages ? { system_pages: cfg.options.system_pages } : {})
+    ...(cfg.options.system_pages
+      ? { system_pages: cfg.options.system_pages, system_pages_format: cfg.options.system_pages_format }
+      : {})
   }
 });
 

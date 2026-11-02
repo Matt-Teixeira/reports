@@ -53,8 +53,20 @@ external scrub, same internal marking, same selection rule
     statuses and order identical to the summary document from the same
     run. Dashboard 0.9 s, systems 0.25–0.6 s, zero page errors. The default
     `pages` format on the same run: 25 files, one zip, as before.
-- **Next:** step 5 (`--pages-format`, scheduled option, email and CLI
-  wording, run list), switching the default to `app`.
+- **Step 5 done (2026-11-02). The app is the default.**
+  - One-off jobs: `--pages-format app|pages`, which implies
+    `--system-pages`, and the job key `system_pages_format`.
+  - Scheduled rows: `options.system_pages_format`.
+  - All three use `page_policy.js` `normalize_pages_format`, where a
+    missing value means `"app"`.
+  - The summary email names the file and says it lists the flagged
+    systems. Part emails and the CLI output describe the single file.
+  - ONEOFF.md, RULES.md and the run list are updated.
+  - End to end on Trinity Health (C009816, 7d) with SMTP stubbed: one
+    email carrying one 85 KB zip holding one 0.8 MB file for 14 systems,
+    with zero Avante addresses, loading in 0.4 s with zero page errors.
+- **Remaining:** step 6 only if load time needs it (not so far). Remove
+  `--pages-format pages` after a release with no complaints.
 
 ## Proposed decisions (confirmed 2026-11-02)
 

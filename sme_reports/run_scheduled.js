@@ -169,7 +169,7 @@ const deliver_explicit_inner = async (run_log, job_id, cfg, slot, ctx, outcomes,
         scope_label: resolution ? resolution.label : null,
         lookback_days: cfg.lookback_days,
         activity: activity
-          ? { audience: activity.audience, pages: activity.pages.length, zips: activity.zips, page_failures: activity.page_failures }
+          ? { audience: activity.audience, format: activity.format, pages: activity.pages.length, zips: activity.zips, page_failures: activity.page_failures }
           : null
       }
     );
@@ -193,7 +193,8 @@ const deliver_explicit_inner = async (run_log, job_id, cfg, slot, ctx, outcomes,
         activity.zips.slice(1),
         {
           subject_base: `Magnet Health Summary${resolution ? ` — ${resolution.label}` : ""}`,
-          audience: activity.audience
+          audience: activity.audience,
+          format: activity.format
         }
       );
     } catch (error) {
@@ -249,7 +250,7 @@ const run_customer_or_fleet = async (run_log, job_id, cfg, slot, counts) => {
     if (batch.activity) {
       const a = batch.activity;
       console.log(
-        `config ${cfg.id}: activity pages (${a.audience}): ${a.pages.length} of ${a.selected.length} flagged systems in ${a.zips.length} zip${a.zips.length === 1 ? "" : "s"}` +
+        `config ${cfg.id}: activity ${a.format === "app" ? "app" : "pages"} (${a.audience}): ${a.pages.length} of ${a.selected.length} flagged systems in ${a.zips.length} zip${a.zips.length === 1 ? "" : "s"}` +
           (a.page_failures.length ? `; FAILED ${a.page_failures.map((f) => f.system_id).join(", ")}` : "")
       );
     }

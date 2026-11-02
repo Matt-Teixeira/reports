@@ -69,9 +69,9 @@ for instance — and run them by name.
 
 | Job kind | What it produces | Extra keys |
 |---|---|---|
-| `customer_summary` | one scoped Magnet Health Summary PDF (customer-facing wording, scope stated on the cover) | exactly one of `customer_id`, `site_ids`, `system_ids`; `exclude`, `exclude_note`, `system_pages` |
+| `customer_summary` | one scoped Magnet Health Summary PDF (customer-facing wording, scope stated on the cover) | exactly one of `customer_id`, `site_ids`, `system_ids`; `exclude`, `exclude_note`, `system_pages`, `system_pages_format` |
 | `sme_brief` | one Magnet Health Brief PDF + HTML per system | exactly one of `customer_id` (every mag system under the customer), `system_ids`; `zip` (bundle an emailed batch into one archive at any size — batches over 4 PDFs zip regardless) |
-| `fleet_summary` | the internal fleet document over every mag-processed system | `exclude`, `exclude_note`, `system_pages` |
+| `fleet_summary` | the internal fleet document over every mag-processed system | `exclude`, `exclude_note`, `system_pages`, `system_pages_format` |
 
 Common settings: `period`, `recipients`, `cc_list`, `email`, `out_dir`,
 `archive` (keep a dated copy of a brief in `archive/`), `summary_pdf` (add
@@ -137,6 +137,16 @@ of its interpretation (`incident/system_pages.js`,
 they are zipped and ride on the summary email, split into "part n/N"
 follow-up emails when one zip would exceed the message limit.
 
+Two formats (`PLAN-SYSTEM-ACTIVITY-APP.md`):
+
+| Format | What the reader gets |
+|---|---|
+| `app` (default) | **one HTML file**, `Avante-<scope>-System-Activity[-Internal]-<period>-<date>.html`: a dashboard of every flagged system (the summary's status and order, totals, a find box); selecting a system opens its activity view, with links back and to the previous/next system. Works offline, straight from the zip. A batch over one email's budget is split into parts; each part lists every system and links its own. |
+| `pages` | one HTML file per system, `Avante-<system>-Activity[-Internal]-<period>-<date>.html` — the original form, kept for one release as a fallback. |
+
+`--pages-format app|pages` (job key `"system_pages_format"`) picks one and,
+like `--pages-audience`, implies `--system-pages`.
+
 Two audiences (`incident/page_policy.js`):
 
 | Audience | What it shows | Default for |
@@ -160,11 +170,13 @@ npm run report:customer -- --customer C0137 --system-pages                      
 npm run report:customer -- --customer C0137 --system-pages --email                 # + send
 npm run report:customer -- --customer C0137 --pages-audience internal --email      # internal copies
 npm run report:fleet -- --system-pages --email                                     # fleet: internal copies
+npm run report:customer -- --customer C0137 --pages-format pages                   # one file per system instead
 ```
 
-A 6-month customer summary (Piedmont, 43 systems, 23 pages) takes ~25 s on
-top of the summary and zips to ~2.3 MB; the 6-month fleet (108 pages) fits
-in 2 zips.
+A 6-month customer summary (Piedmont, 25 flagged systems) builds its app in
+~40 s end to end: one 31 MB file, a 2.2 MB zip, dashboard ready in ~1 s.
+The 6-month fleet (108 systems) is one ~130 MB file in one ~10 MB zip;
+its dashboard is ready in ~3 s and its largest system opens in ~2.5 s.
 
 ## Checks
 

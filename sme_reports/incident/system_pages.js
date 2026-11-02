@@ -31,7 +31,7 @@ const {
 // silent either: it is logged with its cause and returned, the email names
 // the system, and the app's dashboard lists it as not available.
 
-const FORMATS = ["app", "pages"];
+const { PAGE_FORMATS: FORMATS } = require("./page_policy");
 
 // Compressed budget per zip part — the same 12 MB send_batch_email.js holds
 // PDFs to, which stays under O365's ~25 MB after base64 growth.
@@ -106,7 +106,7 @@ const build_system_pages = async (
     period_tag = "",
     period_label = null,
     audience,
-    format = "pages"
+    format = "app"
   }
 ) => {
   if (!["internal", "external"].includes(audience)) throw new Error(`build_system_pages: unknown audience ${audience}`);
