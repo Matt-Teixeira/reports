@@ -34,9 +34,11 @@ external scrub, same internal marking, same selection rule
   The fleet fits one part once the shell is shared, and its largest
   system opens about as fast as its standalone page (3.3 s). Step 6 is not
   needed for now.
-- **Known, pre-existing:** a system view overflows sideways at phone width
-  (564 px at 390 px), the same as the standalone page. The dashboard does
-  not. Fix separately.
+- **Phone width fixed.** System views (and the standalone page and the
+  Anomaly Report) scrolled sideways at 390 px. In the one-column layout,
+  the slot table's min-width held the grid column open. Now `minmax(0,1fr)`,
+  so wide charts and tables scroll inside their panels. The check asserts
+  no sideways scroll at 390 px for every page, app view and dashboard.
 - **Next:** step 4 (chunk into app parts in `build_system_pages`, with
   status from `conditions.js`) and step 5 (flags, wording).
 

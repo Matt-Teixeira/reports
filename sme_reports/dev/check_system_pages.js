@@ -430,6 +430,14 @@ assert.strictEqual(system_page_name("SME10001", T1, "-6mo"), "Avante-SME10001-Ac
 assert.strictEqual(system_page_name("SME10001", T1, "-6mo", "internal"), "Avante-SME10001-Activity-Internal-6mo-2026-10-03.html");
 
 // --- every page loads in Chromium with zero page errors --------------------------
+// No sideways page scroll at phone width: wide charts and tables scroll
+// inside their own panels.
+const fits_phone = async (page, what) => {
+  const vp = page.viewport();
+  await page.setViewport({ width: 390, height: 844 });
+  assert.strictEqual(await page.evaluate(() => document.documentElement.scrollWidth), 390, `${what}: sideways scroll at phone width`);
+  await page.setViewport(vp);
+};
 (async () => {
   const puppeteer = require("puppeteer");
   const browser = await puppeteer.launch({
@@ -447,6 +455,7 @@ assert.strictEqual(system_page_name("SME10001", T1, "-6mo", "internal"), "Avante
       page.on("pageerror", (e) => errors.push(e.message));
       page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
       await page.goto(`file://${file}`, { waitUntil: "load" });
+      await fits_phone(page, p.id);
       // Exercise the controls: expand every day, pick a slot, flip zone + clock.
       await page.click("#toggleDays");
       await page.click("#rows tr.run");
@@ -485,9 +494,11 @@ assert.strictEqual(system_page_name("SME10001", T1, "-6mo", "internal"), "Avante
       // A system opened straight from its link, before any toggles: the reference.
       await page.goto(`file://${file}#${first}`, { waitUntil: "load" });
       const fresh = await app_html();
+      await fits_phone(page, `${app.name} #${first}`);
 
       await page.goto(`file://${file}`, { waitUntil: "load" });
       assert.strictEqual(await page.title(), app.title, `${app.name}: dashboard title`);
+      await fits_phone(page, `${app.name} dashboard`);
       assert.strictEqual(await page.$$eval("#systems tbody tr", (r) => r.length), app.rows, `${app.name}: every flagged system listed`);
       assert.deepStrictEqual(await page.$$eval("#systems tbody tr[data-sys]", (r) => r.map((x) => x.dataset.sys)), app.linked, `${app.name}: linked systems`);
       await page.type("#dfilter", "philips");

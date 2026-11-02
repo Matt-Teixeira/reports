@@ -635,7 +635,7 @@ tr[aria-expanded="true"] .exp{transform:rotate(90deg)}
 .split > .detailpane{grid-column:2;grid-row:2}
 .leftcol table{min-width:520px}
 .detailpane{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto;padding:18px 20px}
-@media (max-width:960px){.split{grid-template-columns:1fr}.split > .tabletools,.split > .leftcol,.split > .detailpane{grid-column:1;grid-row:auto}.detailpane{position:static;max-height:none}}
+@media (max-width:960px){.split{grid-template-columns:minmax(0,1fr)}.split > .tabletools,.split > .leftcol,.split > .detailpane{grid-column:1;grid-row:auto}.detailpane{position:static;max-height:none}}
 tr.sel td{background:var(--band)}
 tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
 td.mk{white-space:nowrap}
