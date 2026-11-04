@@ -677,16 +677,20 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .misslist{list-style:none;padding:0;margin:0;display:grid;gap:6px}
 .misslist code{color:var(--muted)}
 .nbs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
-tr.day{cursor:pointer}
-tr.day th{user-select:none}
+tr.day,tr.month{cursor:pointer}
+tr.day th,tr.month th{user-select:none}
 tr.day:hover th{background:#E2E9F0}
-tr.day .exp{display:inline-block;width:14px;color:var(--blue);transition:transform .15s}
-tr.day[aria-expanded="true"] .exp{transform:rotate(90deg)}
-tr.day:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+tr.day .exp,tr.month .exp{display:inline-block;width:14px;color:var(--blue);transition:transform .15s}
+tr.day[aria-expanded="true"] .exp,tr.month[aria-expanded="true"] .exp{transform:rotate(90deg)}
+tr.day:focus-visible,tr.month:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+tr.month th{text-align:left;padding:16px 14px 10px;background:var(--panel);font-weight:800;font-size:16px;color:var(--head);border-bottom:1.5px solid var(--navy)}
+tr.month:hover th{background:var(--hover)}
+tr.month[aria-expanded="false"] th{border-bottom-color:var(--line)}
+tr.day.in th{padding-left:34px}
 .dsum{margin-left:10px;font-size:12.5px;font-weight:400;color:var(--muted)}
 .dmk{margin-left:10px}
 .dmk .mkr{cursor:inherit;height:20px;min-width:20px;font-size:11.5px}
-@media (prefers-reduced-motion:reduce){tr.day .exp,td.t .exp{transition:none}}
+@media (prefers-reduced-motion:reduce){tr.day .exp,tr.month .exp,td.t .exp{transition:none}}
 
 .hypothesis{padding:18px 22px;border:1.5px solid var(--light);border-left:5px solid var(--blue)}
 .hypothesis h3{margin:8px 0 0;font-size:18px;font-weight:800;color:var(--head)}

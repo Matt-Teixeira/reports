@@ -37,8 +37,9 @@ function fmt(d, opts, tz = TZ){
 let H24 = PREFS.h24 !== undefined ? PREFS.h24 : true;
 const timeSec = d => fmt(d, H24 ? {hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'} : {hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
 const timeMin = d => fmt(d, H24 ? {hour:'2-digit',minute:'2-digit',hourCycle:'h23'} : {hour:'numeric',minute:'2-digit',hour12:true});
-const dayLabel = d => fmt(d,{weekday:'short',month:'short',day:'numeric'});
+const dayLabel = (d, tz) => fmt(d,{weekday:'short',month:'short',day:'numeric'}, tz);
 const shortDay = d => fmt(d,{month:'short',day:'numeric'});
+const monthLabel = (d, tz) => fmt(d,{month:'long',year:'numeric'}, tz);
 const tzAbbr = () => (DATA.zones.find(z => z.tz === TZ) || {abbr:'UTC'}).abbr;
 function isoOut(d){
   const s = d.toISOString().replace('T',' ').replace('Z','');
@@ -357,7 +358,21 @@ function groupRow(g, open){
     <td>${compCell(a.comp)}</td>
     <td class="mk">${markers(g.views, ref)}</td></tr>`;
 }
+// Newest first: the reader opens a page to see what is happening now, and
+// on a 6-month period the oldest day used to sit on top of ~180 rows.
+// Past a month, days fold into months; only the newest month starts open.
+const MONTHLY = slots.length > 1 && slots[slots.length-1].t - slots[0].t > 31 * 864e5;
 const expandedDays = new Set();   // days start collapsed
+const expandedMonths = new Set(MONTHLY ? [monthLabel(slots[slots.length-1].t)] : []);
+// Expansion is keyed by labels in the reader's zone. A zone change re-keys
+// it through the slots: whatever held an open slot stays open under its new
+// label — the newest month included, when the period ends just past a month
+// boundary and that month's name changes with the zone.
+function rekey(set, label, was){
+  const open = new Set(set); set.clear();
+  for(const sl of slots) if(open.has(label(sl.t, was))) set.add(label(sl.t));
+}
+const daySummary = dv => markers(dv, '').replace(/<button type="button"/g, '<span').replace(/<\/button>/g, '</span>');
 function renderTable(){
   const views = slots.map(slotView);
   viewById = new Map(views.map(v => [v.s.id, v]));
@@ -369,26 +384,36 @@ function renderTable(){
     else items.push({key:v.key, views:[v], hasNotes:v.nv.length > 0});
   }
   groupById = new Map(items.filter(it => it.views.length > 1).map(it => [it.views[0].s.id, it]));
-  const days = [];
-  for(const it of items){
-    const l = dayLabel(it.views[0].s.t);
+  const months = [];
+  for(const it of [...items].reverse()){
+    const t = it.views[0].s.t, m = MONTHLY ? monthLabel(t) : '', l = dayLabel(t);
+    if(!months.length || months[months.length-1].label !== m) months.push({label:m, days:[]});
+    const days = months[months.length-1].days;
     if(!days.length || days[days.length-1].label !== l) days.push({label:l, items:[]});
     days[days.length-1].items.push(it);
   }
   let html = '';
-  for(const d of days){
-    const collapsed = !expandedDays.has(d.label);
-    const dv = d.items.flatMap(it => it.views);
-    const sum = markers(dv, '').replace(/<button type="button"/g, '<span').replace(/<\/button>/g, '</span>');
-    html += `<tr class="day" data-day="${esc(d.label)}" tabindex="0" aria-expanded="${!collapsed}"><th colspan="5" scope="rowgroup">
-      <span class="exp">›</span> ${esc(d.label)}<span class="dsum">${dv.length} slots</span><span class="dmk">${sum}</span></th></tr>`;
-    if(collapsed) continue;
-    for(const it of d.items){
-      const v0 = it.views[0];
-      if(it.views.length === 1){ html += slotRow(v0); continue; }
-      const open = openGroups.has(v0.s.id);
-      html += groupRow(it, open);
-      if(open) it.views.forEach(v => { html += slotRow(v); });
+  for(const mo of months){
+    if(MONTHLY){
+      const open = expandedMonths.has(mo.label);
+      const mv = mo.days.flatMap(d => d.items.flatMap(it => it.views));
+      html += `<tr class="month" data-month="${esc(mo.label)}" tabindex="0" aria-expanded="${open}"><th colspan="5" scope="rowgroup">
+        <span class="exp">›</span> ${esc(mo.label)}<span class="dsum">${mo.days.length} day${mo.days.length === 1 ? '' : 's'} · ${mv.length} slots</span><span class="dmk">${daySummary(mv)}</span></th></tr>`;
+      if(!open) continue;
+    }
+    for(const d of mo.days){
+      const collapsed = !expandedDays.has(d.label);
+      const dv = d.items.flatMap(it => it.views);
+      html += `<tr class="day${MONTHLY ? ' in' : ''}" data-day="${esc(d.label)}" tabindex="0" aria-expanded="${!collapsed}"><th colspan="5" scope="rowgroup">
+        <span class="exp">›</span> ${esc(d.label)}<span class="dsum">${dv.length} slots</span><span class="dmk">${daySummary(dv)}</span></th></tr>`;
+      if(collapsed) continue;
+      for(const it of d.items){
+        const v0 = it.views[0];
+        if(it.views.length === 1){ html += slotRow(v0); continue; }
+        const open = openGroups.has(v0.s.id);
+        html += groupRow(it, open);
+        if(open) it.views.forEach(v => { html += slotRow(v); });
+      }
     }
   }
   document.getElementById('rows').innerHTML = html;
@@ -467,7 +492,9 @@ function renderAll(){ renderSummary(); renderLanes(); renderFilters(); renderRec
 
 /* ---------- events ---------- */
 document.querySelectorAll('.seg button[data-tz]').forEach(b => b.addEventListener('click', () => {
+  const was = TZ;
   TZ = PREFS.tz = b.dataset.tz;
+  rekey(expandedDays, dayLabel, was); rekey(expandedMonths, monthLabel, was);
   document.querySelectorAll('.seg button[data-tz]').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderAll();
 }));
@@ -499,6 +526,9 @@ document.getElementById('mquick').addEventListener('click', e => {
 });
 const tbody = document.getElementById('rows');
 tbody.addEventListener('click', e => {
+  const mt = e.target.closest('tr.month');
+  if(mt){ const k = mt.dataset.month; expandedMonths.has(k) ? expandedMonths.delete(k) : expandedMonths.add(k); syncToggle();
+    renderTable(); document.querySelector(`#rows tr.month[data-month="${CSS.escape(k)}"]`)?.focus({preventScroll:true}); return; }
   const dt = e.target.closest('tr.day');
   if(dt){ const k = dt.dataset.day; expandedDays.has(k) ? expandedDays.delete(k) : expandedDays.add(k); syncToggle();
     renderTable(); document.querySelector(`#rows tr.day[data-day="${CSS.escape(k)}"]`)?.focus({preventScroll:true}); return; }
@@ -516,12 +546,12 @@ tbody.addEventListener('click', e => {
 tbody.addEventListener('keydown', e => {
   if(e.target.closest('.mkr')) return;
   if(e.key !== 'Enter' && e.key !== ' ') return;
-  const tr = e.target.closest('tr.run,tr.group,tr.ghead,tr.day'); if(!tr) return;
+  const tr = e.target.closest('tr.run,tr.group,tr.ghead,tr.day,tr.month'); if(!tr) return;
   e.preventDefault(); tr.click();
 });
 document.getElementById('detail').addEventListener('click', e => {
   const j = e.target.closest('[data-jump]');
-  if(j){ const id = +j.dataset.jump; expandedDays.add(dayLabel(new Date(id))); syncToggle();
+  if(j){ const id = +j.dataset.jump; expandedDays.add(dayLabel(new Date(id))); if(MONTHLY) expandedMonths.add(monthLabel(new Date(id))); syncToggle();
     if(!viewById.has(id) || !document.querySelector(`#rows tr[data-s="${id}"]`)){ for(const [gid, g] of groupById) if(g.views.some(v => v.s.id === id)) openGroups.add(gid); }
     select('s', id, 'data'); document.querySelector(`#rows tr[data-s="${id}"]`)?.scrollIntoView({block:'center'}); return; }
   const x = e.target.closest('[data-expand]');
@@ -538,11 +568,13 @@ if(prefs){
   document.querySelectorAll('.seg button[data-clock]').forEach(x => x.setAttribute('aria-pressed', (x.dataset.clock === '24') === H24));
 }
 const allDays = () => [...new Set(slots.map(sl => dayLabel(sl.t)))];
-const allOpen = () => allDays().every(d => expandedDays.has(d));
+const allMonths = () => MONTHLY ? [...new Set(slots.map(sl => monthLabel(sl.t)))] : [];
+const allOpen = () => allDays().every(d => expandedDays.has(d)) && allMonths().every(m => expandedMonths.has(m));
 function syncToggle(){ const b = document.getElementById('toggleDays'); const open = allOpen();
   b.textContent = open ? 'Collapse all' : 'Expand all'; b.setAttribute('aria-pressed', open); }
 document.getElementById('toggleDays').addEventListener('click', () => {
-  if(allOpen()) expandedDays.clear(); else allDays().forEach(d => expandedDays.add(d));
+  if(allOpen()){ expandedDays.clear(); expandedMonths.clear(); }
+  else { allDays().forEach(d => expandedDays.add(d)); allMonths().forEach(m => expandedMonths.add(m)); }
   syncToggle(); renderTable();
 });
 renderAll();

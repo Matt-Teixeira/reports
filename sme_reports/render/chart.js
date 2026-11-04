@@ -141,11 +141,18 @@ const render_timeseries_chart = ({
 
   // Drop interior ticks that would repeat an endpoint's day label
   // (e.g. an interior midnight tick on the same day the window ends).
+  // Interior ticks also draw a vertical gridline: the pressure and helium
+  // charts share x_domain and PLOT, so their gridlines land on the same
+  // columns and the two read as layers over one time axis.
   const ticks = x_ticks(x_domain, sx);
   const end_labels = [day_label(x_domain[0]), day_label(x_domain[1])];
   for (const tick of ticks) {
     const label = day_label(tick.t);
     if (tick.anchor === "middle" && end_labels.includes(label)) continue;
+    if (tick.anchor === "middle")
+      parts.push(
+        `<line x1="${r1(sx(tick.t))}" x2="${r1(sx(tick.t))}" y1="${plot.y1}" y2="${plot.y0}" stroke="${COLORS.grid}" stroke-width="1"/>`
+      );
     parts.push(
       `<text x="${r1(sx(tick.t))}" y="${label_y}" font-size="8.5" fill="${COLORS.axis_text}" text-anchor="${tick.anchor}">${label}</text>`
     );

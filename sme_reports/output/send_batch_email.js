@@ -8,15 +8,13 @@ const { build_fresh_zip } = require("./fresh_zip");
 
 const build_transporter = require("../../email/build-transporter");
 const send_with_retry = require("./send_with_retry");
-const { condition_cell_record } = require("../conditions");
 const {
   COLORS,
   FONT,
   logo_attachment,
-  wrap_email,
-  themed_table,
-  esc
+  wrap_email
 } = require("./email_theme");
+const { status_html } = require("./email_status");
 
 const [addLogEvent] = require("../../utils/logger/log");
 const {
@@ -58,24 +56,12 @@ const send_one = async (run_log, job_id, batch_email, chunk, out_dir, part, tota
   const subject = `Magnet Health Briefs — ${total_systems} systems${part_tag} — ${date}`;
   const use_zip = batch_email.zip || chunk.length > AUTO_ZIP_THRESHOLD;
 
-  // Grade the distilled record, not the bare archetype — quench and the
-  // overlay states live there, and the summary email and fleet PDF already
-  // grade this way. The bare archetype called a quenched magnet "stable".
-  const rows = chunk.map((r) => [
-    `<b>${esc(r.system_id)}</b>`,
-    `${esc(r.site_name)}<br><span style="font-size:11px;color:${COLORS.grey};">${esc(r.manufacturer)} ${esc(r.modality || "")}</span>`,
-    condition_cell_record({ ...(r.summary || {}), archetype: r.archetype })
-  ]);
+  // Graded on the distilled record, not the bare archetype — quench and the
+  // overlay states live there (email_status.js), the same as the summary
+  // email and fleet PDF. The bare archetype called a quenched magnet "stable".
   const body_html =
     `<p style="${FONT}font-size:14px;color:${COLORS.navy};margin:0 0 14px 0;">Attached are the one-page Magnet Health Briefs for <b>${chunk.length}</b> of ${total_systems} systems${use_zip ? " (bundled as a zip)" : ""}${part_tag}.</p>` +
-    themed_table(
-      [
-        { label: "SYSTEM", width: "90" },
-        { label: "SITE" },
-        { label: "CONDITION", width: "190" }
-      ],
-      rows
-    );
+    status_html(chunk);
 
   let attachments;
   let zip_path = null;

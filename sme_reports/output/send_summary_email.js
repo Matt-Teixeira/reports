@@ -7,18 +7,17 @@ const {
   FONT,
   logo_attachment,
   wrap_email,
-  themed_table,
   esc,
   fleet_failure_note
 } = require("./email_theme");
+const { status_html } = require("./email_status");
 
 const {
   attention_sort,
   is_attention,
   is_urgent,
   is_data_issue,
-  is_limited,
-  condition_cell_record
+  is_limited
 } = require("../conditions");
 const { period_label } = require("../periods");
 
@@ -78,37 +77,14 @@ const send_summary_email = async (
       ? `<b>${analyzed_count}</b> systems analyzed — ${tiers}${limited_clause}.`
       : `<b>${analyzed_count}</b> systems analyzed — no systems need attention${limited_clause}.`;
 
-  const columns = [
-    { label: "SYSTEM", width: "90" },
-    { label: "SITE" },
-    { label: "CONDITION", width: "210" }
-  ];
-  const rows = sorted.map((r) => [
-    `<b>${esc(r.system_id)}</b>`,
-    `${esc(r.site_name)}<br><span style="font-size:11px;color:${COLORS.grey};">${esc(r.manufacturer)} ${esc(r.modality || "")}</span>`,
-    condition_cell_record(facts_of(r))
-  ]);
-
+  // A scoped run's email is customer-facing: failure wording goes through
+  // the same whitelist classifier as the scoped PDF (raw messages stay in
+  // the run log), so the two can never disagree.
+  const reason_of = (m) =>
+    scope_label ? require("../render/fleet_model").customer_failure_reason(m) : m;
   let body_html =
     `<p style="${FONT}font-size:14px;color:${COLORS.navy};margin:0 0 14px 0;">${headline}</p>` +
-    themed_table(columns, rows);
-
-  if (failures && failures.length) {
-    // A scoped run's email is customer-facing: failure wording goes
-    // through the same whitelist classifier as the scoped PDF (raw
-    // messages stay in the run log), so the two can never disagree.
-    const { customer_failure_reason } = require("../render/fleet_model");
-    const reason_of = (m) => (scope_label ? customer_failure_reason(m) : m);
-    body_html +=
-      `<p style="${FONT}font-size:13px;color:${COLORS.navy};margin:18px 0 8px 0;"><b>${failures.length} system${failures.length === 1 ? "" : "s"} did not produce a report</b></p>` +
-      themed_table(
-        [{ label: "SYSTEM", width: "90" }, { label: "REASON" }],
-        failures.map((f) => [
-          `<b>${esc(f.system_id)}</b>`,
-          `<span style="color:${COLORS.grey};">${esc(reason_of(f.message))}</span>`
-        ])
-      );
-  }
+    status_html(results, { failures: failures || [], reason_of });
 
   const attachments = [logo_attachment()];
   if (fleet_pdf_path) {

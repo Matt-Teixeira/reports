@@ -311,6 +311,26 @@ for (const [id, vendor] of [["SME10001", "GE"], ["SME10002", "PHILIPS"], ["SME10
   pages.push({ id, vendor, html, primary: f.readings.primary_name });
 }
 
+// A period past a month: the table folds days into months, newest first.
+// Readings cover only the fixture's last three days; the earlier slots are
+// empty, which is all the grouping needs.
+{
+  const f = fixture("SME10009", "GE");
+  const from = T1 - 70 * 86400e3;
+  const a = analyze_activity({ ...f.data, ...scrub_avante(f.data) }, f.readings, { from, to: T1, avante_keys: null });
+  const html = build_system_page(a, { identity: f.data.identity, meta: f.data.meta, model_count: f.data.models.length, period_label: "6 months", audience: "external" });
+  pages.push({ id: "SME10009", vendor: "70-day", html, primary: f.readings.primary_name, monthly: true, slots: a.slots.length });
+}
+// Codex F3: a period ending 02:00Z on Oct 1 — still September in Eastern
+// time. Switching to UTC renames the newest month; it must stay open.
+{
+  const f = fixture("SME10010", "GE");
+  const to = T0 + 2 * 3600e3;
+  const a = analyze_activity({ ...f.data, ...scrub_avante(f.data) }, f.readings, { from: to - 70 * 86400e3, to, avante_keys: null });
+  const html = build_system_page(a, { identity: f.data.identity, meta: f.data.meta, model_count: f.data.models.length, period_label: "6 months", audience: "external" });
+  pages.push({ id: "SME10010", vendor: "month-edge", html, primary: f.readings.primary_name, monthly: true, slots: a.slots.length, month_edge: true });
+}
+
 // A failed system: alerts only, a plain notice, no readings.
 {
   const f = fixture("SME10004", "GE");
@@ -474,8 +494,32 @@ const fits_phone = async (page, what) => {
       page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
       await page.goto(`file://${file}`, { waitUntil: "load" });
       await fits_phone(page, p.id);
+      // Newest first. Past a month, days fold into months and only the
+      // newest month starts open; a shorter period has no month rows.
+      const months = await page.$$eval("#rows tr.month", (r) => r.map((x) => x.getAttribute("aria-expanded")));
+      if (p.monthly) {
+        assert.ok(months.length >= 3, `${p.id}: one row per month (${months.length})`);
+        assert.deepStrictEqual(months, ["true", ...months.slice(1).map(() => "false")], `${p.id}: only the newest month open`);
+        assert.ok(await page.$("#rows tr.day.in"), `${p.id}: days nested under their month`);
+        if (p.month_edge) {
+          const rows = () => page.$$eval("#rows tr.month", (r) => r.map((x) => [x.dataset.month, x.getAttribute("aria-expanded")]));
+          assert.deepStrictEqual((await rows())[0], ["September 2026", "true"], `${p.id}: newest month in Eastern time`);
+          await page.click('.seg button[data-tz="UTC"]');
+          const utc = await rows();
+          assert.deepStrictEqual(utc.slice(0, 2), [["October 2026", "true"], ["September 2026", "true"]], `${p.id}: open months stay open across a zone change`);
+          await page.click('.seg button[data-tz="America/New_York"]');
+        }
+      } else assert.deepStrictEqual(months, [], `${p.id}: no month rows on a short period`);
       // Exercise the controls: expand every day, pick a slot, flip zone + clock.
       await page.click("#toggleDays");
+      const ids = await page.$$eval("#rows tr.run", (r) => r.map((x) => +x.dataset.s));
+      assert.ok(ids.length && ids.every((t, i) => !i || t < ids[i - 1]), `${p.id}: every slot listed, newest first`);
+      if (p.monthly) {
+        assert.strictEqual(ids.length, p.slots, `${p.id}: expand all opens every month and day`);
+        await page.click("#toggleDays");
+        assert.strictEqual(await page.$$eval("#rows tr.day", (r) => r.length), 0, `${p.id}: collapse all folds the months`);
+        await page.click("#toggleDays");
+      }
       await page.click("#rows tr.run");
       await page.click('.seg button[data-tz="UTC"]');
       await page.click('.seg button[data-clock="12"]');

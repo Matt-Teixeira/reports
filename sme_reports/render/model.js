@@ -107,6 +107,8 @@ const build_render_model = ({
           }
         : null;
 
+  const h1_text = `${identity.system_id} — ${identity.site_name} ${identity.modality || ""}`.trim();
+
   // Narrative first: the page's density tier depends on how much prose the
   // period produced, and the charts' height depends on the tier.
   const overrides = request.narrative_overrides || {};
@@ -123,15 +125,40 @@ const build_render_model = ({
   // runs. Pages whose flowed text exceeds the measured capacity of the
   // normal layout switch to a compact tier (smaller story/card faces,
   // shorter charts) so the worst natural page still clears the footer.
-  // Calibration (Chromium, review F1): normal capacity ≈ 1,600 chars —
-  // 1,577 fit with 35px to spare, 1,648 clipped by 22px. The threshold
-  // sits a safe margin under the cliff; the maximal fixtures in
-  // dev/check_chart.js re-measure both tiers on every run.
-  const COMPACT_AT = 1400;
+  //
+  // The measure counts LINES, in units of story-line characters: the page
+  // grows by whole lines, and two layouts make raw character counts lie.
+  // The story's timeline bullets each start a new line in a column narrower
+  // than the story (beside the timestamps), so a 90-character note costs
+  // two lines; and the three rx cards sit side by side, so the row is as
+  // tall as its TALLEST card, not the sum of all three. Measured in
+  // Chromium on the normal tier: 115 characters per full story line, 88 per
+  // bullet-column line, 33 per card-body line and 24 per (bold, spaced)
+  // card heading; each 115 units is one 16.6px line of footer clearance.
+  // A site name long enough to wrap the title (past ~51 characters) costs
+  // a 28px title line, which the measure adds too.
+  //
+  // Calibrated on 37 real 6-month briefs (Intelas, Nov 2026) laid out on
+  // the normal tier: the worst page clips at ~1,860, the spread above that
+  // being the tiles row (84–110px, as their captions wrap). The threshold
+  // keeps the worst page ~22px clear of the footer. Validated on 147
+  // briefs as shipped (Intelas + Piedmont, 6-month and 7-day, both tiers):
+  // every page clears by ≥27px. The maximal fixtures in dev/check_chart.js
+  // re-measure both tiers on every run.
+  const COMPACT_AT = 1700;
+  const LINE = 115;
   const text_len = (s) => String(s).replace(/<[^>]+>/g, "").length;
+  const lines = (s, per) => Math.ceil(text_len(s) / per);
+  const bullets = story_html.match(/<li>[\s\S]*?<\/li>/g) || [];
+  const story_units =
+    text_len(story_html.replace(/<ul class="tl">[\s\S]*?<\/ul>/, "")) +
+    bullets.reduce((n, li) => n + LINE * lines(li.replace(/<span class="ts">[^<]*<\/span>/, ""), 88), 0);
+  const card_lines = Math.max(0, ...rx_cards.map((c) => lines(c.heading, 24) + lines(c.body, 33)));
+  const title_lines = lines(h1_text, 51);
   const content_len =
-    text_len(story_html) +
-    rx_cards.reduce((n, c) => n + text_len(c.body) + text_len(c.heading), 0) +
+    story_units +
+    LINE * card_lines +
+    195 * (title_lines - 1) +
     (banner ? text_len(banner.text) + text_len(banner.label) : 0);
   const density = content_len > COMPACT_AT ? "compact" : null;
 
@@ -238,7 +265,7 @@ const build_render_model = ({
     views,
     title: `Avante — ${identity.system_id} Magnet Health`,
     analyzed_date: analyzed,
-    h1_text: `${identity.system_id} — ${identity.site_name} ${identity.modality || ""}`.trim(),
+    h1_text,
     // Identity + period only. The capture count lives in foot_source and the
     // analyzed date in the header, so the sub-line no longer repeats them —
     // it leads with the site id, the id a customer files this magnet under.

@@ -6,11 +6,33 @@ const path = require("path");
 
 const { render_timeseries_chart } = require("../render/chart");
 const { pressure_domain, padded_domain } = require("../render/scales");
-const { build_render_model } = require("../render/model");
+const { DateTime } = require("luxon");
+const { build_render_model: build_model } = require("../render/model");
 const { build_page } = require("../render/page");
 const { VENDORS } = require("../vendors");
 const { normalize_request } = require("../request_loader");
 const write_html = require("../output/write_html");
+
+// The story's timeline bullets, parsed back out: [{ label, html, t }], t
+// being the label's start (a baseline label is a day range; "Later" has
+// none). Every model this file builds is held to the bullets' contract —
+// time order, one moment per bullet — so each fixture below checks it.
+const tl_items = (story) =>
+  [...story.matchAll(/<li><span class="ts">([^<]*)<\/span><span>([\s\S]*?)<\/span><\/li>/g)].map(([, label, html]) => {
+    const first = label.split(" – ")[0];
+    const d = DateTime.fromFormat(first, first.includes(":") ? "LLL d HH:mm'Z'" : "LLL d", { zone: "utc" });
+    return { label, html, t: d.isValid ? d.toMillis() : null };
+  });
+const build_render_model = (...args) => {
+  const vm = build_model(...args);
+  if (vm.story_html.includes('<ul class="tl">')) {
+    assert.ok(vm.story_html.includes('<p class="tl-lead"><b>Timeline (UTC):</b> '), "timeline leads with its summary line");
+    const ts = tl_items(vm.story_html).map((i) => i.t).filter((t) => t !== null);
+    assert.ok(ts.length, `timeline bullets parse: ${vm.story_html}`);
+    assert.ok(ts.every((t, i) => !i || t >= ts[i - 1]), `timeline in time order: ${tl_items(vm.story_html).map((i) => i.label).join(" | ")}`);
+  }
+  return vm;
+};
 
 const HOUR = 3600000;
 const DAY = 24 * HOUR;
@@ -158,7 +180,7 @@ const philips_series = [];
     vm.pressure_chart_svg.includes('height="3" fill="#C25E00"'),
     "temp-alarm strip on pressure chart"
   );
-  assert.ok(vm.story_html.includes("the compressor stopped"));
+  assert.ok(vm.story_html.includes("The compressor stopped"));
   assert.strictEqual(vm.rx_cards.length, 3);
   // Short cycling inside one incident (gaps ≤3h, far under the 48h gap
   // threshold) must remain ONE event.
@@ -172,7 +194,7 @@ const philips_series = [];
   assert.ok(!vm.story_html.includes("other compressor stop"), "no other-events sentence");
   assert.ok(vm.pressure_heading_note.includes("orange shade ="), "singular caption");
   const html = build_page(vm);
-  assert.ok(html.includes('<div class="page">'));
+  assert.ok(html.includes(`<div class="page${vm.density ? ` ${vm.density}` : ""}">`));
   write_html(path.join(__dirname, "..", "out"), "dev-synthetic-philips", html);
 }
 
@@ -1267,6 +1289,44 @@ const philips_series = [];
   assert.ok(is_data_issue(rec), "fleet files it as a data issue");
 }
 
+// --- latest readings carry their own channel's time (Codex F1) -----------
+{
+  // A helium channel that stopped reporting six hours before pressure: the
+  // timeline's latest-readings bullet used to stamp both under the pressure
+  // capture, so helium wore a time it was never read at. Each channel now
+  // gets its own bullet unless one capture carries both.
+  const { normalize_philips } = require("../normalize");
+  const raw = [];
+  for (let h = 0; h < 72; h++) {
+    const iso = new Date(Date.UTC(2026, 6, 1, h)).toISOString();
+    raw.push({
+      capture_datetime: iso, host_datetime: iso,
+      monitor_magnet_pressure_value: "29", he_psi_avg_value: "29",
+      helium_level_value: h < 66 ? "76.5" : null,
+      cryo_comp_malf_value: "0", cryo_comp_temp_alarm_state: "0", tech_room_temp_value: "21", quenched_state: "0"
+    });
+  }
+  const model = (rows) =>
+    build_render_model({
+      identity: { system_id: "SME99012", manufacturer: "Philips", modality: "MRI", site_name: "Split Clock Clinic", city: "X", state: "TN", customer_name: "X" },
+      vendor: VENDORS.PHILIPS, series: normalize_philips(rows, VENDORS.PHILIPS), source: "synthetic",
+      request: normalize_request({
+        report_type: "magnet_health", system_id: "SME99012", recipients: ["dev@example.com"],
+        window: { start: "2026-07-01", end: "2026-07-04" }, output: { html: false, pdf: false, email: false }
+      })
+    });
+  const split = tl_items(model(raw).story_html);
+  const he = split.find((i) => i.html.startsWith("Helium "));
+  const p = split.find((i) => i.html.includes("now reads"));
+  assert.strictEqual(he.label, "Jul 3 17:00Z", "helium stamped at its own last capture");
+  assert.strictEqual(p.label, "Jul 3 23:00Z", "pressure stamped at its own last capture");
+  assert.ok(!p.html.includes("Helium"), "no helium value under the pressure time");
+  // One capture carrying both stays one bullet.
+  const together = tl_items(model(raw.map((r) => ({ ...r, helium_level_value: "76.5" }))).story_html);
+  const last = together[together.length - 1];
+  assert.ok(last.html.includes("now reads") && last.html.includes("Helium "), "shared capture: one bullet");
+}
+
 // --- ᶜ provenance on every inferred narrative conclusion (review F4) --------
 {
   // RULES.md §6: mark conclusions, and only conclusions. On a GE without an
@@ -1439,8 +1499,9 @@ const philips_series = [];
   assert.ok(!comp.s.includes("stopped Jul 1 00:00Z"), `boundary is not a start: ${comp.s}`);
   assert.ok(!comp.s.includes("every reading"), comp.s);
   assert.ok(vm.story_html.includes("already off when the data begins"), "story states the truncation");
-  assert.ok(vm.story_html.includes("first seen running Jul 1 05:00Z"), "observed ON is stated");
-  assert.ok(vm.story_html.includes("stopped again Jul 1 10:00Z"), "observed trailing stop is stated");
+  const bullet = (story, label) => (tl_items(story).find((i) => i.label === label) || { html: "" }).html;
+  assert.ok(bullet(vm.story_html, "Jul 1 05:00Z").startsWith("First seen running"), "observed ON is stated");
+  assert.ok(bullet(vm.story_html, "Jul 1 10:00Z").includes("Stopped again"), "observed trailing stop is stated");
   assert.ok(!vm.story_html.includes("at every reading"), "no categorical claim");
   assert.ok(!vm.story_html.includes("entire period"), "no entire-period claim");
   assert.ok(!vm.story_html.includes("No compressor signal"), "a signal that changed state is not dead");
@@ -1453,7 +1514,7 @@ const philips_series = [];
   const qvm = build_render_model({ identity, vendor: VENDORS.PHILIPS, series: rows_for(true), source: "synthetic", request });
   assert.ok(qvm.tiles[0].s.includes("already off at first reading"), qvm.tiles[0].s);
   assert.ok(!qvm.story_html.includes("at every reading"), "quench page carries no categorical claim");
-  assert.ok(qvm.story_html.includes("stopped again Jul 1 10:00Z"), "quench page keeps the observed anchor");
+  assert.ok(bullet(qvm.story_html, "Jul 1 10:00Z").includes("Stopped again"), "quench page keeps the observed anchor");
   // Scanner-reported source: the truncated-start conclusions carry no ᶜ
   // (review round-4 F2 counterexample).
   assert.ok(!vm.story_html.includes("ᶜ"), "scanner-reported truncation is unmarked");
@@ -1532,8 +1593,9 @@ const philips_series = [];
   assert.strictEqual(vm.facts.compressor_start_truncated, true);
   assert.strictEqual(vm.tiles[0].v, "OFFᶜ", "inferred tile keeps its mark");
   assert.ok(vm.story_html.includes("already off when the data beginsᶜ"), "truncation conclusion is marked");
-  assert.ok(vm.story_html.includes("first seen running Jul 1 05:00Zᶜ"), "the intervening ON conclusion is marked");
-  assert.ok(vm.story_html.includes("stopped again Jul 1 10:00Zᶜ"), "the trailing stop conclusion is marked");
+  const bullet_at = (label) => (tl_items(vm.story_html).find((i) => i.label === label) || { html: "" }).html;
+  assert.ok(bullet_at("Jul 1 05:00Z").startsWith("First seen runningᶜ"), "the intervening ON conclusion is marked");
+  assert.ok(bullet_at("Jul 1 10:00Z").includes("Stopped againᶜ"), "the trailing stop conclusion is marked");
 }
 
 // --- stale NOW and single-channel ‡ without a conviction --------------------

@@ -25,21 +25,37 @@ const comp_via = (facts) =>
       : "";
 const comp_c = (facts) => (is_inferred(facts.compressor_source) ? "ᶜ" : "");
 
+// The story is a lead line — "Timeline (UTC)" and what the period amounts
+// to — then one bullet per moment, timestamp → note, in time order. The
+// timestamp moves out of the sentence into its own column, so a reader
+// scans the left edge for WHEN and reads across for WHAT; sorting by time
+// means a peak that came after the recovery is listed after it, where the
+// prose used to narrate it before.
+//
+// Each builder below returns an entry { t, label, html } or null; label
+// defaults to the timestamp.
+const entry = (t, html, label = fmt.ts(t)) => (html ? { t, label, html } : null);
+
 // Single-reading dropouts with no thermal response are reported as probable
-// sensor flickers, not treated as true compressor stops.
-const flicker_sentence = (facts) => {
+// sensor flickers, not treated as true compressor stops. One entry at the
+// first; the rest ride along in its note.
+const flicker_entry = (facts) => {
   const fl = facts.compressor_flickers;
-  if (!fl) return "";
-  const listed = fl.times.slice(0, 3).map(fmt.ts).join(", ");
+  if (!fl) return null;
+  const rest = fl.times.slice(1, 3).map(fmt.ts).join(", ");
   const more = fl.times.length > 3 ? `, +${fl.times.length - 3} more` : "";
-  return ` The compressor signal dropped for a single reading ${fl.count === 1 ? "once" : `${fl.count} times`} (${listed}${more}) with no ${p_name(facts).toLowerCase()} response — <b>likely sensor flicker${fl.count === 1 ? "" : "s"}${comp_c(facts)}, not true stops</b>.`;
+  const also = fl.count > 1 ? ` (${fl.count} times: also ${rest}${more})` : "";
+  return entry(
+    fl.times[0],
+    `The compressor signal dropped for a single reading${also} with no ${p_name(facts).toLowerCase()} response — <b>likely sensor flicker${fl.count === 1 ? "" : "s"}${comp_c(facts)}, not true stops</b>.`
+  );
 };
 
 // When clustering yields multiple events, the timeline narrates the primary
-// one; the rest get a single summary sentence so total downtime stays honest.
-// The primary is whichever event is ongoing, else the longest — which is not
-// necessarily the worst, so this deliberately does not call it the most
-// significant.
+// one; the rest get a single summary sentence in the lead so total downtime
+// stays honest. The primary is whichever event is ongoing, else the longest
+// — which is not necessarily the worst, so this deliberately does not call
+// it the most significant.
 const other_events_sentence = (facts) => {
   const evs = facts.compressor_events || [];
   if (evs.length <= 1) return "";
@@ -50,10 +66,10 @@ const other_events_sentence = (facts) => {
   const listed = others.slice(0, 4).map((e) => fmt.day(e.start)).join(", ");
   const days =
     others.length > 4 ? `${listed}, +${others.length - 4} more` : listed;
-  return ` <b>${others.length} other compressor stop event${others.length === 1 ? "" : "s"}${comp_c(facts)}</b> occurred this period (${days}; ${fmt.hours(total)} off in total) — the timeline above covers the primary event, and the others are summarized here.`;
+  return ` <b>${others.length} other compressor stop event${others.length === 1 ? "" : "s"}${comp_c(facts)}</b> occurred this period (${days}; ${fmt.hours(total)} off in total) — the timeline below covers the primary event.`;
 };
 
-const baseline_sentence = (facts) => {
+const baseline_entry = (facts) => {
   const p = facts.pressure;
   const he = facts.helium;
   const ev = facts.compressor_event;
@@ -80,14 +96,17 @@ const baseline_sentence = (facts) => {
     facts.coldhead_baseline_max < facts.vendor.coldhead.warm_k
   )
     parts.push(`coldhead at base temperature`);
-  return parts.length
-    ? `<b>Baseline ${fmt.day(facts.window_start)} – ${fmt.day(ev ? ev.start : facts.window_end)}${qualified ? " (outside other event spans)" : ""}:</b> ${parts.join(", ")}.`
-    : "";
+  if (!parts.length) return null;
+  return entry(
+    facts.window_start,
+    `<b>Baseline${qualified ? " (outside other event spans)" : ""}:</b> ${parts.join(", ")}.`,
+    `${fmt.day(facts.window_start)} – ${fmt.day(ev ? ev.start : facts.window_end)}`
+  );
 };
 
-const peak_sentence = (facts) => {
+const peak_entry = (facts) => {
   const p = facts.pressure;
-  if (!p || thr(facts) === null) return "";
+  if (!p || thr(facts) === null) return null;
   const over = p.peak.v - thr(facts);
   const vs =
     over >= 0
@@ -103,7 +122,7 @@ const peak_sentence = (facts) => {
     p.baseline_value === null
       ? `${p_name(facts)} reached a`
       : `${p_name(facts)} rose from ${p_fmt(facts, p.baseline_value)} to a`;
-  return `${from} <b>peak of ${p_fmt(facts, p.peak.v)} ${units(facts)} at ${fmt.ts(p.peak.t)}</b> — ${vs}${rate}.`;
+  return entry(p.peak.t, `${from} <b>peak of ${p_fmt(facts, p.peak.v)} ${units(facts)}</b> — ${vs}${rate}.`);
 };
 
 const helium_sentence = (facts) => {
@@ -129,19 +148,33 @@ const now_sentence = (facts) => {
         : p.last.v <= facts.thr.high_lt
           ? `below the ${band} band`
           : `within the ${band} band`;
-    return `${p_name(facts)} now reads ${p_fmt(facts, p.last.v)} ${units(facts)} (${fmt.ts(p.last.t)}) — ${state}.`;
+    return `${p_name(facts)} now reads ${p_fmt(facts, p.last.v)} ${units(facts)} — ${state}.`;
   }
   const over = p.last.v - thr(facts);
   const vs =
     over >= 0
       ? `still ${p_fmt(facts, over)} ${units(facts)} over the line`
       : `${Math.round((p.last.v / thr(facts)) * 100)}% of the line`;
-  return `${p_name(facts)} now reads ${p_fmt(facts, p.last.v)} ${units(facts)} (${fmt.ts(p.last.t)}) — ${vs}.`;
+  return `${p_name(facts)} now reads ${p_fmt(facts, p.last.v)} ${units(facts)} — ${vs}.`;
 };
 
-const alarm_sentence = (facts) => {
+// The latest readings close the timeline, each stamped with its own
+// channel's last capture: one bullet when the primary metric and helium
+// were last read together (the usual case — one row carries both), two
+// when they were not, so a helium value never wears a pressure reading's
+// time.
+const now_entries = (facts) => {
+  const p = now_sentence(facts);
+  const he = helium_sentence(facts);
+  const pt = p ? facts.pressure.last.t : null;
+  const ht = he ? facts.helium.last.t : null;
+  if (p && he && pt === ht) return [entry(pt, `${p} ${he}`)];
+  return [p ? entry(pt, p) : null, he ? entry(ht, he) : null];
+};
+
+const alarm_entry = (facts) => {
   const ta = facts.temp_alarm;
-  if (!ta) return "";
+  if (!ta) return null;
   const retrigger =
     ta.runs > 1
       ? ` — not continuous, it re-triggered ${ta.runs - 1} ${ta.runs - 1 === 1 ? "time" : "times"}`
@@ -156,26 +189,42 @@ const alarm_sentence = (facts) => {
     facts.edu && facts.edu.alarm_room_temp
       ? ` Room temperature held ${fmt.num(facts.edu.alarm_room_temp.min.v, 1)}–${fmt.num(facts.edu.alarm_room_temp.max.v, 1)} °F while the alarm was active.`
       : "";
-  return ` A compressor temperature alarm was triggered ${fmt.ts(ta.start)} → ${fmt.ts(ta.end)} (${ta.count} readings${peak_min}${retrigger}; amber strip on the pressure chart).${room}`;
+  return entry(
+    ta.start,
+    `A compressor temperature alarm was triggered, active through ${fmt.ts(ta.end)} (${ta.count} readings${peak_min}${retrigger}; amber strip on the pressure chart).${room}`
+  );
 };
+
+const readings_off = (ev) => `${ev.off_count} reading${ev.off_count === 1 ? "" : "s"} off`;
+
+// The first compressor reading, on the left-censored stories: the stop was
+// already underway when coverage began.
+const first_reading_entry = (facts, html) =>
+  entry(facts.compressor_first_stateful_t, html);
 
 const STORIES = {
   compressor_stop_recovered: (f) => {
     const ev = f.compressor_event;
     const cycles =
       ev.cycles > 1
-        ? ` and then cycled on/off${comp_c(f)} ${ev.cycles} times through ${fmt.ts(ev.end)} (${ev.off_count} readings off)`
-        : ` and stayed off ${fmt.hours(ev.off_hours)} (${ev.off_count} readings off)`;
+        ? ` and then cycled on/off${comp_c(f)} ${ev.cycles} times through ${fmt.ts(ev.end)} (${readings_off(ev)})`
+        : ` and stayed off ${fmt.hours(ev.off_hours)} (${readings_off(ev)})`;
     // "has held since" is only true when no other event postdates this one.
     const later = (f.compressor_events || []).some(
       (e) => e !== ev && e.start > ev.end
     );
-    return (
-      `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
-      `<b>${fmt.ts(ev.start)}: the compressor stopped${comp_c(f)}</b>${comp_via(f)}${cycles}.${alarm_sentence(f)} ` +
-      `${peak_sentence(f)} <b>The compressor recovered${comp_c(f)} ${fmt.ts(ev.end)}</b>${later ? "" : " and has held since"}.` +
-      `${other_events_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
-    );
+    return {
+      lead: `The compressor stopped${comp_c(f)} and recovered.${other_events_sentence(f)}`,
+      entries: [
+        baseline_entry(f),
+        entry(ev.start, `<b>The compressor stopped${comp_c(f)}</b>${comp_via(f)}${cycles}.`),
+        alarm_entry(f),
+        peak_entry(f),
+        entry(ev.end, `<b>The compressor recovered${comp_c(f)}</b>${later ? "" : " and has held since"}.`),
+        flicker_entry(f),
+        ...now_entries(f)
+      ]
+    };
   },
   compressor_stop_ongoing: (f) => {
     const ev = f.compressor_event;
@@ -184,19 +233,27 @@ const STORIES = {
     // an hour count. A corroborated all-period stop is a real but finished
     // state; a dead signal is a monitoring problem wearing a stop's clothes.
     if (f.offline_kind === "warm")
-      return (
-        `<b>Timeline (UTC):</b> <b>The compressor was off the entire periodᶜ</b>${comp_via(f)} — ` +
-        `already off at the first compressor reading (${fmt.ts(f.compressor_first_stateful_t)}), so its true start and total downtime are unknown. ` +
-        `The magnet's own readings corroborate the stopᶜ. ` +
-        `${peak_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
-      );
+      return {
+        lead:
+          `<b>The compressor was off the entire periodᶜ</b>${comp_via(f)} — its true start and total downtime are unknown. ` +
+          `The magnet's own readings corroborate the stopᶜ.`,
+        entries: [
+          first_reading_entry(f, `Already off at the first compressor reading.`),
+          peak_entry(f),
+          ...now_entries(f)
+        ]
+      };
     if (f.offline_kind === "no_signal")
-      return (
-        `<b>Timeline (UTC):</b> <b>No compressor signalᶜ</b>${comp_via(f)} — ` +
-        `the channel has read "off" since before the period began (first reading ${fmt.ts(f.compressor_first_stateful_t)}), with no thermal response from the magnet — ` +
-        `the signal, not the compressor, is the likely faultᶜ. Compressor downtime is not reported. ` +
-        `${baseline_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
-      );
+      return {
+        lead:
+          `<b>No compressor signalᶜ</b>${comp_via(f)} — the channel has read "off" since before the period began, with no thermal response from the magnet — ` +
+          `the signal, not the compressor, is the likely faultᶜ. Compressor downtime is not reported.`,
+        entries: [
+          baseline_entry(f),
+          first_reading_entry(f, `First compressor reading, already "off".`),
+          ...now_entries(f)
+        ]
+      };
     // Left-censored with the overlay verdict suppressed (quench or suspect
     // precedence): the stop was never observed starting, so the story must
     // not invent the period boundary as its start, claim a downtime total,
@@ -205,40 +262,69 @@ const STORIES = {
     // and "every reading" is only claimed when left_censored guarantees no
     // ON reading exists.
     if (f.left_censored)
-      return (
-        `<b>Timeline (UTC):</b> <b>The compressor read OFF at every reading this period${comp_c(f)}</b>${comp_via(f)} — ` +
-        `already off at the first compressor reading (${fmt.ts(f.compressor_first_stateful_t)}), so its true start and total downtime are unknown. ` +
-        `${peak_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
-      );
+      return {
+        lead: `<b>The compressor read OFF at every reading this period${comp_c(f)}</b>${comp_via(f)} — its true start and total downtime are unknown.`,
+        entries: [
+          first_reading_entry(f, `Already off at the first compressor reading.`),
+          peak_entry(f),
+          ...now_entries(f)
+        ]
+      };
     // Start-truncated (review round-3 F1): the event's first off-run was
     // underway when coverage began, but the compressor was later seen
     // running and stopped again. The observed trailing stop anchors the
     // story; the initial run's start and earlier downtime stay unclaimed.
     if (f.compressor_start_truncated)
-      return (
-        `<b>Timeline (UTC):</b> <b>The compressor was already off when the data begins${comp_c(f)}</b>${comp_via(f)} — ` +
-        `that initial stop predates the period, so its start and earlier downtime are unknown. ` +
-        `It was first seen running ${fmt.ts(f.compressor_first_on_t)}${comp_c(f)}, then <b>stopped again ${ev.last_stop_t != null ? fmt.ts(ev.last_stop_t) : "later in the period"}${comp_c(f)} and has not recovered</b> — ` +
-        `off ${fmt.hours(ev.off_hours)} observed across ${ev.cycles} off-runs (${ev.off_count} readings off).${alarm_sentence(f)} ` +
-        `${peak_sentence(f)}${other_events_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)} ` +
-        `<b>Warming event OPEN at end of data.</b>`
-      );
-    return (
-      `<b>Timeline (UTC):</b> ${baseline_sentence(f)} ` +
-      `<b>${fmt.ts(ev.start)}: the compressor stopped${comp_c(f)} and has not recovered</b>${comp_via(f)} — off ${fmt.hours(ev.off_hours)} at the last capture (${ev.off_count} readings off).${alarm_sentence(f)} ` +
-      `${peak_sentence(f)}${other_events_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)} ` +
-      `<b>Warming event OPEN at end of data.</b>`
-    );
+      return {
+        lead:
+          `<b>The compressor was already off when the data begins${comp_c(f)}</b>${comp_via(f)} — ` +
+          `that initial stop predates the period, so its start and earlier downtime are unknown. ` +
+          `<b>Warming event OPEN at end of data.</b>${other_events_sentence(f)}`,
+        entries: [
+          entry(f.compressor_first_on_t, `First seen running${comp_c(f)}.`),
+          ev.last_stop_t != null
+            ? entry(ev.last_stop_t, `<b>Stopped again${comp_c(f)} and has not recovered</b> — off ${fmt.hours(ev.off_hours)} observed across ${ev.cycles} off-runs (${readings_off(ev)}).`)
+            : entry(f.compressor_first_on_t + 1, `<b>Stopped again${comp_c(f)} later in the period and has not recovered</b> — off ${fmt.hours(ev.off_hours)} observed across ${ev.cycles} off-runs (${readings_off(ev)}).`, "Later"),
+          alarm_entry(f),
+          peak_entry(f),
+          ...now_entries(f)
+        ]
+      };
+    return {
+      lead: `<b>Warming event OPEN at end of data.</b>${other_events_sentence(f)}`,
+      entries: [
+        baseline_entry(f),
+        entry(ev.start, `<b>The compressor stopped${comp_c(f)} and has not recovered</b>${comp_via(f)} — off ${fmt.hours(ev.off_hours)} at the last capture (${readings_off(ev)}).`),
+        alarm_entry(f),
+        peak_entry(f),
+        ...now_entries(f)
+      ]
+    };
   },
-  threshold_exceeded: (f) =>
-    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop${comp_c(f)} was detected this period, but ` +
-    `${peak_sentence(f)}${alarm_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`,
-  pressure_rising: (f) =>
-    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor stop${comp_c(f)} and no threshold breach this period, but ${p_name(f).toLowerCase()} is trending up: ` +
-    `${peak_sentence(f)}${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`,
-  stable_healthy: (f) =>
-    `<b>Timeline (UTC):</b> ${baseline_sentence(f)} No compressor events${comp_c(f)}, alarms, or threshold breaches detected across ` +
-    `${fmt.count(f.counts.captures)} captures.${flicker_sentence(f)} ${helium_sentence(f)} ${now_sentence(f)}`
+  threshold_exceeded: (f) => ({
+    lead: `No compressor stop${comp_c(f)} was detected this period, but ${p_name(f).toLowerCase()} crossed its alert line.`,
+    entries: [baseline_entry(f), alarm_entry(f), peak_entry(f), flicker_entry(f), ...now_entries(f)]
+  }),
+  pressure_rising: (f) => ({
+    lead: `No compressor stop${comp_c(f)} and no threshold breach this period, but ${p_name(f).toLowerCase()} is trending up.`,
+    entries: [baseline_entry(f), peak_entry(f), flicker_entry(f), ...now_entries(f)]
+  }),
+  stable_healthy: (f) => ({
+    lead: `No compressor events${comp_c(f)}, alarms, or threshold breaches detected across ${fmt.count(f.counts.captures)} captures.`,
+    entries: [baseline_entry(f), flicker_entry(f), ...now_entries(f)]
+  })
+};
+
+// Stable sort: entries sharing a timestamp keep the order the story lists
+// them in (a stop before the alarm it triggered).
+const timeline_html = ({ lead, entries }) => {
+  const items = entries.filter(Boolean).sort((a, b) => a.t - b.t);
+  return (
+    `<p class="tl-lead"><b>Timeline (UTC):</b> ${lead}</p>` +
+    (items.length
+      ? `<ul class="tl">${items.map((e) => `<li><span class="ts">${e.label}</span><span>${e.html}</span></li>`).join("")}</ul>`
+      : "")
+  );
 };
 
 const build_cards = (f) => {
@@ -403,7 +489,7 @@ const build_narrative = (facts) => {
       `no narrative story registered for archetype "${facts.archetype}"`
     );
   return {
-    story_html: suspect_lead(facts) + story(facts),
+    story_html: suspect_lead(facts) + timeline_html(story(facts)),
     rx_cards: build_cards(facts)
   };
 };

@@ -34,11 +34,13 @@ const logo_attachment = () => ({
 });
 
 // Wraps body content in the branded shell: logo header, gradient band,
-// content area, navy footer bar. 640px centered, fluid below that.
+// content area, navy footer bar. 800px centered, fluid below that — wide
+// enough that a site name and its condition share one line in the status
+// table (email_status.js).
 const wrap_email = ({ title, date, body_html }) => `
 <div style="${FONT}background-color:#f4f6f8;padding:16px 8px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
-<table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:100%;background-color:#ffffff;" bgcolor="#ffffff">
+<table role="presentation" width="800" cellpadding="0" cellspacing="0" border="0" style="width:800px;max-width:100%;background-color:#ffffff;" bgcolor="#ffffff">
   <tr>
     <td style="padding:20px 24px 12px 24px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>

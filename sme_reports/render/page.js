@@ -24,6 +24,10 @@ h1 { font-size: 17.5pt; color: #002B43; } .sub { font-size: 10.5pt; color: #5758
 h2 { font-size: 10pt; letter-spacing: .1em; color: #004E79; margin: .18in 0 .04in; }
 .story { margin-top: .16in; background: #EBF0F5; border-radius: .12in; padding: .12in .15in; font-size: 9.6pt; line-height: 1.5; }
 .story b { color: #002B43; }
+.story ul.tl { list-style: none; margin-top: .04in; }
+.story ul.tl li { display: flex; gap: .1in; }
+.story ul.tl li + li { margin-top: .015in; }
+.story .ts { flex: 0 0 1.05in; font-weight: 700; color: #004E79; white-space: nowrap; }
 .rx { margin-top: .12in; display: flex; gap: .1in; }
 .rx .card { flex: 1; border-radius: .1in; padding: .09in .12in; font-size: 8.8pt; line-height: 1.45; border: 1.5px solid #97C6E9; }
 .rx .card b { color: #004E79; display: block; font-size: 8pt; letter-spacing: .08em; margin-bottom: .02in; }
@@ -49,6 +53,7 @@ const COMPACT_CSS = `.page.compact .band{margin:.07in 0 .12in}
 .page.compact .banner{font-size:8pt;line-height:1.35;padding:.05in .1in;margin-top:.08in}
 .page.compact h2{margin:.07in 0 .015in}
 .page.compact .story{font-size:8.3pt;line-height:1.3;margin-top:.06in;padding:.09in .12in}
+.page.compact .story .ts{flex-basis:.95in}
 .page.compact .rx{margin-top:.06in}
 .page.compact .rx .card{font-size:7.7pt;line-height:1.34;padding:.05in .08in}`;
 

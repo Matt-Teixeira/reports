@@ -1218,6 +1218,52 @@ const rec = (over = {}) => ({
   }
 }
 
+// --- email status block: grouped by what the reader has to do -------------
+// The summary and batch emails share one block (output/email_status.js):
+// FLAGGED is a full table of everything worth a look — attention, urgent,
+// data issues, and systems with no report — and the healthy and limited
+// systems follow as two-up grids under headings that carry their label.
+{
+  const { status_html } = require("../output/email_status");
+  const rec = (system_id, summary) => ({
+    system_id, site_name: `Site ${system_id}`, manufacturer: "GE", modality: "MRI",
+    archetype: summary.archetype, summary
+  });
+  const html = status_html(
+    [
+      rec("SME00001", { archetype: "stable_healthy" }),
+      rec("SME00002", { archetype: "pressure_rising" }),
+      rec("SME00003", { archetype: "stable_healthy", quenched: true }),
+      rec("SME00004", { archetype: "compressor_stop_ongoing", offline_kind: "no_signal" }),
+      rec("SME00005", { assessment_status: "limited_coverage" }),
+      rec("SME00006", { archetype: "stable_healthy" }),
+      rec("SME00007", { archetype: "stable_healthy" }),
+      // Codex F2: outside the vocabulary — flagged as unclassified, never healthy.
+      rec("SME00009", { archetype: "probe_stuck" }),
+      rec("SME00010", {})
+    ],
+    { failures: [{ system_id: "SME00008", message: "raw <db> error" }], reason_of: () => "no data" }
+  );
+  const at = (s) => html.indexOf(s);
+  const [flagged, stable, limited] = ["FLAGGED", "STABLE / HEALTHY", "LIMITED COVERAGE"].map(at);
+  assert.ok(flagged >= 0 && flagged < stable && stable < limited, "groups in order: flagged, stable, limited");
+  assert.ok(/FLAGGED <span[^>]*>· 6</.test(html), "flagged counts attention + quench + data issue + unclassified + no report");
+  for (const id of ["SME00002", "SME00003", "SME00004", "SME00009", "SME00010", "SME00008"])
+    assert.ok(at(id) > flagged && at(id) < stable, `${id} is flagged`);
+  assert.strictEqual((html.match(/not classified/g) || []).length, 2, "an unknown or missing archetype is stated as unclassified");
+  assert.ok(!html.includes("undefined"), "a missing archetype never renders as 'undefined'");
+  assert.ok(at("SME00003") < at("SME00002"), "a quench sorts ahead of a rising pressure");
+  for (const id of ["SME00001", "SME00006", "SME00007"])
+    assert.ok(at(id) > stable && at(id) < limited, `${id} is in the stable grid`);
+  assert.ok(at("SME00005") > limited, "limited coverage gets its own group");
+  assert.ok(html.includes("no report") && html.includes("no data") && !html.includes("raw"), "a failure states the audience's reason");
+  // Three stable systems: two rows, the odd cell padded so the rule spans.
+  const grid = html.slice(stable, limited);
+  assert.strictEqual((grid.match(/<tr>/g) || []).length, 2, "two-up grid");
+  assert.ok(grid.includes("&nbsp;</td></tr>"), "odd cell padded");
+  assert.strictEqual(status_html([rec("SME00001", { archetype: "stable_healthy" })]).includes("FLAGGED"), false, "no empty flagged table");
+}
+
 // --- limited-coverage records are stated, never judged (phases 10-13) -------
 {
   const { build_limited_record } = require("../compute/summary_facts");
