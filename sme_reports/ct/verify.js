@@ -18,7 +18,8 @@
 //      gauges, tube counter, segments, panels, labels and findings;
 //   3. findings: every finding the page shows (all systems), field by field
 //      (status, severity, windows, observed, baseline, trip days, the
-//      abort-rate / prep trip numbers, catalog text), and their order;
+//      abort-rate / prep trip numbers, catalog text, and the stored evidence
+//      exactly as stored), and their order;
 //   4. rules: on every day an abort_rate_high or prep_noncompliance finding
 //      trips (evidence first and last), the SQL value, the model function
 //      and the stored rule evidence agree.
@@ -29,6 +30,8 @@
 // observed, baseline, trip days) are recomputed by hhm_rpp_ge
 // `cli.js verify-findings`; this file checks the page carries them
 // faithfully, and recomputes the trip numbers the fleet columns share.
+// The rest of the stored evidence (weekly counts, code lists, ...) is
+// shown as stored and labelled so; it is compared, not recomputed.
 // Zero differences is a pass (exit 0); anything else exits 1.
 //
 // Where the SQL returns double precision (gauge values, the tube counter),
@@ -399,7 +402,7 @@ function check_panels(model, q, as_of, systems) {
 // Every GE CT finding, in the page's order: open first (highest severity
 // first, newest opened first), then resolved (newest resolved first).
 const FINDINGS_SQL = `
-SELECT system_id, finding_key, label, category, description, customer_visible, status, severity,
+SELECT system_id, finding_key, label, category, description, customer_visible, status, severity, evidence,
   opened_at, resolved_at, to_char(data_through, 'YYYY-MM-DD') AS data_through, window_start, window_end, observed, baseline,
   evidence ->> 'opened_day' AS opened_day, evidence ->> 'last_trip_day' AS last_trip_day, (evidence ->> 'trip_days')::int AS trip_days,
   (finding_key IN ('abort_rate_high', 'prep_noncompliance') AND evidence ? 'first' AND evidence ? 'last') AS has_trip,
@@ -422,7 +425,8 @@ function expected_finding(r) {
     status: r.status, severity: r.severity, opened_at: msOf(r.opened_at), resolved_at: msOf(r.resolved_at), data_through: r.data_through,
     window_start: msOf(r.window_start), window_end: msOf(r.window_end), observed: r.observed, baseline: r.baseline,
     opened_day: r.opened_day, last_trip_day: r.last_trip_day, trip_days: r.trip_days,
-    trip: r.has_trip ? { first: trip("f"), last: trip("l") } : null
+    trip: r.has_trip ? { first: trip("f"), last: trip("l") } : null,
+    evidence: r.evidence
   };
 }
 

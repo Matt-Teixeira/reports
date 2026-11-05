@@ -11,6 +11,7 @@
     "report:customer-briefs": "node sme_reports/oneoff/cli.js customer-briefs",
     "report:fleet": "node sme_reports/oneoff/cli.js fleet",
     "report:list": "node sme_reports/oneoff/cli.js --list",
+    "report:ct": "node sme_reports/ct/cli.js",
     "check:oneoff": "node sme_reports/dev/check_oneoff.js",
     "check:scope": "node sme_reports/dev/check_scope.js",
     "check:config": "node sme_reports/dev/check_config.js",

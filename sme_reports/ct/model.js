@@ -36,6 +36,8 @@ const DAY_MS = 864e5;
 const dnum = (s) => Math.round(Date.parse(`${String(s).slice(0, 10)}T00:00:00Z`) / DAY_MS);
 const dstr = (n) => new Date(n * DAY_MS).toISOString().slice(0, 10);
 const ms = (t) => (t === null || t === undefined ? null : t instanceof Date ? t.getTime() : Date.parse(t));
+// a real calendar day 'YYYY-MM-DD' (Date.parse turns 2026-02-31 into Mar 3)
+const valid_day = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "") && dstr(dnum(s)) === s;
 const pct = (a, b) => (b > 0 ? Math.round((10000 * a) / b) / 100 : null); // the rules' pct()
 const r2 = (x) => (x === null ? null : Math.round(100 * x) / 100);
 const r3 = (x) => (x === null || x === undefined ? null : Math.round(1000 * Number(x)) / 1000);
@@ -304,8 +306,8 @@ function system_view(ix, catalog) {
 
 // raw: the ct/data.js datasets. as_of: 'YYYY-MM-DD'.
 function build_model(raw, { as_of }) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(as_of || "")) throw new Error(`build_model: bad as_of ${as_of}`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw.snapshot_day || "")) throw new Error("build_model: raw.snapshot_day is required");
+  if (!valid_day(as_of)) throw new Error(`build_model: bad as_of ${as_of}`);
+  if (!valid_day(raw.snapshot_day)) throw new Error("build_model: raw.snapshot_day is required");
   if (as_of < raw.snapshot_day) {
     throw new Error(`build_model: as_of ${as_of} is before the snapshot day ${raw.snapshot_day}; findings and tube segments are current state, so historical builds are not supported`);
   }
@@ -345,17 +347,17 @@ function build_model(raw, { as_of }) {
   return { as_of, snapshot_day: raw.snapshot_day, periods: PERIODS, default_period: DEFAULT_PERIOD, reporting, not_reporting, views, inventory: raw.inventory };
 }
 
-// What the page shows of a finding (review PHASE6-VERIFY F2): only values an
-// independent check covers.
+// What the page shows of a finding (review PHASE6-VERIFY F2; user decision
+// 2026-11-05: show the stored evidence, labelled as such, per §16.2 item 6):
 //   - status, severity, windows, data_through, observed, baseline, opened /
 //     last trip day and trip days: recomputed by hhm_rpp_ge
 //     `cli.js verify-findings` (independent SQL, Phases 4-5);
 //   - trip: the abort-rate / prep numbers on the first and last trip day,
 //     recomputed by ct/verify.js (rules check);
-//   - label, category, description, customer_visible: the findings catalog.
-// The rest of the stored evidence (weekly rotor counts, code lists, boot
-// times, ...) is not recomputed anywhere, so it is not carried; the panels
-// show the verified series behind it.
+//   - label, category, description, customer_visible: the findings catalog;
+//   - evidence: the rule's stored evidence as is (thresholds, weekly counts,
+//     codes, ...). Not recomputed; ct/verify.js checks the page carries
+//     exactly what is stored, and the page labels it "stored rule evidence".
 const TRIP_FIELDS = {
   abort_rate_high: (e) => ({ day: e.day, aborts: e.d28.aborts, exams: e.d28.exams, per_100: e.d28.per_100 }),
   prep_noncompliance: (e) => ({ day: e.day, scan_days: e.scan_days, without_fast_cal: e.scan_days_without_fast_cal, share: e.observed })
@@ -367,7 +369,8 @@ function finding_view(f) {
     status: f.status, severity: f.severity, opened_at: ms(f.opened_at), resolved_at: ms(f.resolved_at), data_through: f.data_through,
     window_start: ms(f.window_start), window_end: ms(f.window_end), observed: num(f.observed), baseline: num(f.baseline),
     opened_day: ev.opened_day ?? null, last_trip_day: ev.last_trip_day ?? null, trip_days: ev.trip_days ?? null,
-    trip: trip && ev.first && ev.last ? { first: trip(ev.first), last: trip(ev.last) } : null
+    trip: trip && ev.first && ev.last ? { first: trip(ev.first), last: trip(ev.last) } : null,
+    evidence: f.evidence ?? null
   };
 }
 
@@ -381,5 +384,5 @@ function finding_order(a, b) {
 
 module.exports = {
   build_model, index_system, abort_28d, prep_14d, exams_30d, mas_30d, mas_increments, heatmap, open_findings, local_day_of,
-  finding_view, dnum, dstr, pct, PERIODS, PANELS, EVENT_SERIES, GAUGE_VALUES, FAST_CAL_STEPS, WARMUP_STEPS, STALE_DAYS, SEVERITIES
+  finding_view, valid_day, dnum, dstr, pct, PERIODS, PANELS, EVENT_SERIES, GAUGE_VALUES, FAST_CAL_STEPS, WARMUP_STEPS, STALE_DAYS, SEVERITIES
 };
