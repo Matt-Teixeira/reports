@@ -61,20 +61,24 @@ const SQL = {
 
 const TX_MODE = new pgp.txMode.TransactionMode({ tiLevel: pgp.txMode.isolationLevel.repeatableRead, readOnly: true });
 
+// Reads every dataset inside an open transaction t (ct/verify.js reads its
+// independent SQL in the same snapshot).
 // systems: optional list of system ids (fixtures, verification); null = all.
 // Returns { snapshot_at, snapshot_day (its UTC date), summary, days, daily, exams, tube, findings,
 //           capabilities, boots, identity, inventory }.
-const load_ct = (db, { systems = null } = {}) =>
-  db.tx({ mode: TX_MODE }, async (t) => {
-    const p = systems ? [systems] : [];
-    const snap = await t.one("SELECT now() AS t, to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day");
-    const out = { snapshot_at: snap.t, snapshot_day: snap.day };
-    for (const k of ["summary", "days", "daily", "exams", "tube", "findings", "capabilities", "boots"]) out[k] = await t.any(SQL[k](systems), p);
-    const ids = out.summary.map((r) => r.system_id);
-    out.identity = await t.any(SQL.identity, [ids]);
-    // the inventory footer is fleet-wide only
-    out.inventory = systems ? [] : await t.any(SQL.inventory, [ids]);
-    return out;
-  });
+const read_ct = async (t, { systems = null } = {}) => {
+  const p = systems ? [systems] : [];
+  const snap = await t.one("SELECT now() AS t, to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day");
+  const out = { snapshot_at: snap.t, snapshot_day: snap.day };
+  for (const k of ["summary", "days", "daily", "exams", "tube", "findings", "capabilities", "boots"]) out[k] = await t.any(SQL[k](systems), p);
+  const ids = out.summary.map((r) => r.system_id);
+  out.identity = await t.any(SQL.identity, [ids]);
+  // the inventory footer is fleet-wide only
+  out.inventory = systems ? [] : await t.any(SQL.inventory, [ids]);
+  return out;
+};
 
-module.exports = { load_ct, SQL };
+// One read-only REPEATABLE READ transaction.
+const load_ct = (db, opts = {}) => db.tx({ mode: TX_MODE }, (t) => read_ct(t, opts));
+
+module.exports = { load_ct, read_ct, TX_MODE, SQL };

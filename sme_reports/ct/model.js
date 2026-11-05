@@ -334,7 +334,7 @@ function build_model(raw, { as_of }) {
     views[system_id] = {
       ...system_view(ix, catalog),
       header: row,
-      findings: ix.findings.slice().sort(finding_order)
+      findings: ix.findings.slice().sort(finding_order).map(finding_view)
     };
   }
   const attention = (a, b) => (sev_rank(b.open.max_severity) - sev_rank(a.open.max_severity)) || (b.open.attention - a.open.attention)
@@ -343,6 +343,32 @@ function build_model(raw, { as_of }) {
   // not reporting: most recent last data first
   const not_reporting = rows.filter((r) => r.group === "not_reporting").sort((a, b) => (a.last_day < b.last_day ? 1 : a.last_day > b.last_day ? -1 : a.system_id < b.system_id ? -1 : 1));
   return { as_of, snapshot_day: raw.snapshot_day, periods: PERIODS, default_period: DEFAULT_PERIOD, reporting, not_reporting, views, inventory: raw.inventory };
+}
+
+// What the page shows of a finding (review PHASE6-VERIFY F2): only values an
+// independent check covers.
+//   - status, severity, windows, data_through, observed, baseline, opened /
+//     last trip day and trip days: recomputed by hhm_rpp_ge
+//     `cli.js verify-findings` (independent SQL, Phases 4-5);
+//   - trip: the abort-rate / prep numbers on the first and last trip day,
+//     recomputed by ct/verify.js (rules check);
+//   - label, category, description, customer_visible: the findings catalog.
+// The rest of the stored evidence (weekly rotor counts, code lists, boot
+// times, ...) is not recomputed anywhere, so it is not carried; the panels
+// show the verified series behind it.
+const TRIP_FIELDS = {
+  abort_rate_high: (e) => ({ day: e.day, aborts: e.d28.aborts, exams: e.d28.exams, per_100: e.d28.per_100 }),
+  prep_noncompliance: (e) => ({ day: e.day, scan_days: e.scan_days, without_fast_cal: e.scan_days_without_fast_cal, share: e.observed })
+};
+function finding_view(f) {
+  const ev = f.evidence || {}, trip = TRIP_FIELDS[f.finding_key];
+  return {
+    finding_key: f.finding_key, label: f.label, category: f.category, description: f.description, customer_visible: f.customer_visible,
+    status: f.status, severity: f.severity, opened_at: ms(f.opened_at), resolved_at: ms(f.resolved_at), data_through: f.data_through,
+    window_start: ms(f.window_start), window_end: ms(f.window_end), observed: num(f.observed), baseline: num(f.baseline),
+    opened_day: ev.opened_day ?? null, last_trip_day: ev.last_trip_day ?? null, trip_days: ev.trip_days ?? null,
+    trip: trip && ev.first && ev.last ? { first: trip(ev.first), last: trip(ev.last) } : null
+  };
 }
 
 // Open first (highest severity first), then resolved (newest first).
@@ -355,5 +381,5 @@ function finding_order(a, b) {
 
 module.exports = {
   build_model, index_system, abort_28d, prep_14d, exams_30d, mas_30d, mas_increments, heatmap, open_findings, local_day_of,
-  dnum, dstr, pct, PERIODS, PANELS, FAST_CAL_STEPS, WARMUP_STEPS, STALE_DAYS, SEVERITIES
+  finding_view, dnum, dstr, pct, PERIODS, PANELS, EVENT_SERIES, GAUGE_VALUES, FAST_CAL_STEPS, WARMUP_STEPS, STALE_DAYS, SEVERITIES
 };

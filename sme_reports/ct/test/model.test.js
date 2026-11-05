@@ -200,3 +200,29 @@ test("mas_increments: a counter drop (tube replacement) counts 0", () => {
   assert.strictEqual(M.local_day_of(ix, Date.parse("2026-01-03T04:59:59Z")).day, "2026-01-02");
   assert.strictEqual(M.local_day_of(ix, Date.parse("2026-01-03T05:00:00Z")).day, "2026-01-03");
 });
+
+test("findings payload carries only independently checked fields (review PHASE6-VERIFY F2)", () => {
+  const KEYS = ["finding_key", "label", "category", "description", "customer_visible", "status", "severity", "opened_at", "resolved_at",
+    "data_through", "window_start", "window_end", "observed", "baseline", "opened_day", "last_trip_day", "trip_days", "trip"].sort();
+  let n = 0, trips = 0;
+  for (const [sid, v] of Object.entries(model.views)) {
+    const src = fx.findings.filter((f) => f.system_id === sid);
+    assert.strictEqual(v.findings.length, src.length, sid);
+    for (const f of v.findings) {
+      assert.deepStrictEqual(Object.keys(f).sort(), KEYS, `${sid} ${f.finding_key}`);
+      const s = src.find((x) => x.finding_key === f.finding_key && Date.parse(x.opened_at) === f.opened_at);
+      assert.ok(s, `${sid} ${f.finding_key} source row`);
+      assert.strictEqual(f.trip_days, s.evidence.trip_days ?? null);
+      if (s.finding_key === "abort_rate_high") {
+        trips++;
+        assert.deepStrictEqual(f.trip.last, { day: s.evidence.last.day, aborts: s.evidence.last.d28.aborts, exams: s.evidence.last.d28.exams, per_100: s.evidence.last.d28.per_100 });
+      } else if (s.finding_key === "prep_noncompliance") {
+        trips++;
+        assert.deepStrictEqual(f.trip.first, { day: s.evidence.first.day, scan_days: s.evidence.first.scan_days,
+          without_fast_cal: s.evidence.first.scan_days_without_fast_cal, share: s.evidence.first.observed });
+      } else assert.strictEqual(f.trip, null);
+      n++;
+    }
+  }
+  assert.ok(n === fx.findings.length && trips >= 2, `${n} findings, ${trips} with trip numbers`);
+});
