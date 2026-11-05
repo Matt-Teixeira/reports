@@ -12,7 +12,7 @@ const {
 } = require("../conditions");
 const { he_suffix } = require("./tiles");
 const { limit_key, edu_channel_fresh } = require("./fleet_model");
-const { is_inferred } = require("../compute/provenance");
+const { comp_inferred } = require("../compute/provenance");
 
 // Renders the fleet summary view-model to a multi-page HTML document.
 // Interpolation only — all decisions live in fleet_model.js.
@@ -377,7 +377,7 @@ const cell_compressor = (r) => {
   // GE systems without an EDU have their state inferred from the coldhead —
   // per-row, since one GE section now mixes measured (EDU vibration) and
   // inferred systems.
-  const mark = is_inferred(r.compressor_source) ? "ᶜ" : "";
+  const mark = comp_inferred(r) ? "ᶜ" : "";
   const color = r.compressor_on === false ? COLORS.red : COLORS.teal;
   // A left-censored stop was never observed starting; claiming hours would
   // overclaim, so the cell says what we know: off for the whole window.
@@ -794,6 +794,7 @@ const LEGEND = `<div class="legend pin"><div class="lg-title">Legend</div><div c
 <div class="lg-col"><div class="lg-h">A status label</div>
 <div class="lg-e"><b style="color:${COLORS.red};">urgent</b><br>wrong right now — unrecovered stop, live breach, quench. Each affected system also gets its own one-page brief</div>
 <div class="lg-e"><b>STOP, ONGOING · recovered</b><br>compressor stop observed this period; red while unrecovered</div>
+<div class="lg-e"><b>may not be off · unconfirmed</b><br>the EDU read off, but the scanner read running and the magnet stayed steady · or other data cannot confirm it. Still listed as a stop</div>
 <div class="lg-e"><b>PEAK OVER LIMIT</b><br>the period's peak crossed the limit; the current reading may since have come back under it</div>
 <div class="lg-e"><b>2 evt · 12.5h</b><br>stop events this period · total observed downtime, in hours</div>
 <div class="lg-e"><b>OFF ENTIRE PERIOD</b><br>off since before the period began, start unknown; magnet already warm, so listed but not urgent</div>

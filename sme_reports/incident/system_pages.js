@@ -105,6 +105,7 @@ const build_system_pages = async (
     scope_label = null,
     period_tag = "",
     period_label = null,
+    span = null,
     audience,
     format = "app"
   }
@@ -143,7 +144,7 @@ const build_system_pages = async (
       const notice = sel.result
         ? null
         : `This system could not be analyzed for this period (${customer_failure_reason(sel.message)}), so no readings are shown. Its alert detections and notifications are below.`;
-      const ctx = { identity: raw.identity, meta: raw.meta, model_count: raw.models.length, period_label, notice, audience };
+      const ctx = { identity: raw.identity, meta: raw.meta, model_count: raw.models.length, period_label, notice, audience, span };
       let buf;
       let file = null;
       if (app) {

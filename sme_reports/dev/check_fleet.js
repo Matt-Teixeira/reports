@@ -1039,6 +1039,15 @@ const rec = (over = {}) => ({
   assert.ok(vm2.attention_reason(warm).endsWith("ᶜ"), "corroborated reason is marked");
   const fresh = rec({ archetype: "compressor_stop_ongoing", primary_event: { start: T0, end: null, off_hours: 9.5, cycles: 1 } });
   assert.ok(!build_fleet_model([fresh], []).attention_reason(fresh).includes("ᶜ"), "an observed stop reason is not marked");
+  // The EDU-off issue type leads the reason (compute/corroborate.js), ahead
+  // of the fleet cell's truncation; a confirmed stop reads as before.
+  const typed = (t) => {
+    const r = rec({ archetype: "compressor_stop_recovered", event_count: 1, off_hours_total: 112, compressor_corroboration: t });
+    return build_fleet_model([r], []).attention_reason(r);
+  };
+  assert.ok(typed("doubtful").startsWith("may not be off · off "), typed("doubtful"));
+  assert.ok(typed("unconfirmed").startsWith("unconfirmed · off "), typed("unconfirmed"));
+  assert.ok(typed("confirmed").startsWith("off ") && typed(null).startsWith("off "), "confirmed and untyped read as before");
 }
 
 // --- a quenched record can NEVER render healthy in an email cell ------------
@@ -1220,14 +1229,16 @@ const rec = (over = {}) => ({
 
 // --- email status block: grouped by what the reader has to do -------------
 // The summary and batch emails share one block (output/email_status.js):
-// FLAGGED is a full table of everything worth a look — attention, urgent,
-// data issues, and systems with no report — and the healthy and limited
-// systems follow as two-up grids under headings that carry their label.
+// FLAGGED is one card per system worth a look — attention, urgent, data
+// issues, and systems with no report — and the healthy and limited systems
+// follow as compact lists in two fluid columns under headings that carry
+// their label.
 {
   const { status_html } = require("../output/email_status");
   const rec = (system_id, summary) => ({
     system_id, site_name: `Site ${system_id}`, manufacturer: "GE", modality: "MRI",
-    archetype: summary.archetype, summary
+    archetype: summary.archetype,
+    summary: { primary_name: "He pressure", primary_value: 2.4, primary_units: "PSI", primary_decimals: 3, primary_pct: null, primary_band: null, ...summary }
   });
   const html = status_html(
     [
@@ -1250,17 +1261,36 @@ const rec = (over = {}) => ({
   assert.ok(/FLAGGED <span[^>]*>· 6</.test(html), "flagged counts attention + quench + data issue + unclassified + no report");
   for (const id of ["SME00002", "SME00003", "SME00004", "SME00009", "SME00010", "SME00008"])
     assert.ok(at(id) > flagged && at(id) < stable, `${id} is flagged`);
-  assert.strictEqual((html.match(/not classified/g) || []).length, 2, "an unknown or missing archetype is stated as unclassified");
+  assert.strictEqual((html.match(/not classified/gi) || []).length, 2, "an unknown or missing archetype is stated as unclassified");
   assert.ok(!html.includes("undefined"), "a missing archetype never renders as 'undefined'");
   assert.ok(at("SME00003") < at("SME00002"), "a quench sorts ahead of a rising pressure");
   for (const id of ["SME00001", "SME00006", "SME00007"])
     assert.ok(at(id) > stable && at(id) < limited, `${id} is in the stable grid`);
   assert.ok(at("SME00005") > limited, "limited coverage gets its own group");
-  assert.ok(html.includes("no report") && html.includes("no data") && !html.includes("raw"), "a failure states the audience's reason");
-  // Three stable systems: two rows, the odd cell padded so the rule spans.
+  assert.ok(/No report/.test(html) && html.includes("no data") && !html.includes("raw"), "a failure states the audience's reason");
+  // One card per flagged system, its accent bar in the condition's color,
+  // and the summary document's WHY beneath the identity line.
+  const flagged_block = html.slice(flagged, stable);
+  assert.strictEqual((flagged_block.match(/border-left:4px solid/g) || []).length, 6, "one card per flagged system");
+  assert.ok(flagged_block.includes("quench state recorded this period"), "a card carries the document's reason");
+  assert.ok(/Pressure rising/.test(flagged_block), "the card heading raises the label's first letter");
+  // A record whose reason cannot be worded still gets its card — the
+  // supplementary WHY line is dropped, never the email.
+  const broken = status_html([{ system_id: "SME00011", site_name: "S", manufacturer: "GE", modality: "MRI", archetype: "pressure_rising", summary: { archetype: "pressure_rising" } }]);
+  assert.ok(broken.includes("SME00011") && /Pressure rising/.test(broken), "an unworded reason never sinks the card");
+  // Three stable systems: two fluid columns split by HALVES, so reading down
+  // the left then the right — or down one stacked column on a phone — is the
+  // sorted order; classic Outlook gets the same two columns from a ghost table.
   const grid = html.slice(stable, limited);
-  assert.strictEqual((grid.match(/<tr>/g) || []).length, 2, "two-up grid");
-  assert.ok(grid.includes("&nbsp;</td></tr>"), "odd cell padded");
+  assert.strictEqual((grid.match(/class="col"/g) || []).length, 2, "two fluid columns");
+  const [left_col, right_col] = grid.split('class="col"').slice(1);
+  assert.ok(left_col.includes("SME00001") && left_col.includes("SME00006") && !left_col.includes("SME00007"), "the left column holds the first half");
+  assert.ok(right_col.includes("SME00007"), "the right column holds the rest");
+  assert.ok(grid.indexOf("SME00001") < grid.indexOf("SME00006") && grid.indexOf("SME00006") < grid.indexOf("SME00007"), "sorted order reads down the columns");
+  assert.ok(grid.includes("<!--[if mso]>"), "classic Outlook gets a ghost table");
+  // Nothing in the block is fixed wider than the content: a phone never
+  // scrolls sideways.
+  assert.ok(!/width="8\d\d"/.test(html), "no fixed table width in the block");
   assert.strictEqual(status_html([rec("SME00001", { archetype: "stable_healthy" })]).includes("FLAGGED"), false, "no empty flagged table");
 }
 
@@ -3009,6 +3039,41 @@ const rec = (over = {}) => ({
           doc.cid_clips,
           `${doc.name}: ${cid_clipped} customer-id lines clipped, expected ${doc.cid_clips}`
         );
+        }
+
+        // The emails, MEASURED at phone and desktop widths. The 800px shell
+        // used to be a width="800" table with max-width:100% — which did not
+        // shrink: every phone got an 808px page to scroll sideways. Only a
+        // real layout can show that, so lay the email out and look.
+        {
+          const { wrap_email } = require("../output/email_theme");
+          const { status_html } = require("../output/email_status");
+          const long = "Saint Joseph Health System: Plymouth Medical Center East Campus Building";
+          const erec = (system_id, archetype, site = `Site ${system_id}`) => ({
+            system_id, site_name: site, manufacturer: "Siemens", modality: "MRI", archetype,
+            summary: { archetype, primary_name: "He pressure", primary_value: 15.5, primary_units: "PSI", primary_decimals: 2, primary_pct: null, primary_band: null, off_hours_total: 1.5, event_count: 1 }
+          });
+          const records = [
+            erec("SME90001", "compressor_stop_recovered", long),
+            ...Array.from({ length: 9 }, (_, i) => erec(`SME9010${i}`, "stable_healthy", i === 3 ? long : undefined))
+          ];
+          const email_html =
+            `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;">` +
+            wrap_email({ title: "Magnet Health Summary", date: "2026-11-04", body_html: status_html(records, { failures: [{ system_id: "SME90009", message: "no data" }] }) }) +
+            `</body></html>`;
+          for (const width of [375, 600, 1000]) {
+            await page.setViewport({ width, height: 900 });
+            await page.setContent(email_html, { waitUntil: "load" });
+            const m = await page.evaluate(() => {
+              const cols = [...document.querySelectorAll(".col")].map((c) => c.getBoundingClientRect());
+              return { scroll: document.documentElement.scrollWidth, cols: cols.map((r) => ({ top: r.top, bottom: r.bottom, left: r.left })) };
+            });
+            assert.ok(m.scroll <= width, `email at ${width}px scrolls sideways (${m.scroll}px wide)`);
+            assert.strictEqual(m.cols.length, 2, "the stable list has two fluid columns");
+            const side_by_side = m.cols[1].top === m.cols[0].top && m.cols[1].left > m.cols[0].left;
+            if (width >= 800) assert.ok(side_by_side, `at ${width}px the stable list sits in two columns`);
+            if (width <= 600) assert.ok(m.cols[1].top >= m.cols[0].bottom, `at ${width}px the stable list stacks into one column, in order`);
+          }
         }
       } finally {
         await browser.close();

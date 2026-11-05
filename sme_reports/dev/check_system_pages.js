@@ -272,6 +272,102 @@ const BANNED_SECTIONS = ["Hypothesis", "What the data shows", "Steps for improve
 const LOGO_SMALL = require("../render/assets/logo_small");
 const LOGO_FULL = require("../render/assets/logo");
 
+// The second compressor strip: with the EDU primary (it is what the
+// compressor alert watches), the magnet monitor's own channel as it reported.
+{
+  const f = fixture("SME10009", "GE");
+  const single = render(f);
+  assert.strictEqual(single.a.sources.alt, null, "no secondary readings: one strip");
+  assert.ok(!/<th scope="col">(EDU vibration|Magnet monitor|Coldhead \(inferred\))<\/th>/.test(single.html), "one strip: no second compressor column");
+
+  // EDU primary, Siemens status text second. The status text shows a stop
+  // the EDU did not see (SME19528, Oct 26 2026).
+  const edu_first = {
+    data: f.data,
+    readings: {
+      ...f.readings,
+      compressor_source: "edu_comp_vib",
+      sources: { mag: "mag.siemens", edu: "edu.v2" },
+      compressor: half_hours((t) => ({ t, on: true })),
+      secondary_compressor: {
+        source: "compressor_status",
+        rows: half_hours((t) => ({ t, on: !(t >= T0 + 24 * H && t < T0 + 25.5 * H) }))
+      }
+    }
+  };
+  const p = render(edu_first);
+  assert.deepStrictEqual(
+    p.a.sources.alt,
+    { source: "compressor_status", edu: false, table: "mag.siemens", label: "Magnet monitor" },
+    "EDU primary: the magnet monitor's channel is the second strip"
+  );
+  assert.strictEqual(p.a.slots.filter((s) => s.comp === false).length, 0, "EDU strip: running throughout");
+  assert.strictEqual(p.a.slots.filter((s) => s.alt === false).length, 3, "magnet strip: its own 3-reading stop");
+  assert.ok(p.html.includes('<th scope="col">Magnet monitor</th>'), "second column named for its source");
+  assert.ok(p.html.includes("Readings from mag.siemens and edu.v2"), "data subtitle names the EDU table");
+  assert.ok(p.html.includes("The Compressor strip is the EDU vibration sensor"), "caption names the primary sensor");
+
+  // The merged strip: where the EDU was silent the magnet monitor stands in
+  // (analyze.js backup), flagged per slot so the page can say so.
+  const merged = {
+    data: f.data,
+    readings: {
+      ...edu_first.readings,
+      compressor: half_hours((t) => (t >= T0 + 40 * H && t < T0 + 42 * H ? { t, on: false, b: 1 } : { t, on: true }))
+    }
+  };
+  const m = render(merged);
+  assert.strictEqual(m.a.sources.backup, "Magnet monitor", "the backup is named");
+  assert.strictEqual(m.a.slots.filter((s) => s.comp_b).length, 4, "backup slots are flagged");
+  assert.ok(!("comp_b" in p.a.slots[0]) && !("alt" in single.a.slots[0]), "absent flags add no bytes to the payload");
+  assert.ok(m.html.includes("Where the EDU was silent it shows the magnet monitor reading instead"), "caption explains the lighter segments");
+
+  // "Compressor stops": one card per EDU-reported stop, its verdict and the
+  // evidence behind it (compute/corroborate.js detail).
+  assert.ok(!p.html.includes('class="panel stops"'), "no EDU-reported stops: no section");
+  const stop = (type, secondary, thermal, detail, extra = {}) => ({
+    start: T0 + 30 * H, end: T0 + 34 * H, off_hours: 4, off_count: 8, cycles: 1,
+    corroboration: { type, secondary, thermal, detail }, ...extra
+  });
+  const ev_detail = (sec_off, sec_on, sec_missing, pressure, coldhead) => ({ edu_off: sec_off + sec_on + sec_missing, sec_off, sec_on, sec_missing, pressure, coldhead });
+  const typed = render({
+    data: f.data,
+    readings: {
+      ...edu_first.readings,
+      compressor_secondary_label: "the magnet monitor",
+      compressor_stops: [
+        stop("doubtful", "on", "steady", ev_detail(0, 8, 0, { baseline: 15.3, peak: 15.35, epsilon: 0.33, readings: 4, above: 0 }, { max: 42.1, warm_k: 55, readings: 8 })),
+        stop("confirmed", "off", "warming", ev_detail(6, 0, 2, { baseline: 15.3, peak: 15.9, epsilon: 0.33, readings: 4, above: 3 }, { max: 98, warm_k: 55, readings: 8 }), { start: T0 + 50 * H, end: null }),
+        // A mixed stop (Codex round 2, F2): 5 off readings, 2 of them the EDU's.
+        stop("confirmed", "off", "steady", ev_detail(2, 0, 0, null, { max: 40, warm_k: 55, readings: 4 }), { start: T0 + 64 * H, end: T0 + 66 * H, off_count: 5 }),
+        stop("unconfirmed", "none", "unknown", { ...ev_detail(0, 0, 8, null, { max: null, warm_k: 55, readings: 0, frozen: true }), sec_stale: 8, pressure_frozen: true }, { start: T0 + 60 * H, end: T0 + 62 * H })
+      ]
+    }
+  });
+  const txt = typed.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  assert.strictEqual((typed.html.match(/class="stopcard /g) || []).length, 4, "one card per stop");
+  for (const s of [
+    "May not be off",
+    "The magnet monitor (mag.siemens) said off at 0 and running at 8 of the 8 EDU off readings.",
+    "He pressure: 15.300 PSI before the stop, peak 15.350 PSI in the 2 hours after.",
+    "Coldhead: peaked at 42.1 K during the stop, under the 55 K warm bar.",
+    "Marked “may not be off” because the second channel read running and the magnet showed no warming at the stop.",
+    "Confirmed because the second channel also read off and the magnet warmed.",
+    "and had no fresh reading within 45 minutes of the other 2.",
+    "still off at the end of the period",
+    "5 off readings (2 from the EDU, 3 from the magnet monitor where the EDU was silent)",
+    "Unconfirmed because the second channel had no fresh reading, and there is no live thermal data.",
+    "had no fresh reading within 45 minutes of any of the 8 EDU off readings (at 8 of them its only readings repeat one host time: a frozen feed).",
+    "He pressure: only frozen-feed readings (one repeated host time) in the 2 hours after the stop began.",
+    "Coldhead: only frozen-feed readings during the stop.",
+    "The stop stays listed as the EDU reported it."
+  ])
+    assert.ok(txt.includes(s), `stops section says: ${s}\n--- got: ${txt.slice(txt.indexOf("Compressor stops"), txt.indexOf("Compressor stops") + 1600)}`);
+
+  const silent = render({ data: f.data, readings: { ...edu_first.readings, secondary_compressor: { source: "compressor_status", rows: [] } } });
+  assert.strictEqual(silent.a.sources.alt, null, "an empty secondary source draws no strip");
+}
+
 const pages = [];
 for (const [id, vendor] of [["SME10001", "GE"], ["SME10002", "PHILIPS"], ["SME10003", "SIEMENS_NON_TIM"]]) {
   const f = fixture(id, vendor);
@@ -536,6 +632,45 @@ const fits_phone = async (page, what) => {
       assert.ok(text.includes(p.primary), `${p.id}: primary metric label "${p.primary}" rendered`);
       const lanes = await page.$$eval("#lanes svg", (s) => s.length);
       assert.strictEqual(lanes, 1, `${p.id}: timeline drawn`);
+      await page.close();
+    }
+
+    // Expected-alert markers follow the EDU, which the compressor model
+    // watches: a backup-only OFF (comp_b, the vendor channel standing in
+    // where the EDU was silent) is never an expected compressor alert. The
+    // pages ship with the markers off, so the payload is flipped on here.
+    {
+      const f = fixture("SME10010", "GE");
+      const H = 3600e3;
+      const comp_model = f.data.models.find((m) => m.field_name_alias === "Compressor");
+      const data = {
+        ...f.data,
+        detections: [
+          ...f.data.detections,
+          { alert_model_id: comp_model.id, field_name: "comp_vib_status", resolved_field_content: "false", resolved_field_units: null, operator: "equals", threshold: "false", resolved_threshold_content: null, threshold_units: null, inserted_at: new Date(T0 + 26 * H + 4 * 60e3), capture_datetime: new Date(T0 + 26 * H) }
+        ]
+      };
+      const readings = {
+        ...f.readings,
+        compressor_source: "edu_comp_vib",
+        sources: { mag: "mag.ge_mm3", edu: "edu.v2" },
+        compressor: half_hours((t) =>
+          t === T0 + 26 * H || t === T0 + 30 * H
+            ? { t, on: false } // EDU off: detected at 26 h, missed at 30 h
+            : t >= T0 + 40 * H && t < T0 + 42 * H
+              ? { t, on: false, b: 1 } // backup-only off: never expected
+              : { t, on: true }
+        ),
+        secondary_compressor: { source: "coldhead_ruo_value", rows: half_hours((t) => ({ t, on: true })) }
+      };
+      const { html } = render({ data, readings }, null, "internal");
+      assert.ok(html.includes('"show_missed":false'), "payload carries show_missed");
+      const file = path.join(dir, "missed.html");
+      fs.writeFileSync(file, html.replace('"show_missed":false', '"show_missed":true'));
+      const page = await browser.newPage();
+      await page.goto(`file://${file}`, { waitUntil: "load" });
+      const tile = await page.$eval("#stat-tiles", (e) => e.textContent);
+      assert.ok(/\b1 slots? expected, not detected/.test(tile), `only the EDU-off slot is expected, got: ${tile}`);
       await page.close();
     }
 

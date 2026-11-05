@@ -12,7 +12,8 @@ const {
   customer_users,
   units_queries,
   edu_config,
-  edu_series
+  edu_series,
+  series_before
 } = require("./sql/sql");
 const { VENDORS, classify_manufacturer } = require("./vendors");
 const { resolve_thresholds } = require("./compute/thresholds");
@@ -202,6 +203,44 @@ const fetch_edu_series = async (system_id, window) => {
   };
 };
 
+// Readings just outside the report window, for the compressor merge's two
+// edge checks (compute/analyze.js `context`). Never part of the report.
+// - series_before: the latest vendor rows BEFORE the window from the same
+//   table the window used (`source`), regardless of age (sql.js
+//   series_before, up to BEFORE_ROWS). The first in-window reading is
+//   judged against the real predecessor, however old: a feed frozen for a
+//   day still repeats that day-old host time.
+// - edu_before / edu_after: EDU readings within BOUNDARY_MS of each edge,
+//   enough for the 45-minute proximity rule.
+const BOUNDARY_MS = 2 * 3600e3;
+const NORMALIZE = {
+  PHILIPS: normalize_philips,
+  GE: normalize_ge,
+  SIEMENS: normalize_siemens,
+  // Siemens 10K: no vendor compressor state, but the shield rows' host times
+  // feed the thermal stale filter at the window's start.
+  SIEMENS_NON_TIM: normalize_siemens_non_tim
+};
+const fetch_boundary_context = async (identity, window, vendor, source) => {
+  const before = { start: window.start.minus({ milliseconds: BOUNDARY_MS }), end: window.start };
+  const after = { start: window.end, end: window.end.plus({ milliseconds: BOUNDARY_MS }) };
+  const t0 = window.start.toMillis();
+  const t1 = window.end.toMillis();
+  const q = series_before[source];
+  const norm = NORMALIZE[vendor.key];
+  const [raw, eb, ea] = await Promise.all([
+    q && norm ? db.any(q, [identity.system_id, window.start.toISO()]) : [],
+    fetch_edu_series(identity.system_id, before),
+    fetch_edu_series(identity.system_id, after)
+  ]);
+  return {
+    // The query returns newest first; the merge wants time order.
+    series_before: norm ? norm(raw, vendor).filter((r) => r.t !== null && r.t < t0).reverse() : [],
+    edu_before: eb.edu.filter((r) => r.t < t0),
+    edu_after: ea.edu.filter((r) => r.t > t1)
+  };
+};
+
 // Users assigned to the given site groups (public.user_site_groups) for
 // the fleet document's closing SITE GROUP USERS section. One row per
 // (group, user); a group with nobody assigned returns one row with a NULL
@@ -223,6 +262,7 @@ module.exports = {
   resolve_system_vendor,
   fetch_series,
   fetch_edu_series,
+  fetch_boundary_context,
   fetch_thresholds,
   fetch_units
 };

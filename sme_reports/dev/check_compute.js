@@ -388,9 +388,17 @@ const row = (h, over = {}) => ({
     classify({ compressor_event: null, pressure: p(6, 5.5, 0.1), thr: thr5 }),
     "threshold_exceeded"
   );
+  // "Rising" is the steady-rise judgment analyze stores on the pressure
+  // facts (judgments.js) — not the peak-minus-first rate, which alone no
+  // longer makes a system rising.
   assert.strictEqual(
-    classify({ compressor_event: null, pressure: p(4, 4, 0.2), thr: thr5 }),
+    classify({ compressor_event: null, pressure: { ...p(4, 4, 0.2), steady_rise: { rise: 1, hours: 720, share: 0.25 } }, thr: thr5 }),
     "pressure_rising"
+  );
+  assert.strictEqual(
+    classify({ compressor_event: null, pressure: { ...p(4, 4, 0.2), steady_rise: null }, thr: thr5 }),
+    "stable_healthy",
+    "a positive peak-minus-first rate without a steady rise is stable"
   );
   assert.strictEqual(
     classify({ compressor_event: null, pressure: p(1.01, 1, 0), thr: thr5 }),
@@ -727,6 +735,44 @@ const row = (h, over = {}) => ({
   );
 }
 
+// ---- rising-trend review F1: one verdict for condition and trend word ------
+// A hand-supplied event_window holding NO OFF readings is not a stop
+// (archetype.js observed), so the steady rise decides BOTH the condition and
+// the tile/fleet trend word — previously the condition read stable while the
+// word read "rising" off the override's event ramp.
+{
+  const { analyze_system } = require("../compute/analyze");
+  const { trend_of } = require("../compute/judgments");
+  const { VENDORS } = require("../vendors");
+  const { DateTime } = require("luxon");
+  const window = {
+    start: DateTime.fromMillis(T0, { zone: "utc" }),
+    end: DateTime.fromMillis(T0 + 72 * HOUR, { zone: "utc" })
+  };
+  const event_window = { start: T0 + 20 * HOUR, end: T0 + 40 * HOUR };
+  const run = (f) =>
+    analyze_system({
+      system_id: "SME99998",
+      vendor: VENDORS.PHILIPS,
+      series: Array.from({ length: 72 }, (_, h) => row(h, { pressure: f(h) })),
+      window,
+      event_window
+    }).facts;
+
+  const climbing = run((h) => 30 + (30 * h) / 71);
+  assert.strictEqual(climbing.pressure.event_observed, false, "no OFF readings: not an observed stop");
+  assert.strictEqual(climbing.archetype, "pressure_rising");
+  assert.strictEqual(trend_of(climbing.pressure), "rising", "condition and word agree");
+
+  // A ramp inside the override that comes back down (not a steady climb):
+  // the old event-ramp word would have said "rising" beside a stable
+  // condition.
+  const ramp = run((h) => (h < 20 || h >= 40 ? 30 : 30 + 20 * Math.sin(((h - 20) / 20) * Math.PI)));
+  assert.notStrictEqual(ramp.archetype, "pressure_rising");
+  assert.ok(ramp.pressure.rate_per_hr > 0, "the override's ramp rate is positive");
+  assert.notStrictEqual(trend_of(ramp.pressure), "rising", "but no rising word beside a non-rising condition");
+}
+
 // ---- compressor provenance is a closed registry (round-2 F3) ---------------
 {
   const { source_kind, is_inferred } = require("../compute/provenance");
@@ -823,4 +869,194 @@ const row = (h, over = {}) => ({
   }
 }
 
-console.log("check_compute: all assertions passed");
+// --- pressure rising: a steady climb toward the line (RULES.md §2) ---------
+{
+  const { metric_facts, linear_trend } = require("../compute/metrics");
+  const { steady_rise, trend_of } = require("../compute/judgments");
+  const H = 3600000;
+  // 30 days of 15-minute captures, shaped by f(hour).
+  const series = (f, hours = 720, step = 0.25) => {
+    const pts = [];
+    for (let h = 0; h <= hours; h += step) pts.push({ t: Date.UTC(2026, 9, 1) + h * H, v: +f(h).toFixed(3) });
+    return pts;
+  };
+  const judged = (pts, thr) => {
+    const m = metric_facts(pts, null);
+    m.steady_rise = steady_rise(m, thr);
+    return m;
+  };
+  const siemens = { high_gt: 16.4, high_lt: 14.4, med_gt: null, med_lt: null };
+  const ge = { high_gt: 5.2, high_lt: null, med_gt: null, med_lt: null };
+  const wobble = (h) => 0.004 * Math.sin(h * 1.7);
+
+  // SME12471's shape: flat at 15.30 PSIA, one 0.01 blip in the first hour.
+  // The old rule called it rising (0.01/hr over the hour to its peak).
+  const blip = judged(series((h) => (h > 0.5 && h < 1.2 ? 15.31 : 15.3)), siemens);
+  assert.ok(blip.rate_per_hr > 0.001, "the old rate fires on the blip");
+  assert.strictEqual(blip.steady_rise, null, "a flat Siemens magnet is not rising");
+  assert.strictEqual(classify({ compressor_event: null, pressure: blip, thr: siemens }), "stable_healthy");
+  assert.notStrictEqual(trend_of(blip), "rising", "and no rising arrow");
+
+  // SME08716's shape: a spike to 16.22 (99% of the line) that came back.
+  // Decided 2026-11-04: a peak that returns to normal is not reported.
+  const spike = judged(series((h) => 15.5 + wobble(h) + (h > 300 && h < 340 ? 0.72 * Math.sin(((h - 300) / 40) * Math.PI) : 0)), siemens);
+  assert.ok(spike.peak.v > 16.1 && spike.peak.v < 16.4, `spike peak ${spike.peak.v}`);
+  assert.strictEqual(spike.steady_rise, null, "a spike that returns is not a rise");
+  assert.strictEqual(classify({ compressor_event: null, pressure: spike, thr: siemens }), "stable_healthy");
+
+  // SME15804's shape: GE 1.03 -> 2.43 PSI over 30 days, steady. The old
+  // rule missed it (2.43 is under 60% of 5.2).
+  const climb = judged(series((h) => 1.03 + (1.4 * h) / 720 + wobble(h) * 5), ge);
+  assert.ok(climb.steady_rise, "a steady GE climb is rising");
+  assert.ok(Math.abs(climb.steady_rise.rise - 1.4) < 0.05, `fitted rise ~1.4, got ${climb.steady_rise.rise}`);
+  assert.ok(climb.steady_rise.share > 0.3 && climb.steady_rise.share < 0.4, `share of headroom ${climb.steady_rise.share}`);
+  assert.strictEqual(classify({ compressor_event: null, pressure: climb, thr: ge }), "pressure_rising");
+  assert.strictEqual(trend_of(climb), "rising");
+  // ...and keeps its rising arrow when the last reading dips a hair under
+  // the peak (easing used to win and contradict the condition).
+  const dipped = { ...climb, last: { ...climb.last, v: climb.peak.v * 0.99 } };
+  assert.strictEqual(trend_of(dipped), "rising", "a steady rise is not 'easing'");
+
+  // Boundaries: under 10% of the room; a noisy climb (r² < 0.5); no upper
+  // line; a series already starting over the line.
+  const small = judged(series((h) => 1 + (0.3 * h) / 720), ge); // 0.3 of 4.2 room = 7%
+  assert.strictEqual(small.steady_rise, null, "a rise under 10% of the room is not rising");
+  const noisy = judged(series((h) => 1 + (0.6 * h) / 720 + (Math.floor(h * 7) % 2 ? 0.8 : -0.8)), ge);
+  assert.ok(noisy.trend.r2 < 0.5, `noisy fit r2 ${noisy.trend.r2}`);
+  assert.strictEqual(noisy.steady_rise, null, "an unsteady climb is not rising");
+  assert.strictEqual(steady_rise(climb, { high_gt: null, high_lt: 14 }), null, "no upper line, no headroom to measure");
+  assert.strictEqual(steady_rise(judged(series((h) => 6 + h / 720), ge), ge), null, "already over the line is a breach, not a rise");
+
+  // With an observed stop the event ramp still decides the arrow.
+  const ev = metric_facts(series((h) => (h < 400 ? 1 : 1 + (h - 400) / 200)), { start: Date.UTC(2026, 9, 1) + 400 * H, end: null });
+  ev.event_observed = true; // as analyze sets it for an observed stop
+  ev.steady_rise = null;
+  assert.strictEqual(trend_of(ev), "rising", "an event ramp keeps its rising word");
+
+  // Review F2: under a day of readings is never a trend — three quantized
+  // Siemens steps in an hour fit perfectly and were "40% of the room".
+  const steps = judged(series((h) => (h < 0.4 ? 16.35 : h < 0.8 ? 16.36 : 16.37), 1, 0.5), siemens);
+  assert.ok(steps.trend && steps.trend.r2 > 0.9, "the steps do fit a line");
+  assert.strictEqual(steps.steady_rise, null, "but an hour is not a trend");
+  assert.strictEqual(judged(series((h) => 1 + h / 10, 23.5), ge).steady_rise, null, "23.5 h: still too short");
+  assert.ok(judged(series((h) => 1 + h / 10, 24), ge).steady_rise, "24 h of a steady climb is a rise");
+
+  // linear_trend guards.
+  assert.strictEqual(linear_trend([]), null);
+  assert.strictEqual(linear_trend(series(() => 1, 0.5)), null, "under an hour");
+  assert.strictEqual(linear_trend(series(() => 1)).fitted_rise, 0, "flat is zero");
+}
+
+// --- EDU-off corroboration (compute/corroborate.js) --------------------------
+{
+  const { corroborate_event, overall_type, stale_times } = require("../compute/corroborate");
+  const H = 3600e3, T = Date.UTC(2026, 9, 1);
+  const ev = { start: T + 10 * H, end: T + 14 * H };
+  const off_rows = [10, 11, 12, 13].map((h) => ({ t: T + h * H, compressor_on: false }));
+  const flat = Array.from({ length: 30 }, (_, h) => ({ t: T + h * H, v: 15.3 }));
+  const base = { secondary: [], p_points: flat, coldhead: [], warm_k: 55, epsilon: 0.33, window_end: T + 30 * H };
+  const sec = (on) => off_rows.map((r) => ({ t: r.t + 10 * 60e3, compressor_on: on }));
+  const full = (ctx) => corroborate_event(ev, off_rows, { ...base, ...ctx });
+  // The verdict alone; the evidence (detail) is asserted separately below.
+  const t = (ctx) => { const { type, secondary, thermal } = full(ctx); return { type, secondary, thermal }; };
+  assert.deepStrictEqual(t({ secondary: sec(false) }), { type: "confirmed", secondary: "off", thermal: "steady" }, "the scanner also read off");
+  assert.deepStrictEqual(t({ secondary: sec(true) }), { type: "doubtful", secondary: "on", thermal: "steady" }, "scanner running, magnet steady");
+  assert.deepStrictEqual(t({ secondary: sec(true), p_points: [] }), { type: "unconfirmed", secondary: "on", thermal: "unknown" }, "no thermal data");
+  assert.deepStrictEqual(t({}), { type: "unconfirmed", secondary: "none", thermal: "steady" }, "no scanner reading");
+  const rising = flat.map((p) => ({ ...p, v: p.t >= T + 11 * H ? 15.8 : 15.3 }));
+  assert.strictEqual(t({ secondary: sec(true), p_points: rising }).type, "confirmed", "the magnet warmed: thermal outranks a running scanner");
+  // A rise long after the stop began is the magnet's ordinary swing, not a
+  // response (SME16380: ~0.2 PSI daily on a 5.2 PSI limit).
+  const late = flat.map((p) => ({ ...p, v: p.t >= T + 13 * H ? 15.8 : 15.3 }));
+  assert.strictEqual(t({ secondary: sec(true), p_points: late }).type, "doubtful", "only the 2 h after the stop count");
+  // One glitch reading neither fakes a rise nor sets the baseline.
+  const glitch = flat.map((p) => ({ ...p, v: p.t === T + 9 * H ? 0 : p.t === T + 11 * H ? 15.8 : 15.3 }));
+  assert.strictEqual(t({ secondary: sec(true), p_points: glitch }).thermal, "steady", "a zero before and one spike after is no rise");
+  assert.strictEqual(t({ secondary: sec(true), coldhead: [{ t: T + 12 * H, v: 63 }] }).type, "confirmed", "coldhead past its warm bar");
+  // A scanner reading more than 45 minutes away speaks for nothing.
+  assert.strictEqual(t({ secondary: [{ t: T + 13 * H + 50 * 60e3, compressor_on: true }] }).secondary, "none");
+  assert.strictEqual(t({ secondary: [{ t: T + 13 * H + 40 * 60e3, compressor_on: true }] }).secondary, "on");
+  // The evidence behind a verdict, for the activity page's "why".
+  assert.deepStrictEqual(
+    full({ secondary: sec(true), coldhead: [{ t: T + 12 * H, v: 41 }] }).detail,
+    { edu_off: 4, sec_off: 0, sec_on: 4, sec_missing: 0, sec_stale: 0,
+      pressure: { baseline: 15.3, peak: 15.3, epsilon: 0.33, readings: 3, above: 0 },
+      pressure_frozen: false,
+      coldhead: { max: 41, warm_k: 55, readings: 1, frozen: false } },
+    "detail carries the counts and the numbers against their bars"
+  );
+  assert.strictEqual(full({ p_points: [] }).detail.pressure, null, "no pressure readings: no pressure detail");
+  assert.deepStrictEqual(full({}).detail.coldhead, { max: null, warm_k: 55, readings: 0, frozen: false }, "a silent coldhead says so");
+  // Frozen, not silent: the stale readings set aside are named as such.
+  const frozen = full({
+    p_points: [], secondary_stale: sec(true), p_stale: flat, coldhead_stale: [{ t: T + 12 * H, v: 42 }]
+  }).detail;
+  assert.strictEqual(frozen.sec_stale, 4, "every EDU off reading had only a frozen scanner reading");
+  assert.strictEqual(frozen.pressure_frozen, true);
+  assert.strictEqual(frozen.coldhead.frozen, true);
+  assert.strictEqual(full({ warm_k: null }).detail.coldhead, null, "no warm bar (Philips): no coldhead line");
+  assert.strictEqual(overall_type(["doubtful", "confirmed"]), "confirmed");
+  assert.strictEqual(overall_type(["doubtful", "doubtful"]), "doubtful");
+  assert.strictEqual(overall_type(["doubtful", "unconfirmed"]), "unconfirmed");
+  assert.strictEqual(overall_type([]), null);
+  const st = stale_times([{ t: 1, host_t: 5 }, { t: 2, host_t: 5 }, { t: 3, host_t: 6 }, { t: 4, host_t: null }, { t: 5, host_t: null }]);
+  assert.deepStrictEqual([...st], [2], "only a repeated host timestamp is stale");
+}
+
+// --- boundary context is optional (boundary.js, Codex round 4 F1) -----------
+// Async: the closing "all assertions passed" waits for it.
+let boundary_check = Promise.resolve();
+{
+  const { with_context_fallback } = require("../boundary");
+  boundary_check = (async () => {
+    const ok = await with_context_fallback(async () => ({ series_before: [1] }));
+    assert.deepStrictEqual(ok, { context: { series_before: [1] }, context_error: null });
+    const failed = await with_context_fallback(async () => { throw new Error("connection reset"); });
+    assert.deepStrictEqual(failed, { context: null, context_error: "connection reset" }, "a failed lookup continues without context");
+    // ...and the analysis runs without it.
+    const { analyze_system } = require("../compute/analyze");
+    const { VENDORS } = require("../vendors");
+    const { DateTime } = require("luxon");
+    const T = Date.UTC(2026, 7, 1);
+    const series = Array.from({ length: 48 }, (_, i) => ({ t: T + i * 1800e3, host_t: T + i * 1800e3, pressure: 12, pressure_avg: null, helium: 50, compressor_on: true, coldhead_k: null, shield_k: null, temp_alarm: null, quenched: null }));
+    const window = { start: DateTime.fromMillis(T, { zone: "utc" }), end: DateTime.fromMillis(T + 86400e3, { zone: "utc" }) };
+    const { facts } = analyze_system({ system_id: "SME00001", vendor: VENDORS.PHILIPS, series, window, context: failed.context });
+    assert.strictEqual(facts.archetype, "stable_healthy", "context: null analyzes normally");
+  })();
+}
+
+// --- before-window vendor queries (sql/sql.js series_before) ----------------
+// The boundary context's vendor rows: the latest BEFORE_ROWS before the
+// window, any age (Codex round 3), derived from each series file.
+{
+  const fs = require("fs");
+  const path = require("path");
+  const { series_before, BEFORE_ROWS } = require("../sql/sql");
+  const files = {
+    "mag.philips_mri_monitoring_data_agg": "philips-series.sql",
+    "mag.ge_mm3": "ge-mm3-series.sql",
+    "mag.ge_mm4": "ge-mm4-series.sql",
+    "mag.siemens": "siemens-series.sql",
+    "mag.siemens_non_tim": "siemens-non-tim-series.sql"
+  };
+  assert.deepStrictEqual(Object.keys(series_before).sort(), Object.keys(files).sort(), "one before-window query per vendor table");
+  // Every table data.fetch_series can name as its source has one.
+  const data_src = fs.readFileSync(path.join(__dirname, "..", "data.js"), "utf8");
+  const sources = [...new Set([...data_src.matchAll(/source = "(mag\.[a-z0-9_]+)"/g)].map((m) => m[1]))].sort();
+  assert.deepStrictEqual(sources, Object.keys(files).sort(), "every fetch_series source has a before-window query");
+  for (const [source, file] of Object.entries(files)) {
+    const q = series_before[source];
+    const orig = fs.readFileSync(path.join(__dirname, "..", "sql", file), "utf8");
+    assert.ok(!/BETWEEN/.test(q) && /capture_datetime < \$2/.test(q), `${source}: no lower bound, strictly before the window`);
+    assert.ok(new RegExp(`ORDER BY capture_datetime DESC\\s+LIMIT ${BEFORE_ROWS}`).test(q), `${source}: newest first, bounded`);
+    assert.ok(q.includes(`FROM ${source}`), `${source}: same table`);
+    assert.strictEqual(q.split("FROM")[0], orig.split("FROM")[0], `${source}: same columns as the series query`);
+  }
+}
+
+boundary_check
+  .then(() => console.log("check_compute: all assertions passed"))
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });

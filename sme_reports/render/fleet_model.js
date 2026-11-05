@@ -198,17 +198,28 @@ const rank_within_section = (a, b) => {
 
 // One short clause explaining why a system is on the attention list, in the
 // terms that condition actually turns on.
+
+// "30 days" / "36 hours" — the span a fitted rise was measured over.
+const span_words = (hours) =>
+  hours >= 48 ? `${Math.round(hours / 24)} days` : `${Math.round(hours)} hours`;
+
+// The EDU-off issue type leads a stop's reason (compute/corroborate.js), so
+// the fleet cell's truncation can never cut it. A confirmed stop, or one on
+// a vendor-only system, reads as before.
+const CORROB_PREFIX = { doubtful: "may not be off · ", unconfirmed: "unconfirmed · " };
+const corrob_prefix = (r) => CORROB_PREFIX[r.compressor_corroboration] || "";
+
 const attention_reason = (r) => {
   if (r.quenched === true) return "quench state recorded this period";
   // Left-censored and corroborated warm: a real state, but a finished one.
   if (r.offline_kind === "warm") return "off the entire period — magnet already warmᶜ";
   if (r.archetype === "compressor_stop_ongoing")
-    return r.primary_event
+    return corrob_prefix(r) + (r.primary_event
       ? `compressor off ${fmt.hours(r.primary_event.off_hours)} and not recovered`
-      : "compressor off and not recovered";
+      : "compressor off and not recovered");
   if (r.archetype === "compressor_stop_recovered") {
     const each = r.event_count > 1 ? ` across ${r.event_count} events` : "";
-    return `off ${fmt.hours(r.off_hours_total)}${each}, recovered`;
+    return `${corrob_prefix(r)}off ${fmt.hours(r.off_hours_total)}${each}, recovered`;
   }
   if (r.archetype === "threshold_exceeded") {
     // Explain from the reading that triggered the classification, not from
@@ -232,6 +243,10 @@ const attention_reason = (r) => {
   }
   if (r.archetype === "pressure_rising") {
     const name = r.primary_name.toLowerCase();
+    // The climb itself is the reason: "he pressure up 1.05 PSI in 30 days,
+    // now 2.43". Older records (no primary_rise) keep the wording below.
+    if (r.primary_rise != null && r.primary_rise_hours != null && r.primary_value !== null)
+      return `${name} up ${fmt.num(r.primary_rise, r.primary_decimals)} ${r.primary_units} in ${span_words(r.primary_rise_hours)}, now ${fmt.num(r.primary_value, r.primary_decimals)}`;
     // Band-alerted systems have no percentage by design, so this cannot lean
     // on one — it used to print "trending up at — of its limit" for every
     // rising Siemens TIM system.
@@ -793,10 +808,12 @@ const build_fleet_model = (records, failures, meta = {}) => {
       : "Fleet Magnet Health Summary",
     scope,
     analyzed_date: meta.analyzed_date || fmt.iso_date(Date.now()),
+    // meta.window_span: an explicit report window's own wording (times and
+    // zone, periods.js span_text) — the records only carry its instants.
     window_span:
       window_start === null
         ? "no data this period"
-        : `${fmt.day(window_start)} – ${fmt.day(window_end)}`,
+        : meta.window_span || `${fmt.day(window_start)} – ${fmt.day(window_end)}`,
     total: rows.length,
     attention,
     attention_count: attention.length,

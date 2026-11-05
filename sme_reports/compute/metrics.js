@@ -75,7 +75,53 @@ const metric_facts = (points, event, { other_events = [] } = {}) => {
     last: { ...all.last },
     baseline_value: base_v,
     delta_vs_baseline: base_v === null ? null : all.last.v - base_v,
-    rate_per_hr
+    rate_per_hr,
+    // Least-squares fit over every reading in the period — the input to
+    // the steady-rise judgment (judgments.js steady_rise).
+    trend: linear_trend(points)
+  };
+};
+
+// Least-squares trend over the period's readings: the fitted slope
+// (units/hr), the span it was fitted over, and the rise the fit implies
+// across that span (slope × span — the line's end minus its start, so a
+// bump that comes back down contributes ~nothing, unlike peak − first).
+// Null with fewer than 3 readings or a span under 1 hour. Times are
+// centered before squaring: raw epoch ms squared loses precision.
+const linear_trend = (points) => {
+  if (!points || points.length < 3) return null;
+  const t0 = points[0].t;
+  const span_hours = (points[points.length - 1].t - t0) / HOUR_MS;
+  if (!(span_hours >= 1)) return null;
+  const n = points.length;
+  let mx = 0;
+  let my = 0;
+  for (const p of points) {
+    mx += (p.t - t0) / HOUR_MS;
+    my += p.v;
+  }
+  mx /= n;
+  my /= n;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (const p of points) {
+    const dx = (p.t - t0) / HOUR_MS - mx;
+    const dy = p.v - my;
+    sxy += dx * dy;
+    sxx += dx * dx;
+    syy += dy * dy;
+  }
+  if (sxx === 0) return null;
+  const slope_per_hr = sxy / sxx;
+  return {
+    slope_per_hr,
+    span_hours,
+    fitted_rise: slope_per_hr * span_hours,
+    fitted_start: my - slope_per_hr * mx,
+    // Share of the variance the line explains: near 0 for noise or a
+    // bump-and-return, near 1 for a steady climb.
+    r2: syy === 0 ? 0 : (sxy * sxy) / (sxx * syy)
   };
 };
 
@@ -95,4 +141,4 @@ const valid_counts = (series) => ({
   helium: series.filter((r) => r.helium !== null).length
 });
 
-module.exports = { stats_for, metric_facts, clock_skew_minutes, valid_counts };
+module.exports = { stats_for, metric_facts, linear_trend, clock_skew_minutes, valid_counts };

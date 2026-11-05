@@ -568,7 +568,7 @@ svg .thr{stroke-dasharray:5 4;stroke-width:1.3}
 svg .thr.high{stroke:var(--high)} svg .thr.med{stroke:var(--med)}
 svg .pline{fill:none;stroke:var(--blue);stroke-width:1.8;stroke-linejoin:round}
 svg .lline{fill:none;stroke:var(--navy);stroke-width:1.5;stroke-linejoin:round}
-svg .con{fill:var(--ok)} svg .coff{fill:var(--high)}
+svg .con{fill:var(--ok)} svg .coff{fill:var(--high)} svg .bk{fill-opacity:.45}
 svg .sechead{fill:var(--fill)}
 svg .secrule{stroke:var(--line);stroke-width:1}
 svg .sect{font-size:12.5px;font-weight:700;letter-spacing:.1em;fill:var(--blue)}

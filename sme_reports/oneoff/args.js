@@ -20,6 +20,14 @@ const USAGE = `usage: npm run report -- <job> [options]
   --list                 list the jobs in the config and exit
   --config <path>        job config file (default: sme_reports/oneoff/jobs.config.json)
   --period <spec>        override the job period: 7d, 30d, 90d, 6mo, or a day count
+                         (the rolling period ending today — replaces any
+                         window the job config sets)
+  --from <when>          window start: 2026-10-09 (whole day) or
+                         2026-10-09T14:00 / "2026-10-09 14:00" (exact)
+  --to <when>            window end, same forms; alone, the job period
+                         counts back from it ("the 30 days before")
+  --tz <zone>            zone for --from/--to without Z or an offset
+                         (default America/New_York; e.g. America/Chicago, UTC)
   --customer <id>        override the job's customer scope (customer_summary, sme_brief)
   --system <SME#####>    override the job's system list (repeatable)
   --out-dir <path>       write documents here instead of sme_reports/out
@@ -39,6 +47,9 @@ const parse_oneoff_args = (args) => {
     job: null,
     config_path: null,
     period: null,
+    from: null,
+    to: null,
+    tz: null,
     customer_id: null,
     system_ids: [],
     out_dir: null,
@@ -71,6 +82,18 @@ const parse_oneoff_args = (args) => {
       case "--period":
         if (out.period) fail("--period given twice");
         out.period = value_of(args, ++i, "--period");
+        break;
+      case "--from":
+        if (out.from) fail("--from given twice");
+        out.from = value_of(args, ++i, "--from");
+        break;
+      case "--to":
+        if (out.to) fail("--to given twice");
+        out.to = value_of(args, ++i, "--to");
+        break;
+      case "--tz":
+        if (out.tz) fail("--tz given twice");
+        out.tz = value_of(args, ++i, "--tz");
         break;
       case "--customer":
         if (out.customer_id) fail("--customer given twice");
@@ -124,6 +147,13 @@ const parse_oneoff_args = (args) => {
     }
   }
   if (!out.list && !out.job) fail("no job name given — run with --list to see the configured jobs");
+  // A window with a start is fixed by its two ends; a period beside it
+  // would be a second, possibly disagreeing, statement of its length.
+  // (--to with --period is the supported "N days ending at" form.)
+  if (out.from && out.period)
+    fail("--from and --period conflict — give --from/--to, or --to with --period for the period ending then");
+  if (out.tz && !out.from && !out.to)
+    fail("--tz only applies with --from/--to");
   return out;
 };
 
@@ -133,6 +163,11 @@ const parse_oneoff_args = (args) => {
 const overrides_of = (args) => {
   const o = {};
   if (args.period !== null) o.period = args.period;
+  // The window flags travel as a unit: either one replaces the job
+  // config's whole window (see config.js apply_overrides).
+  if (args.from !== null) o.from = args.from;
+  if (args.to !== null) o.to = args.to;
+  if (args.tz !== null) o.tz = args.tz;
   if (args.out_dir !== null) o.out_dir = args.out_dir;
   if (args.email !== null) o.email = args.email;
   if (args.system_pages !== null) o.system_pages = args.system_pages;

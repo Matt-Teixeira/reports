@@ -1,8 +1,6 @@
 // Priority-ordered event archetype classification. The archetype picks which
 // narrative template renders and colors several KPI tiles.
 
-const RISING_RATE_EPSILON = 0.001; // per-hour, in the metric's native units
-const RISING_PCT_OF_THRESHOLD = 0.6;
 
 // The CLOSED set of conditions classify can produce, in priority order —
 // conditions.js SEVERITY_ORDER must equal it exactly and render/narrative
@@ -32,14 +30,9 @@ const classify_inner = ({ compressor_event, pressure, thr }) => {
       (thr.high_lt !== null && pressure.all.min.v <= thr.high_lt))
   )
     return "threshold_exceeded";
-  if (
-    pressure &&
-    thr.high_gt !== null &&
-    pressure.rate_per_hr !== null &&
-    pressure.rate_per_hr > RISING_RATE_EPSILON &&
-    pressure.last.v >= thr.high_gt * RISING_PCT_OF_THRESHOLD
-  )
-    return "pressure_rising";
+  // A steady climb toward the line (judgments.js steady_rise, judged once
+  // in analyze). A spike that came back down is not a rise.
+  if (pressure && pressure.steady_rise) return "pressure_rising";
   return "stable_healthy";
 };
 

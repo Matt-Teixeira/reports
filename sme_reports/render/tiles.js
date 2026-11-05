@@ -1,7 +1,7 @@
 const fmt = require("./fmt");
 const { STATUS_LABELS } = require("../conditions");
 const { STALE_MS } = require("../compute/staleness");
-const { is_inferred } = require("../compute/provenance");
+const { comp_inferred } = require("../compute/provenance");
 
 // Builds the 5 KPI tile view-models {cls, k, v, s} for the vendor's tile set.
 // Status classes: good (teal) / warn (amber) / bad (red) / ink (navy).
@@ -50,7 +50,7 @@ const BUILDERS = {
     // The ᶜ provenance mark (RULES.md §6): a coldhead-inferred state is a
     // conclusion, not a reading — every ON/OFF this tile prints from that
     // source carries the mark, exactly like the fleet's compressor cells.
-    const c = is_inferred(f.compressor_source) ? "ᶜ" : "";
+    const c = comp_inferred(f) ? "ᶜ" : "";
     // Distinct clustered events beyond the primary; "other", not "earlier" —
     // they can fall on either side of it.
     const others = (f.compressor_events || []).length - 1;
@@ -354,7 +354,9 @@ const degrade_tile = (key, tile, f, suspect) => {
   const stale =
     last && f.window_end - last.t > STALE_MS ? `as of ${fmt.day(last.t)} · ` : "";
   if (suspect) {
-    if (key === "compressor" && f.compressor_source === "edu_comp_vib")
+    // Only a state the EDU itself measured last stays confident: a backup
+    // reading at the end came through the convicted scanner chain.
+    if (key === "compressor" && (f.compressor_last_source || f.compressor_source) === "edu_comp_vib")
       return tile;
     return { ...tile, cls: "dim", s: stale + NOT_JUDGED };
   }

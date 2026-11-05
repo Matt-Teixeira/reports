@@ -1,6 +1,7 @@
 const { DateTime } = require("luxon");
 const { PLOT, linear, y_ticks, x_ticks } = require("./scales");
 const CHARW8 = require("./assets/charw8");
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Pure SVG time-series chart generator reproducing the reports_new exemplar
 // geometry: gridlines + right-anchored y labels, x date ticks, orange event
@@ -130,25 +131,56 @@ const render_timeseries_chart = ({
   // movable labels route around them instead of sitting on them.
   const layout = make_layout(640, height);
 
-  for (const v of y_ticks(y_spec)) {
+  // Every tick keeps its gridline; when adjacent labels would sit closer
+  // than one label's height (a short compact-banner chart), only every
+  // other tick is labelled. Charts with room are untouched.
+  const yt = y_ticks(y_spec);
+  const Y_LABEL_MIN_GAP = 11;
+  const tight = yt.some((v, i) => i > 0 && Math.abs(sy(v) - sy(yt[i - 1])) < Y_LABEL_MIN_GAP);
+  yt.forEach((v, i) => {
     const y = r1(sy(v));
+    parts.push(`<line x1="${plot.x0}" x2="${plot.x1}" y1="${y}" y2="${y}" stroke="${COLORS.grid}" stroke-width="1"/>`);
+    if (tight && i % 2) return;
     parts.push(
-      `<line x1="${plot.x0}" x2="${plot.x1}" y1="${y}" y2="${y}" stroke="${COLORS.grid}" stroke-width="1"/>`,
       `<text x="40" y="${r1(y + 3)}" text-anchor="end" font-size="8.5" fill="${COLORS.axis_text}">${y_format(v)}</text>`
     );
     layout.block(label_box({ x: 40, y: r1(y + 3), anchor: "end", w: text_px(y_format(v), 8.5), size: 8.5 }));
-  }
+  });
 
   // Drop interior ticks that would repeat an endpoint's day label
   // (e.g. an interior midnight tick on the same day the window ends).
   // Interior ticks also draw a vertical gridline: the pressure and helium
   // charts share x_domain and PLOT, so their gridlines land on the same
   // columns and the two read as layers over one time axis.
+  //
+  // A window off UTC day boundaries (an explicit window given in hours, or
+  // in another zone's days) labels its two ENDS with their time — a
+  // four-hour chart under "10-09" and "10-09" says nothing. Every window
+  // that sits on whole UTC days (each rolling period) keeps day labels.
   const ticks = x_ticks(x_domain, sx);
+  const on_day = (t) => t % DAY_MS === 0;
+  const timed = !on_day(x_domain[0]) || !(on_day(x_domain[1]) || on_day(x_domain[1] + 1));
+  const label_of = (tick) =>
+    timed && tick.anchor !== "middle"
+      ? `${DateTime.fromMillis(tick.t, { zone: "utc" }).toFormat("MM-dd HH:mm")}Z`
+      : day_label(tick.t);
   const end_labels = [day_label(x_domain[0]), day_label(x_domain[1])];
+  // The wider timed end labels can reach an interior tick the 28 px
+  // spacing rule (scales.js) cleared for a day label; such a tick is
+  // dropped rather than drawn over an end.
+  const end_boxes = timed
+    ? ticks
+        .filter((t) => t.anchor !== "middle")
+        .map((t) => label_box({ x: r1(sx(t.t)), y: label_y, anchor: t.anchor, w: text_px(label_of(t), 8.5), size: 8.5 }))
+    : [];
   for (const tick of ticks) {
-    const label = day_label(tick.t);
+    const label = label_of(tick);
     if (tick.anchor === "middle" && end_labels.includes(label)) continue;
+    if (
+      tick.anchor === "middle" &&
+      end_boxes.some((b) => boxes_overlap(b, label_box({ x: r1(sx(tick.t)), y: label_y, anchor: "middle", w: text_px(label, 8.5), size: 8.5 }), 4))
+    )
+      continue;
     if (tick.anchor === "middle")
       parts.push(
         `<line x1="${r1(sx(tick.t))}" x2="${r1(sx(tick.t))}" y1="${plot.y1}" y2="${plot.y0}" stroke="${COLORS.grid}" stroke-width="1"/>`

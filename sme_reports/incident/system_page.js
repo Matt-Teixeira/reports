@@ -27,6 +27,112 @@ const ZONES = [
   { tz: "UTC", label: "UTC", abbr: "UTC" }
 ];
 
+// --- "Compressor stops": what the other data says about each EDU stop ---
+// One card per EDU-reported stop in the window (activity.js a.stops, from
+// compute/corroborate.js): the verdict, then the evidence that decided it,
+// in the rule's order — the second compressor channel, then the magnet's
+// thermal readings. Static text in Eastern time: the verdict never changes
+// with the reader's zone, and the times sit beside the timeline's.
+const VERDICT = {
+  confirmed: { label: "Confirmed", lead: "The EDU vibration sensor read off, and other data agrees." },
+  doubtful: { label: "May not be off", lead: "The EDU vibration sensor read off, but other data suggests the compressor may have kept running." },
+  unconfirmed: { label: "Unconfirmed", lead: "The EDU vibration sensor read off. Other data neither confirms nor disputes it." }
+};
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const et = (t) => DateTime.fromMillis(t, { zone: TZ_DEFAULT }).toFormat("LLL d HH:mm ZZZZ");
+
+const stop_card = (ev, s, labels) => {
+  const c = ev.corroboration;
+  const d = c.detail || {};
+  const v = VERDICT[c.type] || VERDICT.unconfirmed;
+  const when = ev.end == null ? `${et(ev.start)} → still off at the end of the period` : `${et(ev.start)} → ${et(ev.end)}`;
+  // off_count counts the merged stream; detail.edu_off only the EDU's. A stop
+  // the backup helped fill says how its off readings split.
+  const edu_off = d.edu_off == null ? ev.off_count : d.edu_off;
+  const readings =
+    edu_off === ev.off_count
+      ? plural(ev.off_count, "EDU off reading")
+      : `${plural(ev.off_count, "off reading")} (${edu_off} from the EDU, ${ev.off_count - edu_off} from ${s.secondary || "the backup"} where the EDU was silent)`;
+  const meta = [`~${ev.off_hours.toFixed(1)} h off`, readings, ev.cycles > 1 ? `${ev.cycles} off-runs` : null].filter(Boolean).join(" · ");
+  const why = [];
+
+  // 1. The second compressor channel.
+  if (!s.secondary) why.push("This system has no second compressor channel: the EDU is its only compressor signal.");
+  else {
+    const name = `${cap(s.secondary)}${s.table ? ` (${esc(s.table)}${s.secondary === "the coldhead" ? ", inferred: under its warm bar means running" : ""})` : ""}`;
+    const frozen = d.sec_stale ? ` (at ${d.sec_stale} of them its only readings repeat one host time: a frozen feed)` : "";
+    if (!d.sec_off && !d.sec_on)
+      why.push(`${name} had no fresh reading within 45 minutes of any of the ${plural(d.edu_off, "EDU off reading")}${frozen}.`);
+    else
+      why.push(
+        `${name} said off at ${d.sec_off} and running at ${d.sec_on} of the ${plural(d.edu_off, "EDU off reading")}` +
+          (d.sec_missing ? `, and had no fresh reading within 45 minutes of the other ${d.sec_missing}${frozen}.` : ".")
+      );
+  }
+  // 2. Thermal: pressure (the primary metric) at the stop's start.
+  const u = labels.p_units ? ` ${esc(labels.p_units)}` : "";
+  const n = (x) => (x == null ? "—" : Number(x).toFixed(labels.p_dec));
+  const p = d.pressure;
+  if (!p)
+    why.push(
+      d.pressure_frozen
+        ? `${esc(labels.primary)}: only frozen-feed readings (one repeated host time) in the 2 hours after the stop began.`
+        : `${esc(labels.primary)}: no live readings in the 2 hours after the stop began.`
+    );
+  else if (p.epsilon == null) why.push(`${esc(labels.primary)}: no alert limit is configured, so a rise cannot be judged.`);
+  else
+    why.push(
+      `${esc(labels.primary)}: ${n(p.baseline)}${u} before the stop, peak ${n(p.peak)}${u} in the 2 hours after. ` +
+        `Warming takes at least two readings ${n(p.epsilon)}${u} or more above that (2% of the alert limit); ${p.above} ${p.above === 1 ? "was" : "were"}.`
+    );
+  // 2b. Thermal: the coldhead against its warm bar, where the vendor has one.
+  const ch = d.coldhead;
+  if (ch)
+    why.push(
+      ch.readings
+        ? `Coldhead: peaked at ${ch.max.toFixed(1)} K during the stop, ${ch.max >= ch.warm_k ? "past" : "under"} the ${ch.warm_k} K warm bar.`
+        : ch.frozen
+          ? "Coldhead: only frozen-feed readings during the stop."
+          : "Coldhead: no live readings during the stop."
+    );
+
+  // The verdict, in the rule's words.
+  const sec_off = c.secondary === "off", warm = c.thermal === "warming";
+  const because =
+    c.type === "confirmed"
+      ? `Confirmed because ${[sec_off ? "the second channel also read off" : null, warm ? "the magnet warmed" : null].filter(Boolean).join(" and ")}.`
+      : c.type === "doubtful"
+        ? "Marked “may not be off” because the second channel read running and the magnet showed no warming at the stop."
+        : c.secondary === "on"
+          ? // on + steady is doubtful and on + warming confirmed, so thermal is unknown here.
+            "Unconfirmed because the second channel read running, but there is no live thermal data to back it."
+          : `Unconfirmed because ${s.secondary ? "the second channel had no fresh reading" : "there is no second channel"}, and ${
+              c.thermal === "steady" ? "the magnet's steady readings alone cannot settle it" : "there is no live thermal data"
+            }.`;
+
+  return `      <article class="stopcard ${c.type}">
+        <div class="stophead"><span class="verdict ${c.type}">${v.label}</span><span class="stopwhen">${when}</span></div>
+        <p class="stopmeta">${meta}</p>
+        <p>${v.lead}</p>
+        <ul class="why">${why.map((w) => `<li>${w}</li>`).join("")}</ul>
+        <p class="because">${because} The stop stays listed as the EDU reported it.</p>
+      </article>`;
+};
+
+const stops_section = (a) => {
+  const s = a.stops;
+  if (!s || !s.events.length) return "";
+  return `
+  <section>
+    <div class="panel stops">
+      <h2 class="lanes-title">Compressor stops</h2>
+      <p class="cap">Each stop the EDU vibration sensor reported, checked against the other data in order: the second compressor channel first, then the magnet's thermal readings. A reading that repeats the previous one's host time is a frozen feed and counts for nothing.</p>
+${s.events.map((ev) => stop_card(ev, s, a.labels)).join("\n")}
+    </div>
+  </section>`;
+};
+
 // One system's part of a page: everything inside the page's .wrap, its
 // timeline payload (serialized once, script-safe: a fleet batch holds every
 // section until its app is written), and the figures the System Activity app's dashboard
@@ -38,7 +144,7 @@ const ZONES = [
 // not be analyzed carries instead of readings.
 const system_section = (
   a,
-  { identity: id, meta = {}, model_count, notice = null, audience = "external" }
+  { identity: id, meta = {}, model_count, notice = null, audience = "external", span: span_override = null }
 ) => {
   if (!["internal", "external"].includes(audience)) throw new Error(`unknown audience ${audience}`);
   const internal = audience === "internal";
@@ -49,8 +155,19 @@ const system_section = (
   // Where the compressor state came from: the EDU vibration sensor, or the
   // magnet monitor's own channel (scanner-reported or coldhead-inferred).
   const comp_table = a.sources.compressor === "edu_comp_vib" ? a.sources.edu : a.sources.mag;
+  // A second compressor strip when the EDU is primary: the vendor channel
+  // as it reported (activity.js sources.alt). The Compressor strip is the
+  // merged state, with that channel standing in where the EDU was silent.
+  const alt = a.sources.alt || null;
+  const extra_table = [comp_table, alt && alt.table].find((t) => t && t !== a.sources.mag) || null;
+  const backup = a.sources.backup || null;
+  const strip_note = !alt
+    ? ""
+    : ` The Compressor strip is the EDU vibration sensor, which this report judges and the compressor alert watches.` +
+      (backup ? ` Where the EDU was silent it shows the ${backup.toLowerCase()} reading instead, drawn lighter.` : "") +
+      ` The ${alt.label} strip below it is the magnet monitor's own reading, every capture, for comparison. The two can disagree.`;
   const data_sub = a.analyzed
-    ? `Readings from ${a.sources.mag}${comp_table && comp_table !== a.sources.mag ? ` and ${comp_table}` : ""}, one point per capture slot`
+    ? `Readings from ${a.sources.mag}${extra_table ? ` and ${extra_table}` : ""}, one point per capture slot`
     : "No readings shown: this system could not be analyzed for this period";
 
   const payload = {
@@ -60,7 +177,7 @@ const system_section = (
     tz_default: TZ_DEFAULT,
     zones: ZONES,
     window: a.window,
-    sources: { mag: a.sources.mag, edu: comp_table },
+    sources: { mag: a.sources.mag, edu: comp_table, alt, backup },
     data_sub,
     labels: a.labels,
     models: a.models,
@@ -87,7 +204,11 @@ const system_section = (
     { k: "Customer", v: esc(id.customer_name), s: [esc(id.customer_id), id.site_group_name && `site group ${esc(id.site_group_name)}`].filter(Boolean).join(" · ") },
     { k: "Monitoring", v: feeds.length ? feeds.join(" · ") : "—", s: `${model_count} alert models` }
   ];
-  const span = `${DateTime.fromMillis(a.window.from, { zone: TZ_DEFAULT }).toFormat("LLL d")} – ${DateTime.fromMillis(a.window.to, { zone: TZ_DEFAULT }).toFormat("LLL d, yyyy")}`;
+  // An explicit report window arrives already worded (periods.js
+  // span_text: its times and zone); a rolling one is named by its days.
+  const span =
+    span_override ||
+    `${DateTime.fromMillis(a.window.from, { zone: TZ_DEFAULT }).toFormat("LLL d")} – ${DateTime.fromMillis(a.window.to, { zone: TZ_DEFAULT }).toFormat("LLL d, yyyy")}`;
   const p_head = `${esc(a.labels.primary)}${a.labels.p_units ? ` (${esc(a.labels.p_units)})` : ""}`;
   const l_head = `${esc(a.labels.level)}${a.labels.l_units && a.labels.l_units !== "%" ? ` (${esc(a.labels.l_units)})` : ""}`;
 
@@ -107,9 +228,10 @@ ${notice ? `
     <div class="panel lanes">
       <h2 class="lanes-title">Timelines</h2>
       <div id="lanes"></div>
-      <p class="cap">Dashed lines in Data are alert thresholds, breaks in a line are missing readings, and the compressor strip is green while running and red while off. Detection marks are colored by severity.</p>
+      <p class="cap">Dashed lines in Data are alert thresholds, breaks in a line are missing readings, and the compressor strip${alt ? "s are" : " is"} green while running and red while off.${strip_note} Detection marks are colored by severity.</p>
     </div>
   </section>
+${stops_section(a)}
 
   <section>
     <details class="panel recips">
@@ -154,7 +276,7 @@ ${notice ? `
       <div class="leftcol">
         <div class="panel tablewrap">
           <table>
-            <thead><tr><th scope="col" id="th-time">Captured</th><th scope="col" class="num">${l_head}</th><th scope="col" class="num">${p_head}</th><th scope="col">Compressor</th><th scope="col">Alerts</th></tr></thead>
+            <thead><tr><th scope="col" id="th-time">Captured</th><th scope="col" class="num">${l_head}</th><th scope="col" class="num">${p_head}</th><th scope="col">Compressor</th>${alt ? `<th scope="col">${esc(alt.label)}</th>` : ""}<th scope="col">Alerts</th></tr></thead>
             <tbody id="rows"></tbody>
           </table>
         </div>
@@ -185,6 +307,17 @@ ${notice ? `
 
 // Shell rules beside timeline.js's CSS.
 const PAGE_CSS = `.notice{padding:14px 18px;border:1.5px solid var(--light);border-left:5px solid var(--blue);color:var(--ink)}
+.stops{padding:18px 20px;margin-top:16px}
+.stopcard{border:1px solid var(--line);border-left:5px solid var(--line);border-radius:8px;padding:12px 16px;margin-top:12px;background:var(--panel)}
+.stopcard.confirmed{border-left-color:var(--high)} .stopcard.doubtful{border-left-color:var(--ok)} .stopcard.unconfirmed{border-left-color:var(--med)}
+.stophead{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.verdict{font-weight:800;font-size:12px;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:6px}
+.verdict.confirmed{background:var(--high-bg);color:var(--high)} .verdict.doubtful{background:var(--ok-bg);color:var(--ok)} .verdict.unconfirmed{background:var(--med-bg);color:var(--med)}
+.stopwhen{font-weight:700;color:var(--head)}
+.stopmeta{margin:4px 0 8px;color:var(--muted);font-size:13px}
+.stopcard p{margin:6px 0}
+.stopcard .why{margin:6px 0;padding-left:20px} .stopcard .why li{margin:3px 0}
+.stopcard .because{color:var(--muted);font-size:13.5px}
 .internal-tag{display:inline-block;margin-left:8px;padding:1px 7px;border:1.5px solid currentColor;border-radius:3px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;vertical-align:1px}`;
 
 const brandbar = ({ period_label, internal, date }) => `<header class="brandbar"><div class="wrap">

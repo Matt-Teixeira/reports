@@ -40,14 +40,16 @@ const send_summary_email = async (
   results,
   failures,
   fleet_pdf_path,
-  { scope_label = null, lookback_days = null, fleet_error = null, activity = null } = {}
+  { scope_label = null, lookback_days = null, window_label = null, fleet_error = null, activity = null } = {}
 ) => {
   const date = new Date().toISOString().slice(0, 10);
   // Scoped runs lead with WHO the summary covers; non-default periods say
   // so in the subject — a 7-day, a 6-month and a 30-day summary sent the
   // same day must be tellable apart from the inbox list. The wording is
   // shared with the artifact tags (periods.js).
-  const label = period_label(lookback_days);
+  // window_label: an explicit window's own span ("Oct 9 14:00 – Oct 11,
+  // 2026 18:00 ET"), which the inbox list needs more than a period name.
+  const label = window_label || period_label(lookback_days);
   const period = label ? ` — ${label}` : "";
   const subject = `Magnet Health Summary — ${scope_label ? `${scope_label} — ` : ""}${results.length} systems${period} — ${date}`;
 

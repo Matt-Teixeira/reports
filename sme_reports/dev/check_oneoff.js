@@ -12,6 +12,7 @@ const {
   period_of_days,
   period_tag,
   period_label,
+  span_text: span_text_of,
   DEFAULT_DAYS
 } = require("../periods");
 const { load_job_config, apply_overrides, build_request, describe_job } = require("../oneoff/config");
@@ -406,6 +407,207 @@ const CONFIG = {
   assert.strictEqual(format_of(from_file), "pages", "the job key reaches the batch");
   assert.ok(/activity pages: external, one file$/.test(describe_job(apply_overrides(jobs.get("customer"), { system_pages: true }))));
   assert.ok(/, one file per system$/.test(describe_job(from_file)));
+}
+
+// --- explicit windows: bounds, zones, wording, tags --------------------------
+{
+  const { window_of } = require("../request_loader");
+  const { span_text, window_tag, window_label } = require("../periods");
+  const ET = "America/New_York";
+  const iso = (dt) => dt.toUTC().toISO();
+
+  // Request files keep their exact historical windows: dates are whole
+  // UTC days, no window is the rolling 30 days ending today.
+  const legacy = window_of({ start: "2026-07-08", end: "2026-08-07" });
+  assert.strictEqual(iso(legacy.start), "2026-07-08T00:00:00.000Z");
+  assert.strictEqual(iso(legacy.end), "2026-08-07T23:59:59.999Z");
+  assert.strictEqual(legacy.tz, "utc");
+  assert.strictEqual(legacy.explicit, true);
+  assert.strictEqual(legacy.lookback_days, null);
+  assert.strictEqual(span_text(legacy), "Jul 8 – Aug 7", "whole UTC days read as they always did");
+  assert.strictEqual(window_tag(legacy), "-20260708-to-20260807", "an explicit window never shares the 30-day name");
+  const rolling = window_of(null);
+  assert.strictEqual(rolling.explicit, false);
+  assert.strictEqual(rolling.lookback_days, 30);
+  assert.strictEqual(window_tag(rolling), "", "the rolling default keeps no tag");
+  assert.strictEqual(window_label(rolling), null);
+  assert.strictEqual(window_tag(window_of({ lookback_days: 7 })), "-7d");
+  assert.strictEqual(
+    span_text(rolling),
+    `${rolling.start.toFormat("LLL d")} – ${rolling.end.toFormat("LLL d")}`,
+    "a rolling window's wording is the historical day span"
+  );
+
+  // A time is the instant given — it used to be silently moved to a day
+  // boundary.
+  const exact = window_of({ start: "2026-10-09T14:00:00Z", end: "2026-10-11T18:00Z" });
+  assert.strictEqual(iso(exact.start), "2026-10-09T14:00:00.000Z");
+  assert.strictEqual(iso(exact.end), "2026-10-11T18:00:00.000Z");
+  assert.strictEqual(span_text(exact), "Oct 9 14:00Z – Oct 11 18:00Z");
+
+  // Zone-less times are read in tz; a Z or offset still wins.
+  const et = window_of({ start: "2026-10-09T14:00", end: "2026-10-11 18:00", tz: ET });
+  assert.strictEqual(iso(et.start), "2026-10-09T18:00:00.000Z", "14:00 EDT");
+  assert.strictEqual(iso(et.end), "2026-10-11T22:00:00.000Z", "a space works for the T");
+  assert.strictEqual(et.tz, ET);
+  assert.strictEqual(span_text(et), "Oct 9 14:00 – Oct 11 18:00 ET");
+  assert.strictEqual(span_text(et, { caps: true }), "OCT 9 14:00 → OCT 11 18:00 ET");
+  assert.strictEqual(span_text(et, { year: true }), "Oct 9 14:00 – Oct 11, 2026 18:00 ET");
+  assert.strictEqual(window_label(et), "Oct 9 14:00 – Oct 11, 2026 18:00 ET");
+  assert.strictEqual(window_tag(et), "-20261009T1400-to-20261011T1800", "tagged in the zone typed");
+  assert.strictEqual(iso(window_of({ start: "2026-10-09T18:00Z", end: "2026-10-10", tz: ET }).start), "2026-10-09T18:00:00.000Z");
+  assert.strictEqual(iso(window_of({ start: "2026-10-09T20:00+02:00", end: "2026-10-10", tz: ET }).start), "2026-10-09T18:00:00.000Z");
+  assert.strictEqual(span_text(window_of({ start: "2026-10-09T14:00", end: "2026-10-09T18:30", tz: ET })), "Oct 9 14:00 – 18:30 ET");
+
+  // Whole days in a zone: that zone's midnights, worded as days + zone.
+  const days = window_of({ start: "2026-10-01", end: "2026-10-31", tz: ET });
+  assert.strictEqual(iso(days.start), "2026-10-01T04:00:00.000Z");
+  assert.strictEqual(iso(days.end), "2026-11-01T03:59:59.999Z");
+  assert.strictEqual(span_text(days), "Oct 1 – Oct 31 ET");
+  assert.strictEqual(span_text(days, { year: true }), "Oct 1 – Oct 31, 2026 ET");
+  assert.strictEqual(window_tag(days), "-20261001-to-20261031");
+  // Midnight to midnight is one day (the end is exclusive), and a window
+  // across the DST change is still "ET".
+  assert.strictEqual(span_text(window_of({ start: "2026-10-01T00:00", end: "2026-10-02T00:00", tz: ET })), "Oct 1 ET");
+  assert.strictEqual(span_text(window_of({ start: "2026-10-30T12:00", end: "2026-11-02T12:00", tz: ET })), "Oct 30 12:00 – Nov 2 12:00 ET");
+
+  // Only an end: the period counts back from it — onto a day boundary
+  // from a whole-day end (the rolling shape), exactly from a timed one.
+  const back_day = window_of({ end: "2026-10-12", lookback_days: 7 });
+  assert.strictEqual(iso(back_day.start), "2026-10-05T00:00:00.000Z");
+  assert.strictEqual(back_day.lookback_days, 7, "an end-only window keeps its period");
+  assert.strictEqual(back_day.explicit, true);
+  const back_exact = window_of({ end: "2026-10-12T17:00", tz: ET, lookback_days: 7 });
+  assert.strictEqual(iso(back_exact.start), "2026-10-05T21:00:00.000Z");
+  assert.strictEqual(iso(back_exact.end), "2026-10-12T21:00:00.000Z");
+
+  // Loud on everything else.
+  const { DateTime } = require("luxon");
+  const now = DateTime.fromISO("2026-11-04T15:00:00Z", { zone: "utc" });
+  for (const [win, re] of [
+    [{ start: "2026-10" }, /not YYYY-MM-DD/],
+    [{ start: "10/09/2026" }, /not YYYY-MM-DD/],
+    [{ start: "2026-10-09T2pm" }, /not YYYY-MM-DD/],
+    [{ start: "2026-13-01" }, /not a valid date/],
+    [{ start: 20261009 }, /must be a date/],
+    [{ start: "2026-10-09", tz: "Mars/Base" }, /not a known time zone/],
+    [{ start: "2026-10-09", end: "2026-10-08" }, /before window.end/],
+    [{ start: "2026-10-09T14:00Z", end: "2026-10-09T14:30Z" }, /shorter than 1 hour/],
+    [{ start: "2026-10-09", end: "2026-11-05" }, /in the future/],
+    [{ start: "2026-10-09", end: "2026-11-04T16:00Z" }, /in the future/],
+    [{ start: "2026-11-04T16:00Z" }, /in the future/],
+    [{ tz: "America/New_York" }, /window.tz only applies with window.start/],
+    [{ lookback_days: 7, tz: "UTC" }, /window.tz only applies with window.start/]
+  ])
+    throws(() => window_of(win, { now }), re, `rejects ${JSON.stringify(win)}`);
+  // ...but today is a valid whole-day end, and now is a valid exact one.
+  window_of({ start: "2026-10-09", end: "2026-11-04" }, { now });
+  window_of({ start: "2026-10-09", end: "2026-11-04T15:00Z" }, { now });
+
+  // A summary batch over an explicit window: one shared window comes back
+  // for the artifact names, and no history records are written for it.
+  const loaded = load_raw_request({
+    summary_only: true,
+    batch_email: { recipients: ["ops@example.com"], summary_pdf: true, archive_records: true },
+    reports: ["SME01096", "SME01097"].map((id) => ({
+      report_type: "magnet_health",
+      system_id: id,
+      window: { start: "2026-10-09T14:00", end: "2026-10-11T18:00", tz: ET }
+    }))
+  });
+  assert.ok(loaded.window && loaded.window.explicit);
+  assert.strictEqual(window_tag(loaded.window), "-20261009T1400-to-20261011T1800");
+  assert.strictEqual(loaded.batch_email.archive_records, false, "explicit windows write no history");
+  assert.strictEqual(loaded.history_skipped, true);
+  const rolling_batch = load_raw_request({
+    summary_only: true,
+    period: "7d",
+    batch_email: { recipients: ["ops@example.com"], summary_pdf: true },
+    reports: [{ report_type: "magnet_health", system_id: "SME01096" }]
+  });
+  assert.strictEqual(rolling_batch.window.explicit, false);
+  assert.strictEqual(rolling_batch.batch_email.archive_records, true, "rolling batches keep their history");
+  assert.strictEqual(rolling_batch.history_skipped, false);
+}
+
+// --- windows in the job layer: config keys, flags, layering ------------------
+{
+  const W = {
+    defaults: { period: "30d", recipients: ["ops@example.com"] },
+    jobs: {
+      incident: { kind: "sme_brief", system_ids: ["SME21284"], from: "2026-10-09T14:00", to: "2026-10-11T18:00" },
+      before: { kind: "sme_brief", system_ids: ["SME21284"], to: "2026-10-12", period: "7d" },
+      cust: { kind: "customer_summary", customer_id: "C0137", from: "2026-10-01", to: "2026-10-31", archive_records: true },
+      fleet: { kind: "fleet_summary", period: "6mo" }
+    }
+  };
+  const { jobs } = load_job_config(W);
+  const incident = jobs.get("incident");
+  assert.strictEqual(incident.tz, "America/New_York", "jobs read times as Eastern by default");
+  assert.strictEqual(incident.window.start.toUTC().toISO(), "2026-10-09T18:00:00.000Z");
+  const said = describe_job(incident);
+  assert.ok(said.includes("window Oct 9 14:00 – Oct 11, 2026 18:00 ET"), said);
+  assert.ok(said.includes("(2026-10-09T18:00Z → 2026-10-11T22:00Z)"), "the UTC instants are printed before the run");
+
+  // The composed request carries the window and the real loader accepts it.
+  const brief = load_raw_request(build_request(incident));
+  assert.strictEqual(brief.requests[0].window.end.toISO(), "2026-10-11T22:00:00.000Z");
+  assert.strictEqual(brief.requests[0].window.explicit, true);
+
+  // to + period: the period ending then.
+  const before = jobs.get("before");
+  assert.strictEqual(before.window.lookback_days, 7);
+  assert.ok(describe_job(before).includes("7-day period ending then"));
+  const before_req = load_raw_request(build_request(before)).requests[0].window;
+  assert.strictEqual(before_req.start.toISO(), "2026-10-05T04:00:00.000Z", "7 days before Oct 12, Eastern days");
+
+  // Scoped summary: the window rides report_defaults to every system.
+  const cust = jobs.get("cust");
+  assert.ok(describe_job(cust).includes("no history records (explicit window)"));
+  const scoped = load_raw_request(build_request(cust));
+  const mat = materialize_scoped_requests(scoped.raw, ["SME01096", "SME01097"]);
+  assert.ok(mat.requests.every((r) => r.window.start.toISO() === "2026-10-01T04:00:00.000Z"));
+  assert.strictEqual(mat.batch_email.archive_records, false);
+
+  // Config errors are named in the operator's words.
+  const job_err = (job, re, what) =>
+    throws(() => load_job_config({ defaults: W.defaults, jobs: { j: job } }), re, what);
+  job_err({ kind: "sme_brief", system_ids: ["SME1"], from: "2026-10-09", period: "7d" }, /from and period conflict/);
+  job_err({ kind: "sme_brief", system_ids: ["SME1"], tz: "UTC" }, /tz only applies with from\/to/);
+  job_err({ kind: "sme_brief", system_ids: ["SME1"], from: "2026-10-09", to: "next week" }, /job "j": to "next week" is not YYYY-MM-DD/);
+  job_err({ kind: "sme_brief", system_ids: ["SME1"], from: "2026-10-09", tz: "Eastern" }, /job "j": tz "Eastern" is not a known time zone/);
+  throws(
+    () => load_job_config({ defaults: { ...W.defaults, from: "2026-10-01" }, jobs: { j: W.jobs.fleet } }),
+    /defaults: unknown setting "from"/,
+    "a window belongs to a job, not the defaults"
+  );
+
+  // CLI flags.
+  const p = (...a) => parse_oneoff_args(a);
+  throws(() => p("sme", "--from", "2026-10-09", "--period", "7d"), /--from and --period conflict/);
+  throws(() => p("sme", "--tz", "UTC"), /--tz only applies with --from\/--to/);
+  throws(() => p("sme", "--to", "2026-10-09", "--to", "2026-10-10"), /--to given twice/);
+  throws(() => p("sme", "--from"), /--from requires a value/);
+  const ov = (job, ...a) => {
+    const args = p(job, ...a);
+    return apply_overrides(jobs.get(job), { ...overrides_of(args), customer_id: args.customer_id, system_ids: args.system_ids });
+  };
+  // The CLI window replaces the config's as a unit.
+  const only_to = ov("incident", "--to", "2026-10-10");
+  assert.strictEqual(only_to.from, null, "--to does not keep the config's from");
+  assert.strictEqual(only_to.window.lookback_days, 30, "...and counts the period back from it");
+  // --period alone is the rolling period: the config window is dropped.
+  const rolled = ov("incident", "--period", "7d");
+  assert.strictEqual(rolled.window, null);
+  assert.strictEqual(rolled.period.days, 7);
+  // --from/--to on a rolling job; --tz changes how they are read.
+  const chi = ov("fleet", "--from", "2026-10-09T14:00", "--to", "2026-10-10T14:00", "--tz", "America/Chicago");
+  assert.strictEqual(chi.window.start.toUTC().toISO(), "2026-10-09T19:00:00.000Z");
+  assert.strictEqual(span_text_of(chi.window), "Oct 9 14:00 – Oct 10 14:00 CT");
+  const fleet_req = load_raw_request(build_request(chi, { fleet_system_ids: ["SME01096"] }));
+  assert.ok(fleet_req.window.explicit);
+  throws(() => ov("fleet", "--from", "2026-10-09T14:00", "--to", "2026-10-09T14:20"), /command line: the window is shorter than 1 hour/);
+  throws(() => ov("fleet", "--from", "2026-10-09", "--to", "2099-01-01"), /command line: to "2099-01-01" is in the future/);
 }
 
 // --- the shipped config file itself loads ------------------------------------

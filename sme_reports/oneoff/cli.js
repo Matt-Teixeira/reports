@@ -6,6 +6,7 @@ const path = require("path");
 
 const { parse_oneoff_args, overrides_of, USAGE } = require("./args");
 const { load_job_config, apply_overrides, build_request, describe_job } = require("./config");
+const { span_text } = require("../periods");
 
 // One-off report runner: `npm run report -- <job> [flags]`.
 //
@@ -83,7 +84,7 @@ const print_outcome = (job, batch) => {
   const counts =
     `${batch.results.length} system${batch.results.length === 1 ? "" : "s"} analyzed` +
     (batch.failures.length ? `, ${batch.failures.length} failed` : "") +
-    ` · ${job.period.label} period` +
+    ` · ${job.window ? `window ${span_text(job.window, { year: true })}` : `${job.period.label} period`}` +
     (job.email ? "" : " · nothing emailed");
   console.log(`\n${counts}`);
   for (const l of lines) console.log(`  ${l}`);

@@ -12,19 +12,21 @@ const {
   resolve_system_vendor,
   fetch_series,
   fetch_edu_series,
+  fetch_boundary_context,
   fetch_thresholds,
   fetch_units,
   fetch_site_group_users,
   fetch_customer_users
 } = require("./data");
 const { build_render_model } = require("./render/model");
+const { with_context_fallback } = require("./boundary");
 const { analyze_system } = require("./compute/analyze");
 const { build_page } = require("./render/page");
 const { build_summary_facts, build_limited_record } = require("./compute/summary_facts");
 // Aliased on import: `period_tag` is also a STRING parameter on the fleet
 // summary / sidecar helpers below, and one name for both would read as a
 // shadowed function at every glance.
-const { period_tag: period_tag_of } = require("./periods");
+const { period_tag: period_tag_of, window_tag, window_label, span_text } = require("./periods");
 const write_html = require("./output/write_html");
 
 const [addLogEvent] = require("../utils/logger/log");
@@ -102,6 +104,15 @@ const run_one = async (run_log, job_id, request, on_facts = null, opts = {}) => 
       fetch_thresholds(request.system_id, vendor),
       fetch_units(request.system_id, vendor)
     ]);
+  // Readings just outside the window, for the compressor merge's edge checks
+  // only (data.fetch_boundary_context). After the series: it reads the same
+  // table the window came from. Optional: a failure here never fails the
+  // report (boundary.js); the note records it.
+  const { context, context_error } = await with_context_fallback(() =>
+    fetch_boundary_context(identity, request.window, vendor, source)
+  );
+  if (context_error)
+    console.warn(`${request.system_id}: boundary context unavailable, continuing without it: ${context_error}`);
 
   note = {
     job_id,
@@ -112,7 +123,8 @@ const run_one = async (run_log, job_id, request, on_facts = null, opts = {}) => 
     edu_source,
     edu_captures: edu.length,
     thresholds,
-    units
+    units,
+    boundary_context: context_error ? `unavailable: ${context_error}` : "ok"
   };
   await addLogEvent(I, run_log, "run_sme_report", det, note, null);
 
@@ -140,7 +152,8 @@ const run_one = async (run_log, job_id, request, on_facts = null, opts = {}) => 
       edu,
       edu_source,
       thresholds,
-      units
+      units,
+      context
     });
     facts = vm.facts;
     views = vm.views;
@@ -155,7 +168,8 @@ const run_one = async (run_log, job_id, request, on_facts = null, opts = {}) => 
       edu,
       edu_source,
       thresholds,
-      units
+      units,
+      context
     }));
   }
 
@@ -186,8 +200,9 @@ const run_one = async (run_log, job_id, request, on_facts = null, opts = {}) => 
       // Non-default periods tag the archived name: a 7-day, a 6-month and a
       // 30-day brief archived the same day must not overwrite each other.
       // The tag vocabulary is shared (periods.js) so a filename and the
-      // email announcing it can never name the span differently.
-      const tag = period_tag_of(request.window.lookback_days);
+      // email announcing it can never name the span differently. An
+      // explicit window is tagged by its two ends instead (window_tag).
+      const tag = window_tag(request.window);
       const dated = `Avante-${request.system_id}-Magnet-Health${tag}-${new Date().toISOString().slice(0, 10)}.pdf`;
       outputs.archive_path = path.join(archive_dir, dated);
       fs.copyFileSync(outputs.pdf_path, outputs.archive_path);
@@ -223,7 +238,35 @@ const run_one = async (run_log, job_id, request, on_facts = null, opts = {}) => 
             compressor_source: views.compressor_source,
             pressure: views.p_points,
             helium: views.he_points,
-            compressor: views.compressor_rows.map((r) => ({ t: r.t, on: r.compressor_on }))
+            // b: a backup reading — the vendor channel standing in where the
+            // EDU was silent (analyze.js merge).
+            compressor: views.compressor_rows.map((r) =>
+              r.src && r.src !== views.compressor_source
+                ? { t: r.t, on: r.compressor_on, b: 1 }
+                : { t: r.t, on: r.compressor_on }
+            ),
+            // EDU-reported stops with their corroboration and its evidence
+            // (compute/corroborate.js), for the page's "Compressor stops"
+            // section; and what the secondary channel is called there.
+            compressor_stops: (facts.compressor_events || [])
+              .filter((e) => e.corroboration)
+              .map((e) => ({
+                start: e.start,
+                end: e.end,
+                off_hours: e.off_hours,
+                off_count: e.off_count,
+                cycles: e.cycles,
+                corroboration: e.corroboration
+              })),
+            compressor_secondary_label: facts.compressor_secondary_label || null,
+            // The vendor channel as it reported, for the page's second strip
+            // when the EDU is primary (analyze.js views.secondary_compressor).
+            secondary_compressor: views.secondary_compressor
+              ? {
+                  source: views.secondary_compressor.source,
+                  rows: views.secondary_compressor.rows.map((r) => ({ t: r.t, on: r.compressor_on }))
+                }
+              : null
           }
         }
       : {})
@@ -324,7 +367,7 @@ const build_fleet_summary = async (run_log, job_id, results, failures, out_dir, 
     const records = results.map((r) => r.summary).filter(Boolean);
     const site_group_users = await load_site_group_users(run_log, job_id, records);
     const customer_users = await load_customer_users(run_log, job_id, scope);
-    const vm = build_fleet_model(records, failures, { excluded, scope, site_group_users, customer_users });
+    const vm = build_fleet_model(records, failures, { excluded, scope, site_group_users, customer_users, window_span: opts.window_span || null });
     const date = new Date().toISOString().slice(0, 10);
     const html = build_fleet_page(vm);
     // Scoped documents are named by their scope IDENTITY (slug + scope-set
@@ -395,12 +438,21 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
     // --facts). Cache HITS skip run_one and therefore the observer — fine
     // for the harness, which never passes a cache.
     const { concurrency = 1, cache = null, on_facts = null } = opts;
+    // The loader turned history capture off for an explicit window; say so
+    // in the console and the run log rather than skipping quietly.
+    if (loaded.history_skipped) {
+      console.log("history records not written: an explicit report window is not part of the period series");
+      await addLogEvent(I, run_log, "run_batch", det, { job_id, history_skipped: "explicit window" }, null);
+    }
     // Activity pages need each system's screened readings carried out of
     // run_one; only ask for them when the pages were requested. The loader
     // has already resolved system_pages to the audience (page_policy.js).
     const want_pages = !!(batch_email && batch_email.system_pages);
-    // Null = explicit-date windows: no chosen period, no tag (F3).
-    const batch_period_tag = period_tag_of(lookback_days);
+    // The batch's one shared window (null when its reports differ). An
+    // explicit window names the batch's documents by its ends; otherwise
+    // the period does (null = mixed explicit dates: no tag, F3).
+    const batch_window = loaded.window && loaded.window.explicit ? loaded.window : null;
+    const batch_period_tag = batch_window ? window_tag(batch_window) : period_tag_of(lookback_days);
     const slots = new Array(requests.length);
     let cursor = 0;
     const worker = async () => {
@@ -467,7 +519,12 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
           excluded,
           scope_resolution,
           batch_period_tag,
-          { archive_records: batch_email.archive_records }
+          {
+            archive_records: batch_email.archive_records,
+            // Times and zone on the cover and footers when the window has
+            // them; a rolling window keeps the records-derived day span.
+            window_span: batch_window ? span_text(batch_window) : null
+          }
         );
         fleet_pdf_path = fleet.pdf_path;
         fleet_error = fleet.error;
@@ -497,7 +554,10 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
           scope_tag,
           scope_label: scope_resolution && scope_resolution.label ? scope_resolution.label : "Fleet",
           period_tag: batch_period_tag,
-          period_label: label_of(lookback_days),
+          // An explicit window states its span on each page's sub-line
+          // instead of a period name in the header.
+          period_label: batch_window ? null : label_of(lookback_days),
+          span: batch_window ? span_text(batch_window, { year: true }) : null,
           audience: batch_email.system_pages,
           format: batch_email.system_pages_format
         });
@@ -517,6 +577,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
             {
               scope_label: subject_scope,
               lookback_days,
+              window_label: batch_window ? window_label(batch_window) : null,
               // A requested-but-failed summary document must be STATED in the
               // email, never just an absent attachment (round-2 F1).
               fleet_error,

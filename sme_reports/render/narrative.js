@@ -1,6 +1,6 @@
 const fmt = require("./fmt");
 const { STALE_MS } = require("../compute/staleness");
-const { is_inferred } = require("../compute/provenance");
+const { is_inferred, comp_inferred } = require("../compute/provenance");
 
 // Rules-based narrative: one template-literal builder per event archetype,
 // producing the .story block and the three .rx footnote cards. Free-text
@@ -17,13 +17,46 @@ const he_sfx = (facts) =>
 // How the compressor state is known: measured on the EDU, or concluded from
 // the coldhead (RULES.md §6). Inferred state words carry the ᶜ mark — the
 // same convention as the fleet document, defined in the DATA NOTES card.
-const comp_via = (facts) =>
-  facts.compressor_source === "edu_comp_vib"
-    ? " (per EDU vibration sensor)"
-    : is_inferred(facts.compressor_source)
-      ? " (inferred from coldhead temperature)"
+// With the EDU primary, a backup filling its gaps is named too: the brief
+// never credits the EDU for a reading the scanner or the coldhead supplied.
+const comp_via = (facts) => {
+  const b = facts.compressor_backup;
+  if (facts.compressor_source === "edu_comp_vib")
+    return !b
+      ? " (per EDU vibration sensor)"
+      : b.inferred
+        ? " (per EDU vibration sensor; inferred from coldhead temperature where the EDU was silent)"
+        : " (per EDU vibration sensor; the magnet monitor's reading where the EDU was silent)";
+  return is_inferred(facts.compressor_source) ? " (inferred from coldhead temperature)" : "";
+};
+const comp_c = (facts) => (comp_inferred(facts) ? "ᶜ" : "");
+
+// The follow-up on an EDU-reported stop (compute/corroborate.js): the stop
+// is stated as read, then what the other data says about it. Secondary
+// channel first, thermal second. Empty when the stop has no corroboration
+// record (a vendor-only system).
+const corrob_note = (f, ongoing = false) => {
+  const c = f.compressor_event && f.compressor_event.corroboration;
+  if (!c) return "";
+  const sec = f.compressor_secondary_label;
+  // A confirmed stop reads exactly as a stop always has: the brief's page
+  // budget is spent only where the other data raises a doubt.
+  if (c.type === "confirmed") return "";
+  const parts = [
+    !sec ? null : c.secondary === "on" ? f.compressor_secondary_running : `${sec} had no live reading`,
+    c.thermal === "steady" ? "the magnet showed no warming at the stop" : "no live thermal data exists"
+  ].filter(Boolean);
+  // The summary's reason carries the SYSTEM's type (any confirmed stop
+  // confirms the period). When this stop's doubt is not the period's
+  // verdict, say so, or the brief and the summary seem to disagree.
+  const others =
+    f.compressor_corroboration === "confirmed"
+      ? " Another stop this period is confirmed by other data."
       : "";
-const comp_c = (facts) => (is_inferred(facts.compressor_source) ? "ᶜ" : "");
+  return c.type === "doubtful"
+    ? ` <b>Based on other data, it may not ${ongoing ? "be" : "have been"} off</b>: ${parts.join(" and ")}.${others}`
+    : ` Other data does not confirm it: ${parts.join(", and ")}.${others}`;
+};
 
 // The story is a lead line — "Timeline (UTC)" and what the period amounts
 // to — then one bullet per moment, timestamp → note, in time order. The
@@ -202,6 +235,15 @@ const readings_off = (ev) => `${ev.off_count} reading${ev.off_count === 1 ? "" :
 const first_reading_entry = (facts, html) =>
   entry(facts.compressor_first_stateful_t, html);
 
+// " — up 1.05 PSI over 30 days" from the steady-rise judgment
+// (judgments.js), or nothing when a caller's facts predate it.
+const rise_clause = (f) => {
+  const r = f.pressure && f.pressure.steady_rise;
+  if (!r) return "";
+  const span = r.hours >= 48 ? `${Math.round(r.hours / 24)} days` : `${Math.round(r.hours)} hours`;
+  return ` — up ${fmt.num(r.rise, f.vendor.pressure.decimals)} ${units(f)} over ${span}`;
+};
+
 const STORIES = {
   compressor_stop_recovered: (f) => {
     const ev = f.compressor_event;
@@ -214,7 +256,7 @@ const STORIES = {
       (e) => e !== ev && e.start > ev.end
     );
     return {
-      lead: `The compressor stopped${comp_c(f)} and recovered.${other_events_sentence(f)}`,
+      lead: `The compressor stopped${comp_c(f)} and recovered.${corrob_note(f)}${other_events_sentence(f)}`,
       entries: [
         baseline_entry(f),
         entry(ev.start, `<b>The compressor stopped${comp_c(f)}</b>${comp_via(f)}${cycles}.`),
@@ -263,7 +305,7 @@ const STORIES = {
     // ON reading exists.
     if (f.left_censored)
       return {
-        lead: `<b>The compressor read OFF at every reading this period${comp_c(f)}</b>${comp_via(f)} — its true start and total downtime are unknown.`,
+        lead: `<b>The compressor read OFF at every reading this period${comp_c(f)}</b>${comp_via(f)} — its true start and total downtime are unknown.${corrob_note(f, true)}`,
         entries: [
           first_reading_entry(f, `Already off at the first compressor reading.`),
           peak_entry(f),
@@ -279,7 +321,7 @@ const STORIES = {
         lead:
           `<b>The compressor was already off when the data begins${comp_c(f)}</b>${comp_via(f)} — ` +
           `that initial stop predates the period, so its start and earlier downtime are unknown. ` +
-          `<b>Warming event OPEN at end of data.</b>${other_events_sentence(f)}`,
+          `<b>Warming event OPEN at end of data.</b>${corrob_note(f, true)}${other_events_sentence(f)}`,
         entries: [
           entry(f.compressor_first_on_t, `First seen running${comp_c(f)}.`),
           ev.last_stop_t != null
@@ -291,7 +333,7 @@ const STORIES = {
         ]
       };
     return {
-      lead: `<b>Warming event OPEN at end of data.</b>${other_events_sentence(f)}`,
+      lead: `<b>Warming event OPEN at end of data.</b>${corrob_note(f, true)}${other_events_sentence(f)}`,
       entries: [
         baseline_entry(f),
         entry(ev.start, `<b>The compressor stopped${comp_c(f)} and has not recovered</b>${comp_via(f)} — off ${fmt.hours(ev.off_hours)} at the last capture (${readings_off(ev)}).`),
@@ -306,7 +348,7 @@ const STORIES = {
     entries: [baseline_entry(f), alarm_entry(f), peak_entry(f), flicker_entry(f), ...now_entries(f)]
   }),
   pressure_rising: (f) => ({
-    lead: `No compressor stop${comp_c(f)} and no threshold breach this period, but ${p_name(f).toLowerCase()} is trending up.`,
+    lead: `No compressor stop${comp_c(f)} and no threshold breach this period, but ${p_name(f).toLowerCase()} is climbing steadily${rise_clause(f)}.`,
     entries: [baseline_entry(f), peak_entry(f), flicker_entry(f), ...now_entries(f)]
   }),
   stable_healthy: (f) => ({

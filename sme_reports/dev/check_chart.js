@@ -434,8 +434,8 @@ const philips_series = [];
   assert.strictEqual(vm.facts.archetype, "compressor_stop_recovered", "the EDU-seen stop is the event");
   assert.ok(vm.story_html.includes("per EDU vibration sensor"), "narrative credits the sensor");
 
-  // A nearly-empty EDU must NOT displace dense inference — exact boundary:
-  // 23 readings stay fallback, 24 flip the source.
+  // A sparse EDU leads where it reported; the coldhead inference fills the
+  // rest as BACKUP, and its share carries the ᶜ.
   const sparse_edu = ge_edu.slice(0, 23);
   const vm2 = build_render_model({
     identity: { system_id: "SME22099", manufacturer: "GE", modality: "MRI", site_name: "RMCHCS", city: "Gallup", state: "NM", customer_name: "RMCHCS" },
@@ -446,8 +446,15 @@ const philips_series = [];
     edu: sparse_edu,
     edu_source: "edu.v3"
   });
-  assert.strictEqual(vm2.facts.compressor_source, "coldhead_ruo_value", "23 EDU readings stay fallback");
+  assert.strictEqual(vm2.facts.compressor_source, "edu_comp_vib", "23 EDU readings still lead");
+  assert.deepStrictEqual(
+    vm2.facts.compressor_backup,
+    { source: "coldhead_ruo_value", readings: 177, inferred: true },
+    "the coldhead fills the 177 hours the EDU was silent"
+  );
+  assert.strictEqual(vm2.facts.compressor_last_source, "coldhead_ruo_value", "the current state is the backup's");
   assert.strictEqual(vm2.facts.archetype, "stable_healthy");
+  assert.ok(vm2.tiles[0].v.includes("ᶜ"), `an inferred backup marks the tile, got ${vm2.tiles[0].v}`);
   const vm2b = build_render_model({
     identity: { system_id: "SME22099", manufacturer: "GE", modality: "MRI", site_name: "RMCHCS", city: "Gallup", state: "NM", customer_name: "RMCHCS" },
     vendor: VENDORS.GE,
@@ -605,7 +612,9 @@ const philips_series = [];
     );
   }
 
-  // 24 scanner readings IS coverage — the scanner keeps its priority.
+  // The EDU is PRIMARY: a scanner channel that covers the period no longer
+  // outranks a sufficient EDU (SME19528: the alerts watch the EDU, and the
+  // Siemens status text froze while the EDU kept reporting).
   const covered = series.map((r, i) => ({ ...r, compressor_on: i < 24 ? true : null }));
   const vm2 = build_render_model({
     identity: philips_identity, vendor: VENDORS.PHILIPS, series: covered, source: "synthetic",
@@ -615,7 +624,157 @@ const philips_series = [];
     }),
     edu: edu_rows, edu_source: "edu.v2"
   });
-  assert.strictEqual(vm2.facts.compressor_source, "cryo_comp_malf_value", "a covered scanner channel keeps priority");
+  assert.strictEqual(vm2.facts.compressor_source, "edu_comp_vib", "a sufficient EDU outranks a covered scanner channel");
+  assert.strictEqual(vm2.facts.archetype, "compressor_stop_recovered", "the EDU-measured stop is the event");
+  const req_15809 = () => normalize_request({
+    report_type: "magnet_health", system_id: "SME15809", recipients: ["dev@example.com"],
+    window: { start: "2026-08-01", end: "2026-08-10" }, output: { html: false, pdf: false, email: false }
+  });
+  // A sparse EDU leads where it reported; the scanner fills the rest.
+  const dense = series.map((r) => ({ ...r, compressor_on: true }));
+  const vm2s = build_render_model({
+    identity: philips_identity, vendor: VENDORS.PHILIPS, series: dense, source: "synthetic",
+    request: req_15809(), edu: edu_rows.slice(0, 23), edu_source: "edu.v2"
+  });
+  assert.strictEqual(vm2s.facts.compressor_source, "edu_comp_vib", "23 EDU readings still lead");
+  assert.deepStrictEqual(
+    vm2s.facts.compressor_backup,
+    { source: "cryo_comp_malf_value", readings: 177, inferred: false },
+    "the scanner fills the hours the EDU was silent, unmarked"
+  );
+  assert.ok(!vm2s.tiles[0].v.includes("ᶜ"), "a reported backup carries no ᶜ");
+
+  // The scanner is a BACKUP, not ignored: a stop it reports while the EDU is
+  // silent is a stop. EDU out from hour 50 to 80; the scanner reads off for
+  // hours 60–64 inside that gap, and off at hour 150 where the EDU says
+  // running (the EDU wins there).
+  const gap_edu = edu_rows
+    .filter((r) => r.t < E0 + 50 * HOUR || r.t >= E0 + 80 * HOUR)
+    .map((r) => ({ ...r, comp_vib: true }));
+  const gap_scanner = series.map((r, i) => ({ ...r, compressor_on: !((i >= 60 && i < 65) || i === 150) }));
+  const vmg = build_render_model({
+    identity: philips_identity, vendor: VENDORS.PHILIPS, series: gap_scanner, source: "synthetic",
+    request: req_15809(), edu: gap_edu, edu_source: "edu.v2"
+  });
+  assert.strictEqual(vmg.facts.compressor_source, "edu_comp_vib");
+  assert.strictEqual(vmg.facts.compressor_backup.readings, 30, "the scanner fills exactly the 30-hour EDU gap");
+  assert.strictEqual(vmg.facts.archetype, "compressor_stop_recovered", "the scanner-seen stop in the gap counts");
+  assert.strictEqual(vmg.facts.compressor_events.length, 1, "the scanner's off at hour 150 is overruled by the EDU");
+  assert.strictEqual(vmg.facts.compressor_event.start, E0 + 60 * HOUR, "the stop starts where the scanner saw it");
+  assert.strictEqual(vmg.facts.compressor_event.corroboration, undefined, "a backup-only stop is not an EDU-off issue");
+  assert.strictEqual(vmg.facts.compressor_corroboration, null);
+  assert.ok(
+    vmg.story_html.includes("the magnet monitor's reading where the EDU was silent"),
+    "the story names the backup, never crediting the EDU for it"
+  );
+
+  // A stale backup never fills a gap: readings that repeat the previous host
+  // timestamp are a frozen feed re-sending one snapshot (SME19528).
+  const frozen = gap_scanner.map((r, i) => (i >= 55 && i < 80 ? { ...r, host_t: E0 + 55 * HOUR } : r));
+  const vmf = build_render_model({
+    identity: philips_identity, vendor: VENDORS.PHILIPS, series: frozen, source: "synthetic",
+    request: req_15809(), edu: gap_edu, edu_source: "edu.v2"
+  });
+  assert.strictEqual(vmf.facts.compressor_backup.readings, 6, "only the fresh readings (hours 50–55) fill the gap");
+  assert.strictEqual(vmf.facts.archetype, "stable_healthy", "a frozen feed's stop is not a stop");
+
+  // Window edges (Codex round 2, F1). Readings just outside the window are
+  // boundary CONTEXT: they decide EDU proximity and freshness at the edge,
+  // and never become readings themselves.
+  {
+    const MIN = 60e3;
+    const on_edu = edu_rows.map((r) => ({ ...r, comp_vib: true }));
+    const run = (series_in, edu_in, context) =>
+      build_render_model({
+        identity: philips_identity, vendor: VENDORS.PHILIPS, series: series_in, source: "synthetic",
+        request: req_15809(), edu: edu_in, edu_source: "edu.v2", context
+      });
+    // (a) An EDU reading 20 min before the window speaks for scanner
+    // readings at 00:10 and 00:20; without it, both fill as backup and
+    // make a two-reading stop.
+    const edge_series = [
+      ...[10, 20].map((m) => ({ ...series[0], t: E0 + m * MIN, host_t: E0 + m * MIN, compressor_on: false })),
+      ...series.map((r) => ({ ...r, compressor_on: true }))
+    ].sort((a, b) => a.t - b.t);
+    const late_edu = on_edu.filter((r) => r.t >= E0 + 2 * HOUR);
+    const blind = run(edge_series, late_edu, null);
+    assert.strictEqual(blind.facts.compressor_events.length, 1, "without context the edge readings fill (the defect)");
+    const seen = run(edge_series, late_edu, { edu_before: [{ t: E0 - 20 * MIN, comp_vib: true }] });
+    assert.strictEqual(seen.facts.compressor_events.length, 0, "an EDU reading before the window covers the edge");
+    assert.ok(seen.facts.compressor_backup.readings < blind.facts.compressor_backup.readings, "fewer backup readings with context");
+    assert.ok(seen.facts.counts.captures === blind.facts.counts.captures, "context never becomes a reading");
+    assert.deepStrictEqual(seen.views.p_points.map((p) => p.t), blind.views.p_points.map((p) => p.t), "context never becomes a chart point");
+    assert.deepStrictEqual(seen.views.he_points.map((p) => p.t), blind.views.he_points.map((p) => p.t));
+    // (b) A first in-window scanner reading that repeats the host time of
+    // the reading BEFORE the window is a frozen feed, not fresh.
+    const X = E0 - 30 * MIN;
+    const frozen_first = series.map((r, i) =>
+      i === 0 ? { ...r, host_t: X, compressor_on: false } : i === 1 ? { ...r, compressor_on: false } : { ...r, compressor_on: true }
+    );
+    const gap_start_edu = on_edu.filter((r) => r.t >= E0 + 5 * HOUR);
+    const naive = run(frozen_first, gap_start_edu, null);
+    assert.strictEqual(naive.facts.compressor_events.length, 1, "without context the frozen first reading counts (the defect)");
+    const judged = run(frozen_first, gap_start_edu, { series_before: [{ ...series[0], t: X, host_t: X, compressor_on: false }] });
+    assert.strictEqual(judged.facts.compressor_events.length, 0, "the frozen first reading is stale: one fresh off reading is a flicker");
+    // (c) Codex round 3: the predecessor can be far older than the EDU's 2 h
+    // margin (a feed frozen through a data gap). Its age never matters.
+    const Y = E0 - 79 * HOUR;
+    const frozen_old = frozen_first.map((r, i) => (i === 0 ? { ...r, host_t: Y } : r));
+    const old = run(frozen_old, gap_start_edu, {
+      series_before: [
+        { ...series[0], t: Y, host_t: Y, compressor_on: false },
+        { ...series[0], t: Y + 30 * MIN, host_t: null, compressor_on: null } // a stateless row after it
+      ]
+    });
+    assert.strictEqual(old.facts.compressor_events.length, 0, "a 79 h-old predecessor still exposes the frozen first reading");
+  }
+
+  // Siemens 10K (Codex round 4, F2): no vendor compressor channel, but a
+  // frozen shield feed at the window's start must not pass as live thermal
+  // evidence. The predecessor's host time makes the first reading stale.
+  {
+    const X = E0 - 3 * HOUR; // the feed froze before the window
+    const shield = series.map((r) => ({
+      ...r, host_t: X, pressure: 48, pressure_avg: null, helium: 90, compressor_on: null,
+      coldhead_k: null, shield_k: 48, temp_alarm: null, temp_alarm_minutes: null, quenched: null
+    }));
+    const stop_edu = edu_rows.map((r, i) => ({ ...r, comp_vib: !(i < 5) })); // EDU off for the first 5 h
+    const nt = (context) =>
+      build_render_model({
+        identity: philips_identity, vendor: VENDORS.SIEMENS_NON_TIM, series: shield, source: "synthetic",
+        request: req_15809(), edu: stop_edu, edu_source: "edu.v2", context
+      });
+    const blind = nt(null).facts.compressor_event.corroboration;
+    assert.strictEqual(blind.thermal, "steady", "without context the frozen first reading passes as live (the defect)");
+    const seen = nt({ series_before: [{ ...shield[0], t: X, host_t: X }] }).facts.compressor_event.corroboration;
+    assert.strictEqual(seen.thermal, "unknown", "the frozen first shield reading is stale");
+    assert.strictEqual(seen.detail.pressure_frozen, true, "and the card can say it was frozen");
+  }
+
+  // Mixed verdicts (Codex round 2, F3): a doubtful primary stop beside a
+  // confirmed one. The period is confirmed, so the summary has no qualifier;
+  // the brief says why its primary stop is doubtful AND that another is
+  // confirmed.
+  {
+    const two_edu = edu_rows.map((r, i) => ({ ...r, comp_vib: !((i >= 20 && i < 40) || (i >= 120 && i < 123)) }));
+    const scanner = series.map((r, i) => ({ ...r, compressor_on: !(i >= 120 && i < 123) }));
+    const vmm = build_render_model({
+      identity: philips_identity, vendor: VENDORS.PHILIPS, series: scanner, source: "synthetic",
+      request: req_15809(), edu: two_edu, edu_source: "edu.v2"
+    });
+    assert.strictEqual(vmm.facts.compressor_events.length, 2);
+    assert.strictEqual(vmm.facts.compressor_event.corroboration.type, "doubtful", "the 20 h primary stop is doubtful");
+    assert.strictEqual(vmm.facts.compressor_corroboration, "confirmed", "the 3 h stop confirms the period");
+    assert.ok(vmm.story_html.includes("may not have been off"), "the brief states the primary stop's doubt");
+    assert.ok(vmm.story_html.includes("Another stop this period is confirmed by other data."), "and why the summary has no qualifier");
+  }
+
+  // Under the EDU, a stray scanner reading adds nothing it does not cover.
+  const vm2e = build_render_model({
+    identity: philips_identity, vendor: VENDORS.PHILIPS, series, source: "synthetic",
+    request: req_15809(), edu: edu_rows.slice(0, 10), edu_source: "edu.v2"
+  });
+  assert.strictEqual(vm2e.facts.compressor_source, "edu_comp_vib", "10 EDU readings beat 1 stray malf reading");
 
   // An EDU of nothing but nulls contributes zero readings and changes nothing.
   const null_edu = edu_rows.map((r) => ({ ...r, comp_vib: null }));
@@ -1137,7 +1296,7 @@ const philips_series = [];
   // Banner pages trade chart height for the banner's room.
   // Banner pages render short charts; the exact height depends on the
   // density tier the page's prose selected.
-  const expect_h = vm.density ? 92 : 100;
+  const expect_h = vm.density ? 86 : 100;
   assert.ok(
     vm.pressure_chart_svg.includes(`viewBox="0 0 640 ${expect_h}"`),
     `suspect charts render short (density=${vm.density || "normal"})`
@@ -1754,14 +1913,22 @@ const philips_series = [];
         monitor_magnet_pressure_value: last ? "-50" : String(29 + (h % 7) * 0.1),
         he_psi_avg_value: last ? "-50" : String(29 + (h % 7) * 0.1),
         helium_level_value: last ? "0.0" : String(76.5 - h * 0.001),
-        cryo_comp_malf_value: stop || flicker ? "60" : "0",
+        // The scanner reads running through every EDU stop, and the pressure
+        // holds: each stop is DOUBTFUL, so the lead carries the longest
+        // corroboration note — the worst case the page must still fit.
+        cryo_comp_malf_value: "0",
         cryo_comp_temp_alarm_state: alarm ? "5" : "0",
         tech_room_temp_value: "21", quenched_state: "0"
       });
     }
+    // The EDU sees the same stops and flickers: it is the primary
+    // compressor source, so an always-running EDU would erase the story.
     const edu_rows = [];
-    for (let h = 0; h < 720; h++)
-      edu_rows.push({ t: Date.UTC(2026, 6, 1, h), room_temp_f: 70 + (h % 5), humidity_pct: 45, probe_0_f: 66, probe_1_f: 68, comp_vib: true });
+    for (let h = 0; h < 720; h++) {
+      const stop = h >= 24 && h < 594 && (h - 24) % 60 < 5;
+      const flicker = h >= 45 && h < 405 && (h - 45) % 60 === 0;
+      edu_rows.push({ t: Date.UTC(2026, 6, 1, h), room_temp_f: 70 + (h % 5), humidity_pct: 45, probe_0_f: 66, probe_1_f: 68, comp_vib: !(stop || flicker) });
+    }
     return build_render_model({
       // The customer name is deliberately outsized: the sub-line now carries
       // only identity + period (site id · customer · make · city · span), so
@@ -1784,9 +1951,13 @@ const philips_series = [];
   assert.strictEqual(max_banner.density, "compact", "maximal banner page selects the compact tier");
   assert.strictEqual(max_plain.density, "compact", "maximal plain page selects the compact tier");
   assert.ok(max_banner.story_html.includes("+5 more"), "other-events day list is capped");
-  // Short charts recompute their geometry, not just their viewBox: at 92
+  // Short charts recompute their geometry, not just their viewBox: at 86
   // the x-label row sits at height − 6.
-  assert.ok(max_banner.pressure_chart_svg.includes('y="86"'), "compact-banner chart x-labels at height − 6");
+  assert.ok(max_banner.pressure_chart_svg.includes('y="80"'), "compact-banner chart x-labels at height − 6");
+  // The worst-case lead carries the doubtful-stop note (scanner running,
+  // pressure steady through every EDU stop).
+  assert.strictEqual(max_banner.facts.compressor_corroboration, "doubtful");
+  assert.ok(max_banner.story_html.includes("Based on other data, it may not have been off"), "the doubtful note is in the lead");
   // A suspect Philips exercises the temp-alarm tile under the conviction.
   const ta = max_banner.tiles.find((t) => t.k === "TEMP ALARM");
   assert.strictEqual(ta.cls, "dim", "temp-alarm tile is suspended on a convicted page");

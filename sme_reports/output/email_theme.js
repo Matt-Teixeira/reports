@@ -34,15 +34,29 @@ const logo_attachment = () => ({
 });
 
 // Wraps body content in the branded shell: logo header, gradient band,
-// content area, navy footer bar. 800px centered, fluid below that — wide
-// enough that a site name and its condition share one line in the status
-// table (email_status.js).
+// content area, navy footer bar.
+//
+// FLUID-HYBRID width (no media queries — Gmail and Outlook drop or mangle
+// them): the shell is a div capped at SHELL_PX and otherwise as wide as the
+// screen, so a phone gets a full-width email instead of an 800px page it
+// must scroll sideways or zoom out of. A `width="800"` table with
+// `max-width:100%` did NOT shrink — Chromium-family and Apple clients honor
+// the attribute over the style once the content's minimum width is wide.
+// Classic Outlook for Windows (Word renderer) ignores max-width, so a
+// conditional ("ghost") table gives it the fixed 800px it always had.
+const SHELL_PX = 800;
+const GUTTER_PX = 24;
+// Width the body content lays out in on a full-width screen — the fluid
+// columns in email_status.js split this.
+const CONTENT_PX = SHELL_PX - 2 * GUTTER_PX;
+
 const wrap_email = ({ title, date, body_html }) => `
 <div style="${FONT}background-color:#f4f6f8;padding:16px 8px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
-<table role="presentation" width="800" cellpadding="0" cellspacing="0" border="0" style="width:800px;max-width:100%;background-color:#ffffff;" bgcolor="#ffffff">
+<!--[if mso]><table role="presentation" width="${SHELL_PX}" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<div style="max-width:${SHELL_PX}px;margin:0 auto;background-color:#ffffff;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#ffffff;" bgcolor="#ffffff">
   <tr>
-    <td style="padding:20px 24px 12px 24px;">
+    <td style="padding:20px ${GUTTER_PX}px 12px ${GUTTER_PX}px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
         <td align="left" valign="middle"><img src="cid:${LOGO_CID}" alt="Avante" height="38" style="height:38px;border:0;display:block;"></td>
         <td align="right" valign="middle" style="${FONT}font-size:13px;color:${COLORS.grey};line-height:1.4;">${title}<br><b style="color:${COLORS.navy};">${date}</b></td>
@@ -50,7 +64,7 @@ const wrap_email = ({ title, date, body_html }) => `
     </td>
   </tr>
   <tr>
-    <td style="padding:0 24px;">
+    <td style="padding:0 ${GUTTER_PX}px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
         <td width="30%" height="6" bgcolor="${COLORS.navy}" style="background-color:${COLORS.navy};font-size:1px;line-height:6px;">&nbsp;</td>
         <td width="32%" height="6" bgcolor="${COLORS.blue}" style="background-color:${COLORS.blue};font-size:1px;line-height:6px;">&nbsp;</td>
@@ -58,9 +72,9 @@ const wrap_email = ({ title, date, body_html }) => `
       </tr></table>
     </td>
   </tr>
-  <tr><td style="padding:16px 24px 20px 24px;">${body_html}</td></tr>
+  <tr><td style="padding:16px ${GUTTER_PX}px 20px ${GUTTER_PX}px;">${body_html}</td></tr>
   <tr>
-    <td bgcolor="${COLORS.navy}" style="background-color:${COLORS.navy};padding:12px 24px;">
+    <td bgcolor="${COLORS.navy}" style="background-color:${COLORS.navy};padding:12px ${GUTTER_PX}px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
         <td align="left" style="${FONT}font-size:12px;color:#ffffff;">Avante · Moving Healthcare Forward</td>
         <td align="right" style="${FONT}font-size:12px;color:${COLORS.light};">Remote Solutions</td>
@@ -68,7 +82,8 @@ const wrap_email = ({ title, date, body_html }) => `
     </td>
   </tr>
 </table>
-</td></tr></table>
+</div>
+<!--[if mso]></td></tr></table><![endif]-->
 </div>`;
 
 // Themed data table: header row in navy, zebra-striped body rows.
@@ -130,6 +145,7 @@ module.exports = {
   FONT,
   logo_attachment,
   wrap_email,
+  CONTENT_PX,
   themed_table,
   esc,
   fleet_failure_note

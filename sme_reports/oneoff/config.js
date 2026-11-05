@@ -15,7 +15,8 @@
 
 const path = require("path");
 
-const { resolve_period, PERIOD_KEYS } = require("../periods");
+const { resolve_period, PERIOD_KEYS, span_text } = require("../periods");
+const { window_of } = require("../request_loader");
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SME_RE = /^SME\d+$/;
@@ -34,6 +35,9 @@ const COMMON_KEYS = [
   "kind",
   "description",
   "period",
+  "from",
+  "to",
+  "tz",
   "recipients",
   "cc_list",
   "email",
@@ -99,12 +103,59 @@ const DEFAULT_SETTINGS = {
   system_pages: false,
   // How those pages are packaged: "app" (one file listing every flagged
   // system) or "pages" (one file per system) — incident/page_policy.js.
-  system_pages_format: "app"
+  system_pages_format: "app",
+  // An explicit window (PLAN: report windows). from/to: the request
+  // loader's bound forms — a date (whole day) or a date-time (exact).
+  // Neither = the rolling period ending today; only `to` = the period
+  // counting back from it. tz: the zone a bound without Z/offset is read
+  // in. Eastern because the people typing these think in it; request files
+  // keep their UTC default.
+  from: null,
+  to: null,
+  tz: "America/New_York"
+};
+
+const as_bound = (v, at) => {
+  if (typeof v !== "string" || !v.trim())
+    fail(`${at} must be a date (2026-10-09) or date-time (2026-10-09T14:00) string`);
+  return v.trim();
+};
+
+// The normalized window a job will run over, or null for a rolling
+// period — resolved HERE, through the request loader's own window_of, so
+// a bad bound fails before any database work and describe_job can print
+// the exact instants about to be analyzed. The loader's field names are
+// translated to the ones the operator typed.
+const resolve_job_window = (job, at) => {
+  if (!job.from && !job.to) return null;
+  try {
+    return window_of({
+      ...(job.from ? { start: job.from } : {}),
+      ...(job.to ? { end: job.to } : {}),
+      tz: job.tz,
+      lookback_days: job.period.days
+    });
+  } catch (error) {
+    fail(
+      `${at}: ` +
+        error.message
+          .replace(/^sme_report request invalid: /, "")
+          .replace(/window\.start/g, "from")
+          .replace(/window\.end/g, "to")
+          .replace(/window\.tz/g, "tz")
+    );
+  }
 };
 
 const resolve_settings = (raw, at) => {
   const s = {};
   if (raw.period !== undefined) s.period = resolve_period(raw.period, `${at}.period`);
+  if (raw.from !== undefined) s.from = as_bound(raw.from, `${at}.from`);
+  if (raw.to !== undefined) s.to = as_bound(raw.to, `${at}.to`);
+  if (raw.tz !== undefined) {
+    if (typeof raw.tz !== "string" || !raw.tz.trim()) fail(`${at}.tz must be a time zone name (e.g. America/New_York)`);
+    s.tz = raw.tz.trim();
+  }
   if (raw.recipients !== undefined) s.recipients = as_emails(raw.recipients, `${at}.recipients`);
   if (raw.cc_list !== undefined) s.cc_list = as_emails(raw.cc_list, `${at}.cc_list`);
   if (raw.email !== undefined) s.email = as_bool(raw.email, `${at}.email`);
@@ -133,7 +184,9 @@ const load_job_config = (raw) => {
   if (raw.defaults !== undefined) {
     if (typeof raw.defaults !== "object" || raw.defaults === null || Array.isArray(raw.defaults))
       fail("config.defaults must be an object");
-    check_keys(raw.defaults, COMMON_KEYS.filter((k) => k !== "kind"), "defaults");
+    // A window belongs to one job — every job sharing one window is what
+    // separate jobs are for. tz may be defaulted.
+    check_keys(raw.defaults, COMMON_KEYS.filter((k) => k !== "kind" && k !== "from" && k !== "to"), "defaults");
   }
   const defaults = {
     ...DEFAULT_SETTINGS,
@@ -167,6 +220,14 @@ const validate_job = (name, raw, defaults) => {
     ...defaults,
     ...resolve_settings(raw, at)
   };
+  // A window with a start is fixed by its ends; a period beside it would
+  // be a second statement of its length. `to` + `period` is the supported
+  // "N days ending at" form.
+  if (raw.from !== undefined && raw.period !== undefined)
+    fail(`${at}: from and period conflict — give from/to, or to with period for the period ending then`);
+  if (raw.tz !== undefined && raw.from === undefined && raw.to === undefined)
+    fail(`${at}: tz only applies with from/to`);
+  job.window = resolve_job_window(job, at);
 
   if (raw.kind === "customer_summary") {
     // Exactly one selector, so a config can never quietly widen from a
@@ -232,7 +293,22 @@ const validate_job = (name, raw, defaults) => {
 const apply_overrides = (job, overrides = {}) => {
   if ((overrides.system_pages || overrides.system_pages_format) && !KIND_KEYS[job.kind].includes("system_pages"))
     fail(`--system-pages / --pages-audience / --pages-format do not apply to a ${job.kind} job (summary kinds only)`);
+  if (overrides.from !== undefined && overrides.period !== undefined)
+    fail("--from and --period conflict — give --from/--to, or --to with --period for the period ending then");
   const next = { ...job, ...resolve_settings(overrides, "command line") };
+  // Window layering. The CLI window replaces the job's as a UNIT — a
+  // --to on a job whose config sets from/to must not quietly keep the
+  // config's from. --period alone means the rolling period ending today,
+  // so it drops any window the config set.
+  if (overrides.from !== undefined || overrides.to !== undefined) {
+    next.from = overrides.from !== undefined ? next.from : null;
+    next.to = overrides.to !== undefined ? next.to : null;
+  } else if (overrides.period !== undefined) {
+    next.from = null;
+    next.to = null;
+  }
+  if (overrides.tz !== undefined && !next.from && !next.to) fail("--tz only applies with --from/--to");
+  next.window = resolve_job_window(next, "command line");
   if (overrides.customer_id !== undefined && overrides.customer_id !== null) {
     if (job.kind === "fleet_summary")
       fail(`--customer does not apply to a ${job.kind} job (it covers the whole fleet)`);
@@ -287,6 +363,14 @@ const batch_email_block = (job, { summary_pdf }) => ({
 // meaning it has in a request file; nothing is a one-off-only concept.
 const build_request = (job, { fleet_system_ids = null, brief_system_ids = null } = {}) => {
   const period = job.period.key;
+  // The window block each report carries, in request-file form (the
+  // loader re-validates it). With only `to`, the batch period fills in
+  // the length, exactly as it does for a request file.
+  const window =
+    job.from || job.to
+      ? { ...(job.from ? { start: job.from } : {}), ...(job.to ? { end: job.to } : {}), tz: job.tz }
+      : null;
+  const win = window ? { window } : {};
   const exclusion = job.exclude
     ? { exclude: job.exclude, exclude_note: job.exclude_note || "excluded by report job config" }
     : {};
@@ -297,7 +381,7 @@ const build_request = (job, { fleet_system_ids = null, brief_system_ids = null }
       summary_only: true,
       period,
       ...exclusion,
-      report_defaults: { output: job.out_dir ? { out_dir: job.out_dir } : {} },
+      report_defaults: { output: job.out_dir ? { out_dir: job.out_dir } : {}, ...win },
       batch_email: batch_email_block(job, { summary_pdf: true })
     };
 
@@ -312,6 +396,7 @@ const build_request = (job, { fleet_system_ids = null, brief_system_ids = null }
       reports: fleet_system_ids.map((id) => ({
         report_type: "magnet_health",
         system_id: id,
+        ...win,
         ...(job.out_dir ? { output: { out_dir: job.out_dir } } : {})
       }))
     };
@@ -349,6 +434,7 @@ const build_request = (job, { fleet_system_ids = null, brief_system_ids = null }
       system_id: id,
       recipients: job.recipients,
       cc_list: job.cc_list,
+      ...win,
       output: brief_output(job)
     }))
   };
@@ -369,13 +455,25 @@ const describe_job = (job) => {
             .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(",") : v}`)
             .join(" ");
   return (
-    `job "${job.name}" — ${job.kind} · ${target} · ${job.period.label} period ` +
-    `(${job.period.days} days) · ${job.email ? `email -> ${job.recipients.join(", ")}` : "no email"}` +
+    `job "${job.name}" — ${job.kind} · ${target} · ${period_of_job(job)} · ` +
+    `${job.email ? `email -> ${job.recipients.join(", ")}` : "no email"}` +
     (job.system_pages
       ? ` · activity pages: ${job.system_pages === true ? (job.kind === "fleet_summary" ? "internal" : "external") : job.system_pages}` +
         (job.system_pages_format === "pages" ? ", one file per system" : ", one file")
-      : "")
+      : "") +
+    (job.window && job.archive_records ? " · no history records (explicit window)" : "")
   );
+};
+
+// What span a job covers, in words: the period, or the window with its
+// exact UTC instants (the zone-converted bounds are the thing most worth
+// confirming before a run).
+const period_of_job = (job) => {
+  if (!job.window) return `${job.period.label} period (${job.period.days} days)`;
+  const w = job.window;
+  const iso = (dt) => dt.toUTC().toFormat("yyyy-MM-dd'T'HH:mm'Z'");
+  const back = !job.from ? ` — ${job.period.label} period ending then` : "";
+  return `window ${span_text(w, { year: true })} (${iso(w.start)} → ${iso(w.end)})${back}`;
 };
 
 module.exports = {
@@ -386,5 +484,6 @@ module.exports = {
   resolve_settings,
   apply_overrides,
   build_request,
-  describe_job
+  describe_job,
+  period_of_job
 };

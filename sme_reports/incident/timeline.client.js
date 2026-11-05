@@ -93,10 +93,20 @@ const ORG_ORDER = DATA.org_order || ['Avante', CUST, 'Other'];
 /* ---------- the capture-slot spine ---------- */
 const slots = [], slotAt = new Map();
 for(const x of DATA.slots){
-  const s = {t:new Date(x.t), id:x.t, mag:x.mag, comp:x.comp, run:null, notes:[]};
+  const s = {t:new Date(x.t), id:x.t, mag:x.mag, comp:x.comp, comp_b:!!x.comp_b, alt:x.alt == null ? null : x.alt, run:null, notes:[]};
   slots.push(s); slotAt.set(x.t, s);
 }
 const MAGN = slots.filter(s => s.mag).length, EDUN = slots.filter(s => s.comp != null).length;
+// A second compressor strip: the source the analysis did not choose (the
+// magnet monitor's channel under an EDU primary, or the EDU under a
+// fallback). The compressor alert model watches the EDU, so its
+// expected-alert rule follows whichever strip is the EDU.
+const ALT_SRC = (DATA.sources && DATA.sources.alt) || null;
+const ALTN = slots.filter(s => s.alt != null).length, ALT = !!ALT_SRC && ALTN > 0;
+const ALT_LBL = ALT ? ALT_SRC.label : '';
+const COLS = ALT ? 6 : 5;
+// The vendor channel standing in where the EDU was silent (analyze.js merge).
+const BK_LBL = (DATA.sources && DATA.sources.backup) || '';
 runs.forEach(r => { const s = slotAt.get(r.slot.getTime()); if(s){ s.run = r; r.slotRef = s; } });
 const LAST_RUN_SLOT = runs.length ? runs[runs.length-1].slot.getTime() : 0;
 // A notification belongs to the slot its run evaluated: the latest run at or
@@ -107,9 +117,11 @@ notes.forEach(b => {
   b.run = b.slot.run; b.slot.notes.push(b);
 });
 // Alerts the data says should have triggered: each model's rule applied to
-// the merged readings.
+// the merged readings. The compressor model watches the EDU, so a backup
+// reading (comp_b: the vendor channel standing in where the EDU was
+// silent) never makes a compressor alert expected.
 const rule = c => { const m = MODELS[c];
-  if(m.kind === 'compressor') return s => s.comp === false;
+  if(m.kind === 'compressor') return ALT && ALT_SRC.edu ? s => s.alt === false : s => s.comp === false && !s.comp_b;
   if(m.value == null || !s0Field(m)) return null;
   const f = s0Field(m);
   return m.op === '>' ? s => s.mag && s.mag[f] > m.value : m.op === '<' ? s => s.mag && s.mag[f] < m.value : null; };
@@ -137,7 +149,7 @@ function renderSummary(){
   const tile = (k, v, sub, cls) => `<div class="tile${cls ? ' ' + cls : ''}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${sub}</div></div>`;
   document.getElementById('stat-tiles').innerHTML = [
     tile('Period', `${esc(shortDay(a))} – ${esc(shortDay(b))}`, `${esc(dayLabel(a))} ${timeMin(a)} to ${esc(dayLabel(b))} ${timeMin(b)} ${tzAbbr()} · ${slots.length} half-hour slots`),
-    tile('Readings', `${MAGN} · ${EDUN}`, `magnet · compressor, of ${slots.length} slots`),
+    tile('Readings', ALT ? `${MAGN} · ${EDUN} · ${ALTN}` : `${MAGN} · ${EDUN}`, `magnet · compressor${ALT ? ' · ' + esc(ALT_LBL.toLowerCase()) : ''}, of ${slots.length} slots`),
     tile('Detections', TOTAL, `across ${ORDER.length} alert models in ${runs.length} runs` + (showMissed ? ` · <b>${missedSlots} slots</b> expected, not detected` : '')),
     tile('Notifications', NOTE_ROWS, `in ${notes.length} batches to ${esc(RECIPS)}`),
     tile('Reached', ok, `${off} with both channels off · ${err} error${err === 1 ? '' : 's'}`, 'good')
@@ -156,7 +168,7 @@ function renderLanes(){
   const W = 1100, L = 190, PW = W - L - 10, top = 30, LH = 24;
   const SH = 30, GAP = 26;
   const dataH = top, pY = dataH + SH, pH = 92, lY = pY + pH + 16, lH = 80, cY = lY + lH + 16, cH = 14;
-  const detH = cY + cH + GAP, dY = detH + SH;
+  const vY = cY + cH + 8, detH = (ALT ? vY : cY) + cH + GAP, dY = detH + SH;
   const notH = dY + ORDER.length*LH + GAP, nY = notH + SH, H = nY + LH + 8;
   const x = t => L + (t - T0) / (T1 - T0) * PW;
   const py = v => pY + pH - (v - P_LO) / (P_TOP - P_LO) * pH, ly = v => lY + lH - (v - L_LO) / (L_HI - L_LO) * lH;
@@ -195,16 +207,24 @@ function renderLanes(){
       d += `${pen ? 'L' : 'M'}${x(sl.id).toFixed(1)},${yf(v).toFixed(1)}`; pen = true; }
     return d; };
   s += `<path class="pline" d="${path(m => m.pr, py)}"/><path class="lline" d="${path(m => m.lvl, ly)}"/>`;
-  s += `<text x="${L-12}" y="${cY+cH-3}" text-anchor="end" class="plabel">Compressor</text>`;
   // Consecutive slots in the same state draw as ONE rect (a 6-month window
   // is ~8,760 slots); a gap in readings ends the run.
   const sw = 1800e3 / (T1 - T0) * PW;
-  for(let i = 0; i < slots.length; ){ const a = slots[i]; if(a.comp == null){ i++; continue; }
-    let j = i; while(j + 1 < slots.length && slots[j+1].comp === a.comp) j++;
-    const b = slots[j], x0 = x(a.id) - sw/2, w = x(b.id) - x(a.id) + sw;
-    const when = i === j ? `${esc(dayLabel(a.t))} ${timeMin(a.t)}` : `${esc(dayLabel(a.t))} ${timeMin(a.t)} to ${esc(dayLabel(b.t))} ${timeMin(b.t)}`;
-    s += `<rect class="${a.comp ? 'con' : 'coff'}" x="${x0.toFixed(1)}" y="${cY}" width="${(w+0.3).toFixed(1)}" height="${cH}"><title>${when} ${tzAbbr()}: ${a.comp ? 'running' : 'off'}</title></rect>`;
-    i = j + 1; }
+  // Backup readings (comp_b) draw lighter and say whose reading they are; a
+  // change of source ends a run like a change of state does.
+  const strip = (key, y, label) => {
+    s += `<text x="${L-12}" y="${y+cH-3}" text-anchor="end" class="plabel">${label}</text>`;
+    const bk = sl => key === 'comp' && sl.comp_b;
+    for(let i = 0; i < slots.length; ){ const a = slots[i]; if(a[key] == null){ i++; continue; }
+      let j = i; while(j + 1 < slots.length && slots[j+1][key] === a[key] && bk(slots[j+1]) === bk(a)) j++;
+      const b = slots[j], x0 = x(a.id) - sw/2, w = x(b.id) - x(a.id) + sw;
+      const when = i === j ? `${esc(dayLabel(a.t))} ${timeMin(a.t)}` : `${esc(dayLabel(a.t))} ${timeMin(a.t)} to ${esc(dayLabel(b.t))} ${timeMin(b.t)}`;
+      const via = bk(a) ? ` (${esc(BK_LBL.toLowerCase())} reading; the EDU was silent)` : '';
+      s += `<rect class="${a[key] ? 'con' : 'coff'}${bk(a) ? ' bk' : ''}" x="${x0.toFixed(1)}" y="${y}" width="${(w+0.3).toFixed(1)}" height="${cH}"><title>${label} ${when} ${tzAbbr()}: ${a[key] ? 'running' : 'off'}${via}</title></rect>`;
+      i = j + 1; }
+  };
+  strip('comp', cY, 'Compressor');
+  if(ALT) strip('alt', vY, esc(ALT_LBL));
   ORDER.forEach((c,i) => {
     const m = MODELS[c], y = dY + i*LH, cy = y + LH/2;
     s += `<g class="${active.has(c) ? '' : 'off'}"><line class="laneline" x1="${L}" x2="${L+PW}" y1="${cy}" y2="${cy}"/>`;
@@ -290,7 +310,7 @@ const P_CRIT_AT = P_CRIT.length ? Math.min(...P_CRIT) : Infinity, P_WARN_AT = P_
 const L_SFX = LBL.l_units === '%' ? '%' : '';
 const lvlCell = v => v == null ? nodata : `<span class="${v < LVL_LINE ? 'warn' : ''}">${v.toFixed(LBL.l_dec)}${L_SFX}</span>`;
 const prCell = v => v == null ? nodata : `<span class="${v > P_CRIT_AT ? 'crit' : v > P_WARN_AT ? 'warn' : ''}">${v.toFixed(LBL.p_dec)}</span>`;
-const compCell = v => v == null ? nodata : v ? 'Running' : '<span class="crit">Off</span>';
+const compCell = (v, bk) => (v == null ? nodata : v ? 'Running' : '<span class="crit">Off</span>') + (v != null && bk ? `<span class="to"> · ${esc(BK_LBL.toLowerCase())}</span>` : '');
 function rangeCell(vals, f){
   if(!vals.length) return nodata;
   const lo = Math.min(...vals), hi = Math.max(...vals);
@@ -303,7 +323,7 @@ function slotView(s){
   const missed = showMissed ? expected(s).filter(c => active.has(c) && !have.has(c)) : [];
   const aFlag = [...have].some(isAbsent) && !!s.mag;
   const nv = showNotes ? s.notes.map(b => ({b, rows:visRows(b)})).filter(x => x.rows.length) : [];
-  const key = [...have].join('') + '|' + missed.join('') + '|' + s.comp + '|' + (s.mag ? 1 : 0) + '|' + (aFlag ? 1 : 0);
+  const key = [...have].join('') + '|' + missed.join('') + '|' + s.comp + (s.comp_b ? 'b' : '') + '|' + s.alt + '|' + (s.mag ? 1 : 0) + '|' + (aFlag ? 1 : 0);
   return {s, dets, have, missed, aFlag, nv, key};
 }
 const stCell = v => v ? `<span class="st-${v}">${v === 'SENT' ? 'Sent' : v === 'DISABLED' ? 'Disabled' : 'Error'}</span>` : `<span class="st-none">Not set</span>`;
@@ -343,7 +363,7 @@ function slotRow(v){
     <td class="t">${timeMin(s.t)}</td>
     <td class="num">${s.mag ? lvlCell(s.mag.lvl) : nodata}</td>
     <td class="num">${s.mag ? prCell(s.mag.pr) : nodata}</td>
-    <td>${compCell(s.comp)}</td>
+    <td>${compCell(s.comp, s.comp_b)}</td>${ALT ? `<td>${compCell(s.alt)}</td>` : ''}
     <td class="mk">${markers([v], ref)}</td></tr>`;
 }
 function groupRow(g, open){
@@ -355,7 +375,7 @@ function groupRow(g, open){
     <td class="t"><span class="exp">›</span> ${timeMin(a.t)} to ${end}<span class="count">${g.views.length}</span></td>
     <td class="num">${rangeCell(mags.map(m => m.lvl), lvlCell)}</td>
     <td class="num">${rangeCell(mags.map(m => m.pr), prCell)}</td>
-    <td>${compCell(a.comp)}</td>
+    <td>${compCell(a.comp, a.comp_b)}</td>${ALT ? `<td>${compCell(a.alt)}</td>` : ''}
     <td class="mk">${markers(g.views, ref)}</td></tr>`;
 }
 // Newest first: the reader opens a page to see what is happening now, and
@@ -397,14 +417,14 @@ function renderTable(){
     if(MONTHLY){
       const open = expandedMonths.has(mo.label);
       const mv = mo.days.flatMap(d => d.items.flatMap(it => it.views));
-      html += `<tr class="month" data-month="${esc(mo.label)}" tabindex="0" aria-expanded="${open}"><th colspan="5" scope="rowgroup">
+      html += `<tr class="month" data-month="${esc(mo.label)}" tabindex="0" aria-expanded="${open}"><th colspan="${COLS}" scope="rowgroup">
         <span class="exp">›</span> ${esc(mo.label)}<span class="dsum">${mo.days.length} day${mo.days.length === 1 ? '' : 's'} · ${mv.length} slots</span><span class="dmk">${daySummary(mv)}</span></th></tr>`;
       if(!open) continue;
     }
     for(const d of mo.days){
       const collapsed = !expandedDays.has(d.label);
       const dv = d.items.flatMap(it => it.views);
-      html += `<tr class="day${MONTHLY ? ' in' : ''}" data-day="${esc(d.label)}" tabindex="0" aria-expanded="${!collapsed}"><th colspan="5" scope="rowgroup">
+      html += `<tr class="day${MONTHLY ? ' in' : ''}" data-day="${esc(d.label)}" tabindex="0" aria-expanded="${!collapsed}"><th colspan="${COLS}" scope="rowgroup">
         <span class="exp">›</span> ${esc(d.label)}<span class="dsum">${dv.length} slots</span><span class="dmk">${daySummary(dv)}</span></th></tr>`;
       if(collapsed) continue;
       for(const it of d.items){
@@ -434,7 +454,7 @@ function renderDetail(){
     const mags = g.views.map(v => v.s.mag).filter(Boolean);
     const missed = g.views[0].missed;
     el.innerHTML = `<div class="dhead"><p class="kicker">${g.views.length} identical slots</p><h3>${esc(dayLabel(a.t))} ${timeMin(a.t)} to ${esc(shortDay(b.t))} ${timeMin(b.t)} ${tzAbbr()}</h3></div>
-      <section id="d-data"><h4>Readings</h4><div class="stats">${stat(esc(LBL.level), rangeCell(mags.map(m => m.lvl).filter(v => v != null), lvlCell))}${stat(esc(LBL.primary), rangeCell(mags.map(m => m.pr).filter(v => v != null), prCell))}${stat('Compressor', compCell(a.comp))}</div></section>
+      <section id="d-data"><h4>Readings</h4><div class="stats">${stat(esc(LBL.level), rangeCell(mags.map(m => m.lvl).filter(v => v != null), lvlCell))}${stat(esc(LBL.primary), rangeCell(mags.map(m => m.pr).filter(v => v != null), prCell))}${stat('Compressor', compCell(a.comp, a.comp_b))}${ALT ? stat(esc(ALT_LBL), compCell(a.alt)) : ''}</div></section>
       <section id="d-det"><h4>Detections</h4>${actualChips(g.views) || '<p class="nodata">None in these slots</p>'}${g.views[0].aFlag ? '<p class="flag">Absent/Null triggered on every slot here, though magnet data exists for them</p>' : ''}</section>
       ${missed.length ? `<section id="d-miss"><h4>Expected, not detected</h4><div class="chips">${missed.map(c => `<span class="chip miss"><b>${esc(MODELS[c].name)}</b>every slot</span>`).join('')}</div></section>` : ''}
       <p><button type="button" class="jump" data-expand="${a.id}">${openGroups.has(a.id) ? 'Collapse' : 'List'} these ${g.views.length} slots in the table</button></p>`;
@@ -443,8 +463,8 @@ function renderDetail(){
   const v = viewById.get(selected.id), s = v.s;
   let h = `<div class="dhead"><p class="kicker">Capture slot</p><h3>${esc(dayLabel(s.t))} ${timeMin(s.t)} ${tzAbbr()}</h3><p class="sub">capture_datetime ${isoOut(s.t)}</p></div>`;
   const pTxt = s.mag && s.mag.pr != null ? prCell(s.mag.pr) + (LBL.p_units ? ' ' + esc(LBL.p_units) : '') : nodata;
-  h += `<section id="d-data"><h4>Readings</h4><div class="stats">${stat(esc(LBL.level), s.mag ? lvlCell(s.mag.lvl) : nodata)}${stat(esc(LBL.primary), pTxt)}${stat('Compressor', compCell(s.comp))}</div>
-    <p class="src">${DATA.sources.mag ? (s.mag ? `${DATA.sources.mag} row found` : `No row in ${DATA.sources.mag}`) + '. ' : 'No readings for this period. '}${DATA.sources.edu ? (s.comp == null ? `No row in ${DATA.sources.edu}` : `${DATA.sources.edu} row found`) + '.' : ''}</p></section>`;
+  h += `<section id="d-data"><h4>Readings</h4><div class="stats">${stat(esc(LBL.level), s.mag ? lvlCell(s.mag.lvl) : nodata)}${stat(esc(LBL.primary), pTxt)}${stat('Compressor', compCell(s.comp, s.comp_b))}${ALT ? stat(esc(ALT_LBL), compCell(s.alt)) : ''}</div>
+    <p class="src">${DATA.sources.mag ? (s.mag ? `${DATA.sources.mag} row found` : `No row in ${DATA.sources.mag}`) + '. ' : 'No readings for this period. '}${DATA.sources.edu && DATA.sources.edu !== DATA.sources.mag ? (s.comp == null ? `No row in ${DATA.sources.edu}` : `${DATA.sources.edu} row found`) + '.' : ''}${ALT && ALT_SRC.table && ALT_SRC.table !== DATA.sources.edu && ALT_SRC.table !== DATA.sources.mag ? ' ' + (s.alt == null ? `No row in ${ALT_SRC.table}` : `${ALT_SRC.table} row found`) + '.' : ''}</p></section>`;
   h += `<section id="d-det"><h4>Detections</h4>`;
   if(!s.run) h += `<p class="nodata">No detection run evaluated this slot.</p>`;
   else {

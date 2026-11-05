@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { DateTime } = require("luxon");
 
-const { resolve_period, DEFAULT_DAYS } = require("./periods");
+const { resolve_period, DEFAULT_DAYS, is_utc } = require("./periods");
 
 // Loads and validates a report request JSON file, applying defaults.
 // The normalized request object is the single internal contract for the SME
@@ -36,17 +36,69 @@ const days_of = (spec, at, sibling_lookback) => {
   }
 };
 
+// A window bound: a date ("2026-10-09") or a date-time
+// ("2026-10-09T14:00", seconds optional, a space accepted for the T, an
+// optional Z or ±HH:MM offset). Deliberately narrower than everything
+// luxon's fromISO accepts: "2026-10" or a week date would parse to SOME
+// instant, and a window bound must be the instant the operator meant.
+const BOUND_RE = /^\d{4}-\d{2}-\d{2}(?:[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)(Z|[+-]\d{2}:?\d{2})?)?$/;
+
+// Zone-less bounds are read in `zone`; a Z or offset always wins. Returns
+// the instant and whether only a date was given (a whole-day bound).
+const parse_bound = (value, field, zone) => {
+  if (typeof value !== "string")
+    fail(`${field} must be a date or date-time string, got ${JSON.stringify(value)}`);
+  const v = value.trim();
+  const m = BOUND_RE.exec(v);
+  if (!m) fail(`${field} "${value}" is not YYYY-MM-DD or YYYY-MM-DDTHH:mm (optionally with Z or ±HH:MM)`);
+  const dt = DateTime.fromISO(v.replace(" ", "T"), { zone });
+  if (!dt.isValid) fail(`${field} "${value}" is not a valid date (${dt.invalidExplanation || dt.invalidReason})`);
+  return { dt, date_only: m[1] === undefined };
+};
+
+// The shortest window a report is built for. Shorter than this, the charts
+// and the story describe a handful of captures — a mistake (a reversed AM/PM,
+// a missing day) far more often than a request.
+const MIN_WINDOW_MS = 60 * 60 * 1000;
+
 // Window normalization on its own: the batch-period derivation needs the
 // EFFECTIVE window of entries that may later be excluded (round-2 F2), so
 // this cannot live only inside normalize_request.
-const window_of = (win) => {
+//
+// Bounds: a DATE is a whole day (start of the start day through the end of
+// the end day — the historical behavior); a DATE-TIME is that exact
+// instant, never moved to a day boundary (it used to be, silently). A
+// window may give both bounds, only an end (the period then counts back
+// from it — "the 30 days before the incident"), only a start (through
+// today), or neither (the rolling period ending today).
+//
+// window.tz is the zone zone-less bounds are read in, and the zone the
+// window is described in back to the reader (periods.js span_text). It
+// defaults to UTC, which keeps every existing request file's window
+// exactly as it was; the one-off CLI passes America/New_York.
+const window_of = (win, { now = DateTime.utc() } = {}) => {
   // || not a default parameter: "window": null appears in pre-existing
   // request files and a default parameter only covers undefined — null
   // must keep its historical 30-day-default behavior (round-3 F1).
   win = win || {};
-  const end = win.end
-    ? parse_date(win.end, "window.end").endOf("day")
-    : DateTime.utc().endOf("day");
+  const tz = win.tz === undefined || win.tz === null ? "utc" : win.tz;
+  if (typeof tz !== "string" || !tz.trim() || !DateTime.utc().setZone(tz).isValid)
+    fail(`window.tz "${tz}" is not a known time zone (e.g. America/New_York, America/Chicago, UTC)`);
+  // A zone with no bound would quietly move a ROLLING window onto that
+  // zone's days while every rolling surface still words it in UTC days.
+  if (win.tz !== undefined && win.tz !== null && !win.start && !win.end)
+    fail("window.tz only applies with window.start / window.end");
+  const zone = is_utc(tz) ? "utc" : tz;
+  const today_end = now.setZone(zone).endOf("day");
+
+  const end_b = win.end ? parse_bound(win.end, "window.end", zone) : null;
+  const end = !end_b ? today_end : end_b.date_only ? end_b.dt.endOf("day") : end_b.dt;
+  // A window that reaches past now would be labelled with a span the data
+  // cannot cover. A date bound may be today (through the end of today, the
+  // same as the rolling default); a time bound may not be later than now.
+  if (end_b && (end_b.date_only ? end > today_end : end > now.plus({ minutes: 1 })))
+    fail(`window.end "${win.end}" is in the future`);
+
   // ?? not ||: zero must reach validation and fail loudly, not silently
   // become the 30-day default under a 7-day batch (review round-1 F7).
   // "period" is the NAMED spelling of the same setting ("6mo", "7d", a day
@@ -56,13 +108,34 @@ const window_of = (win) => {
     win.period !== undefined ? days_of(win.period, "window.period", win.lookback_days) : win.lookback_days ?? DEFAULT_DAYS;
   if (!Number.isInteger(lookback_days) || lookback_days <= 0)
     fail(`window.lookback_days must be a positive integer, got ${JSON.stringify(win.lookback_days)}`);
-  const start = win.start
-    ? parse_date(win.start, "window.start").startOf("day")
-    : end.minus({ days: lookback_days }).startOf("day");
+
+  const start_b = win.start ? parse_bound(win.start, "window.start", zone) : null;
+  // Counting back from an end: from a whole-day end the start lands on a
+  // day boundary (the historical rolling shape); from an exact end it is
+  // exactly N days earlier — "7 days before 17:00" starts at 17:00.
+  const start = start_b
+    ? start_b.date_only
+      ? start_b.dt.startOf("day")
+      : start_b.dt
+    : end_b && !end_b.date_only
+      ? end.minus({ days: lookback_days })
+      : end.minus({ days: lookback_days }).startOf("day");
   if (start >= end) fail("window.start must be before window.end");
+  if (start_b && start > now) fail(`window.start "${win.start}" is in the future`);
+  if (end.toMillis() - start.toMillis() < MIN_WINDOW_MS)
+    fail(`the window is shorter than 1 hour (${win.start || "?"} to ${win.end || "?"}) — check the bounds`);
+
   // lookback_days records the period the window DEFAULTED from — null when
-  // explicit dates were given (a day count would be coincidence).
-  return { start, end, lookback_days: win.start ? null : lookback_days };
+  // explicit start was given (a day count would be coincidence). explicit:
+  // either bound was CHOSEN, so the window is named by its ends, not by a
+  // period ending today (periods.js window_tag / window_label).
+  return {
+    start: start.toUTC(),
+    end: end.toUTC(),
+    lookback_days: win.start ? null : lookback_days,
+    tz: zone,
+    explicit: !!(win.start || win.end)
+  };
 };
 
 const normalize_request = (raw) => {
@@ -298,7 +371,30 @@ const assemble = (raw, list) => {
     );
   const lookback_days = periods.length === 1 ? periods[0] : null;
 
-  return { requests, batch_email, summary_only, excluded, out_dir, lookback_days };
+  // The batch's ONE window when every report shares it (always, for a
+  // summary batch — enforced above), else null. Artifact tags and labels
+  // read it, so an explicit window names its documents by its ends.
+  const first = effective_windows[0];
+  const window =
+    first &&
+    effective_windows.every(
+      (w) => w.start.toMillis() === first.start.toMillis() && w.end.toMillis() === first.end.toMillis() && w.tz === first.tz
+    )
+      ? first
+      : null;
+
+  // History records are the scheduled product's period series ("changes
+  // since last report" compares like with like). An explicit window is an
+  // investigation, not a point in that series, so it never writes one —
+  // whatever the batch asked for — and says so rather than skipping
+  // quietly.
+  let history_skipped = false;
+  if (batch_email && batch_email.archive_records && effective_windows.some((w) => w.explicit)) {
+    batch_email.archive_records = false;
+    history_skipped = true;
+  }
+
+  return { requests, batch_email, summary_only, excluded, out_dir, lookback_days, window, history_skipped };
 };
 
 // Accepts a single request, or { "reports": [ ... ], "batch_email": {...} },
@@ -382,5 +478,6 @@ module.exports = {
   load_requests,
   load_raw_request,
   materialize_scoped_requests,
-  normalize_request
+  normalize_request,
+  window_of
 };

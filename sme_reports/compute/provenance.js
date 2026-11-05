@@ -27,4 +27,11 @@ const source_kind = (source) => {
 // which states are concluded rather than read.
 const is_inferred = (source) => source_kind(source) === "inferred";
 
-module.exports = { SOURCE_KIND, source_kind, is_inferred };
+// A system's compressor story carries the ᶜ when ANY of its readings were
+// inferred: the primary source itself (a GE with no EDU), or an inferred
+// backup filling EDU gaps (compute/analyze.js compressor_backup). Takes a
+// facts object or a fleet record — both carry the two fields.
+const comp_inferred = (f) =>
+  is_inferred(f.compressor_source) || !!(f.compressor_backup && f.compressor_backup.inferred);
+
+module.exports = { SOURCE_KIND, source_kind, is_inferred, comp_inferred };

@@ -2,6 +2,7 @@ const path = require("path");
 const build_transporter = require("../../email/build-transporter");
 const send_with_retry = require("./send_with_retry");
 const { COLORS, FONT, logo_attachment, wrap_email, esc } = require("./email_theme");
+const { span_text } = require("../periods");
 
 const [addLogEvent] = require("../../utils/logger/log");
 const {
@@ -16,10 +17,15 @@ const {
 const send_report_email = async (run_log, job_id, request, identity, pdf_path) => {
   const subject = `Magnet Health Brief — ${identity.system_id} — ${identity.site_name}`;
   const date = new Date().toISOString().slice(0, 10);
+  // An explicit window is worded with its times and zone (periods.js) —
+  // the same words as the brief's cover; a rolling one keeps its dates.
+  const data_period = request.window.explicit
+    ? span_text(request.window, { year: true })
+    : `${request.window.start.toFormat("yyyy-MM-dd")} to ${request.window.end.toFormat("yyyy-MM-dd")}`;
   const body_html =
     `<p style="${FONT}font-size:14px;color:${COLORS.navy};margin:0 0 10px 0;">Attached is the one-page Magnet Health Brief for ` +
     `<b>${esc(identity.system_id)}</b> — ${esc(identity.site_name)} (${esc(identity.manufacturer)} ${esc(identity.modality || "")}).</p>` +
-    `<p style="${FONT}font-size:13px;color:${COLORS.grey};margin:0;">Data period: ${request.window.start.toFormat("yyyy-MM-dd")} to ${request.window.end.toFormat("yyyy-MM-dd")}.</p>`;
+    `<p style="${FONT}font-size:13px;color:${COLORS.grey};margin:0;">Data period: ${esc(data_period)}.</p>`;
 
   const message = {
     from: process.env.OUTLOOK_USER,

@@ -296,6 +296,11 @@ const build_summary_facts = (facts, identity) => {
     primary_min: pressure && pressure.all ? pressure.all.min.v : null,
     primary_delta: pressure ? pressure.delta_vs_baseline : null,
     primary_trend,
+    // The steady climb behind a pressure_rising condition (judgments.js
+    // steady_rise): the fitted rise and the hours it was fitted over. Null
+    // otherwise. Additive; older sidecars lack it.
+    primary_rise: p_ok && pressure && pressure.steady_rise ? pressure.steady_rise.rise : null,
+    primary_rise_hours: p_ok && pressure && pressure.steady_rise ? pressure.steady_rise.hours : null,
     thr_high_gt: thr.high_gt,
     thr_high_lt: thr.high_lt,
     // "oem_constant" means no alert model is configured for this system, so
@@ -334,6 +339,12 @@ const build_summary_facts = (facts, identity) => {
     // It must never be rendered as "ON".
     compressor_on: facts.last_compressor_on,
     compressor_source: facts.compressor_source,
+    // The vendor channel's share when it filled EDU gaps (or null); the
+    // fleet cell's ᶜ reads it (compute/provenance.js comp_inferred).
+    compressor_backup: facts.compressor_backup || null,
+    // EDU-off issue type (compute/corroborate.js): the fleet reason's
+    // qualifier. null when no EDU-reported stop.
+    compressor_corroboration: facts.compressor_corroboration || null,
     // Only events with observed OFF readings count as history. A request
     // event_window override produces an event whose window was supplied by
     // hand; if no OFF reading falls inside it, there is no downtime to report
@@ -345,7 +356,8 @@ const build_summary_facts = (facts, identity) => {
           start: primary.start,
           end: primary.end,
           off_hours: primary.off_hours,
-          cycles: primary.cycles
+          cycles: primary.cycles,
+          corroboration: primary.corroboration || null
         }
       : null,
     flicker_count: facts.compressor_flickers ? facts.compressor_flickers.count : 0,

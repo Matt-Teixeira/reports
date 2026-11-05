@@ -9,6 +9,7 @@ const { render_timeseries_chart } = require("./chart");
 const { build_tiles } = require("./tiles");
 const { build_narrative } = require("./narrative");
 const fmt = require("./fmt");
+const { span_text } = require("../periods");
 
 // Turns identity + normalized series + request into the flat view-model that
 // page.js interpolates. All display strings are finalized here; the
@@ -26,7 +27,8 @@ const build_render_model = ({
   edu = [],
   edu_source = null,
   thresholds = null, // from data.fetch_thresholds(); null -> OEM fallback
-  units = null // from data.fetch_units(); null -> vendor defaults
+  units = null, // from data.fetch_units(); null -> vendor defaults
+  context = null // boundary readings for the compressor merge (analyze.js)
 }) => {
   const { facts, views } = analyze_system({
     system_id: identity.system_id,
@@ -37,7 +39,8 @@ const build_render_model = ({
     edu,
     edu_source,
     thresholds,
-    units
+    units,
+    context
   });
   // Locals the presentation code below reads — all analysis products.
   // `units`/`thresholds` are re-bound to the RESOLVED values (analyze owns
@@ -164,7 +167,10 @@ const build_render_model = ({
 
   // Banner pages trade chart height for the banner's room; compact pages
   // trade a further notch for their extra prose. All measured, not assumed.
-  const chart_height = banner ? (density ? 92 : 100) : density ? 128 : 152;
+  // Compact + banner went 92 -> 86 (2026-11-05) when a doubtful stop's
+  // corroboration note (render/narrative.js corrob_note) joined the lead:
+  // the maximal fixture measured 9.8px clear at 92, under the 12px floor.
+  const chart_height = banner ? (density ? 86 : 100) : density ? 128 : 152;
 
   // Pressure chart markers: peak is red when breaching, orange otherwise;
   // "now" is one notch softer (orange breaching / green not) — exemplar convention.
@@ -240,8 +246,17 @@ const build_render_model = ({
     });
   }
 
-  const win_span = `${fmt.day(window_start)} – ${fmt.day(window_end)}`;
-  const win_span_caps = `${fmt.day_caps(window_start)} → ${fmt.day_caps(window_end)}`;
+  // An explicit window is worded with its times and zone (periods.js);
+  // a rolling one is whole UTC days, worded exactly as it always was. The
+  // chart headings name only the days — the full span would wrap the
+  // pressure heading past its one line; the sub-line states the times and
+  // zone, and the axis ends state the instants.
+  const win_span = request.window.explicit
+    ? span_text(request.window)
+    : `${fmt.day(window_start)} – ${fmt.day(window_end)}`;
+  const win_span_caps = request.window.explicit
+    ? span_text(request.window, { caps: true, days: true })
+    : `${fmt.day_caps(window_start)} → ${fmt.day_caps(window_end)}`;
   const analyzed = fmt.iso_date(Date.now());
   // "every capture" keeps the line-mode pressure heading on one line.
   const mode_desc = mode === "band" ? "daily range" : "every capture";

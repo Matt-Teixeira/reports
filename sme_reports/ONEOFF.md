@@ -19,6 +19,8 @@ npm run report:customer -- --customer C0137 --period 6mo
 npm run report:sme      -- --system SME19034 --period 6mo
 npm run report:customer-briefs -- --customer C0137 --period 7d   # every brief, one zip email
 npm run report:fleet    -- --period 6mo
+npm run report:sme      -- --system SME21284 --from "2026-10-09 14:00" --to "2026-10-11 18:00"
+npm run report:sme      -- --system SME21284 --to 2026-10-12 --period 7d   # the 7 days before
 npm run report -- customer                           # any job by name
 ```
 
@@ -29,7 +31,9 @@ to fire while you are deciding what it should say.
 
 | Flag | Effect |
 |---|---|
-| `--period <spec>` | `7d`, `30d`, `90d`, `6mo`, or a plain day count |
+| `--period <spec>` | `7d`, `30d`, `90d`, `6mo`, or a plain day count — the rolling period ending today (drops any window the job config sets) |
+| `--from <when>` / `--to <when>` | an explicit window — see [Windows](#windows) |
+| `--tz <zone>` | the zone `--from`/`--to` are read in when they carry no `Z` or offset (default `America/New_York`) |
 | `--customer <id>` | customer_summary and sme_brief jobs — overrides the scope (for a brief job it replaces any explicit system list) |
 | `--system <SME#####>` | repeatable, comma lists accepted; narrows a brief job's systems (or a customer-scoped job to an explicit set) |
 | `--out-dir <path>` | where documents are written |
@@ -109,6 +113,77 @@ inside a `window`, wherever `lookback_days` was accepted:
 `period` and `lookback_days` are the same setting — naming both is a
 request error, not a precedence rule between two numbers that may
 disagree.
+
+## Windows
+
+A report can cover any two instants instead of a period ending today.
+
+```bash
+npm run report:sme -- --system SME21284 --from "2026-10-09 14:00" --to "2026-10-11 18:00"
+npm run report:customer -- --from 2026-10-01 --to 2026-10-31          # October, Eastern days
+npm run report:sme -- --system SME21284 --to 2026-10-12T17:00 --period 7d
+npm run report:fleet -- --from 2026-10-09T18:00Z --to 2026-10-11T22:00Z
+```
+
+| Given | Window |
+|---|---|
+| `--from` + `--to` | exactly those bounds |
+| `--to` (+ the job's or `--period`'s period) | the period counting back from `--to` |
+| `--from` alone | from then through today |
+| neither | the rolling period ending today (unchanged) |
+
+- **A date is a whole day** (`2026-10-09` = that day's midnight to
+  midnight); **a date-time is that exact instant** (`2026-10-09T14:00`,
+  `"2026-10-09 14:00"`, seconds optional).
+- **Zone:** a bound without `Z` or an offset is read in `--tz`, default
+  `America/New_York`. `--tz America/Chicago`, `--tz UTC`. A `Z` or
+  `-05:00` on the bound always wins.
+- **Refused before any work:** `--from` with `--period` (a window with a
+  start is fixed by its ends), `--tz` without a window, a bound in the
+  future, `from` not before `to`, a window under 1 hour, and anything
+  that is not one of the forms above.
+- The console line printed before the run states the window in its zone
+  **and** as UTC instants — check it there.
+
+Jobs take the same settings as `from`, `to` and `tz` keys
+(`from` + `period` in one job is an error; `from`/`to` are not allowed in
+`defaults` — a window belongs to a job). On the command line the window
+travels as a unit: `--from`/`--to` replace the job's whole window, and
+`--period` alone drops it.
+
+```jsonc
+"sme21284-event": { "kind": "sme_brief", "system_ids": ["SME21284"],
+                    "from": "2026-10-09T14:00", "to": "2026-10-11T18:00" }
+```
+
+**What the reader sees.** Every place that states the span words it the
+same way (`periods.js` `span_text`): `Oct 9 14:00 – Oct 11 18:00 ET`,
+or `Oct 1 – Oct 31 ET` for whole days, on the brief's sub-line, the
+summary cover and footers, the activity pages and both emails (the
+summary subject names the window instead of a period). The brief's chart
+headings name only the days (`OCT 9 → OCT 11`) to stay on one line, and
+the chart axis labels its ends with their UTC times (`10-09 18:00Z`)
+whenever the window does not sit on whole UTC days. Everything else in
+the brief stays UTC, as before.
+
+**Artifact names** carry the window's ends, in its zone, in place of the
+period tag — `…-Magnet-Health-20261009T1400-to-20261011T1800-<date>.pdf`,
+`…-Summary-20261001-to-20261031-<date>.pdf` — so a window can never
+overwrite, or pass for, the 30-day document from the same day.
+
+**No history records.** An explicit window never writes a records
+sidecar, even with `archive_records: true`: the archived series is the
+scheduled product's period history, and an investigation is not a point
+in it. The console line says so.
+
+**Request files** take the same bounds in `window.start` / `window.end`,
+plus an optional `window.tz` — which defaults to **UTC** there, so every
+existing request file's window is unchanged. The one difference: a
+date-time bound used to be moved silently to its day's boundary; it is
+now the instant written.
+
+The scheduled config table is unchanged — scheduled reports are always
+rolling periods.
 
 ## What a 6-month period changes
 

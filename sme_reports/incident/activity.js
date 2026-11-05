@@ -13,6 +13,8 @@
 // Output is the browser payload incident/timeline.client.js consumes (the
 // same shape the Anomaly Report embeds), so both pages share one client.
 
+const { is_inferred } = require("../compute/provenance");
+
 const SLOT_MS = 30 * 60e3;
 const RUN_GAP_MS = 5 * 60e3;
 
@@ -47,6 +49,10 @@ const mode_of = (xs) => {
   return [...c.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
 };
 
+// What a compressor source is, in a strip label or table header.
+const comp_label = (src) =>
+  src === "edu_comp_vib" ? "EDU vibration" : is_inferred(src) ? "Coldhead (inferred)" : "Magnet monitor";
+
 const fixed = (v, d) => (v === null || v === undefined ? null : Number(v).toFixed(d));
 
 // data: incident/activity_data.js rows — ALREADY SCRUBBED (incident/scrub.js)
@@ -73,6 +79,8 @@ const analyze_activity = (data, readings, { from, to, avante_keys = null }) => {
   const slots = [];
   const slot_at = new Map();
   for (let t = first; t < to; t += SLOT_MS) {
+    // alt / comp_b are set only when present: on a 6-month page (~8,760
+    // slots) an always-present null would add ~100 KB per system.
     const s = { t, comp: null, mag: null };
     slots.push(s);
     slot_at.set(t, s);
@@ -99,9 +107,19 @@ const analyze_activity = (data, readings, { from, to, avante_keys = null }) => {
     }
     for (const c of r.compressor) {
       const s = in_slot(c.t);
-      if (s) s.comp = c.on;
+      if (s) {
+        s.comp = c.on;
+        if (c.b) s.comp_b = 1;
+      }
+    }
+    // The vendor channel as it reported (analyze.js secondary_compressor),
+    // under an EDU primary. It gets its own strip.
+    for (const c of (r.secondary_compressor && r.secondary_compressor.rows) || []) {
+      const s = in_slot(c.t);
+      if (s) s.alt = c.on;
     }
   }
+  const alt_src = r && r.secondary_compressor && slots.some((s) => s.alt != null) ? r.secondary_compressor.source : null;
 
   // --- alert runs -----------------------------------------------------------
   // A run's detections share an inserted_at to within seconds; runs are 30
@@ -252,7 +270,19 @@ const analyze_activity = (data, readings, { from, to, avante_keys = null }) => {
     sources: {
       mag: (r && r.sources.mag) || null,
       edu: (r && r.sources.edu) || null,
-      compressor: (r && r.compressor_source) || null
+      compressor: (r && r.compressor_source) || null,
+      // What stood in where the EDU was silent (slots with comp_b), or null.
+      backup: alt_src && slots.some((s) => s.comp_b) ? comp_label(alt_src) : null,
+      // The second compressor strip: its source, table and label, and
+      // whether it is the EDU (which the compressor alert model watches).
+      alt: alt_src
+        ? {
+            source: alt_src,
+            edu: alt_src === "edu_comp_vib",
+            table: alt_src === "edu_comp_vib" ? r.sources.edu : r.sources.mag,
+            label: comp_label(alt_src)
+          }
+        : null
     },
     labels: {
       primary: (r && r.primary_name) || "He pressure",
@@ -261,6 +291,15 @@ const analyze_activity = (data, readings, { from, to, avante_keys = null }) => {
       level: "He level",
       l_units: units.helium || "%",
       l_dec: dec.helium
+    },
+    // EDU-reported compressor stops in the window with the other data's
+    // verdict and evidence (compute/corroborate.js), for the page's
+    // "Compressor stops" section. Empty when there are none.
+    stops: {
+      secondary: (r && r.compressor_secondary_label) || null,
+      table: (r && r.sources.mag) || null,
+      edu_table: (r && r.sources.edu) || null,
+      events: ((r && r.compressor_stops) || []).filter((e) => (e.end == null || e.end >= from) && e.start < to)
     },
     models,
     runs: page_runs,

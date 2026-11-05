@@ -20,6 +20,7 @@ const {
   valid_counts
 } = require("./metrics");
 const { classify } = require("./archetype");
+const { steady_rise } = require("./judgments");
 const { offline_state } = require("./summary_facts");
 const {
   PLAUSIBLE,
@@ -30,6 +31,7 @@ const {
 } = require("./plausible");
 const { fallback_thresholds } = require("../vendors");
 const { is_inferred } = require("./provenance");
+const { corroborate_event, overall_type, stale_times } = require("./corroborate");
 
 // EDU environmental telemetry (vendor-independent, °F / %); supplemental.
 // Screened against the EDU plausibility bounds first: an open probe input
@@ -100,8 +102,15 @@ const analyze_system = ({
   edu = [],
   edu_source = null,
   thresholds = null, // from data.fetch_thresholds(); null -> OEM fallback
-  units = null // from data.fetch_units(); null -> vendor defaults
+  units = null, // from data.fetch_units(); null -> vendor defaults
+  // Readings just OUTSIDE the window (data.fetch_boundary_context), for two
+  // checks at its edges and nothing else: whether an EDU reading lies within
+  // 45 min of a vendor reading, and whether a vendor reading repeats the
+  // previous one's host timestamp. They never enter rows, events or charts.
+  context = null
 }) => {
+  const ctx_series_before = (context && context.series_before) || [];
+  const ctx_edu = [...((context && context.edu_before) || []), ...((context && context.edu_after) || [])];
   thresholds = thresholds || fallback_thresholds(vendor);
   units = units || { pressure: vendor.pressure.units, helium: vendor.helium.units };
   const thr = thresholds.pressure;
@@ -190,18 +199,20 @@ const analyze_system = ({
   const window_start = window.start.toMillis();
   const window_end = window.end.toMillis();
 
-  // Compressor source is a per-SYSTEM choice, not a per-vendor one. The EDU
-  // vibration sensor is a direct measurement of the compressor itself, so
-  // where a system has one reporting, it outranks the GE coldhead INFERENCE
-  // and fills in when the scanner channel yields nothing (e.g. a Philips
-  // whose only malf readings are cable errors). Scanner-reported channels
-  // (Philips malf, Siemens status text) otherwise keep priority — measured
-  // beats inferred, but a report from the machine itself is not displaced.
-  // The floor keeps a nearly-empty EDU from displacing dense inference.
-  const EDU_MIN_READINGS = 24;
+  // Compressor state is merged PER READING. The EDU vibration sensor is
+  // PRIMARY: a direct measurement of the compressor, and the sensor every
+  // default compressor alert model watches (comp_vib_status = false), so the
+  // report judges the signal the detections come from. The vendor channel
+  // (Philips malf, Siemens status text, GE coldhead inference) is the
+  // BACKUP: wherever the EDU is silent, its reading stands in, so an EDU
+  // outage never blanks a period the scanner can still speak for. With no
+  // EDU readings at all, the vendor channel is the whole signal.
+  // SME19528 (Oct 2026) is why the EDU leads: its Siemens status text showed
+  // a stop no alert could see while the EDU read running, then froze.
+  const EDU_COVER_MS = 45 * 60e3; // an EDU reading this close speaks for the moment
   const edu_comp_rows = edu
     .filter((r) => r.comp_vib !== null)
-    .map((r) => ({ t: r.t, compressor_on: r.comp_vib }));
+    .map((r) => ({ t: r.t, compressor_on: r.comp_vib, src: "edu_comp_vib" }));
   const vendor_is_edu = vendor.compressor.source === "edu_comp_vib";
   const vendor_is_inference = is_inferred(vendor.compressor.source);
   // An inferred state is only as good as the reading it was inferred FROM.
@@ -218,21 +229,50 @@ const analyze_system = ({
           : r
       )
     : rows;
+  const vendor_src = vendor.compressor.source;
   const vendor_stateful = vendor_is_edu
     ? []
-    : source_rows.filter((r) => r.compressor_on !== null);
-  // The floor is SYMMETRIC: just as a nearly-empty EDU cannot displace dense
-  // inference, a nearly-empty scanner channel cannot displace a dense EDU.
-  // Without this, a Philips with one stray malf reading and 1,400 EDU
-  // readings would keep the scanner source, detect zero events, and render
-  // "running continuously" over a measured six-hour stop.
-  const use_edu =
-    vendor_is_edu ||
-    (edu_comp_rows.length >= EDU_MIN_READINGS &&
-      (vendor_is_inference || vendor_stateful.length < EDU_MIN_READINGS));
-  const compressor_rows = use_edu ? edu_comp_rows : source_rows;
-  const compressor_source = use_edu ? "edu_comp_vib" : vendor.compressor.source;
-  const stateful = compressor_rows.filter((r) => r.compressor_on !== null);
+    : source_rows
+        .filter((r) => r.compressor_on !== null)
+        .map((r) => ({ t: r.t, host_t: r.host_t, compressor_on: r.compressor_on, src: vendor_src }));
+  const use_edu = vendor_is_edu || edu_comp_rows.length > 0;
+  // A backup reading fills an EDU gap only if it is FRESH: one that repeats
+  // the previous reading's host timestamp is the scanner re-sending an old
+  // snapshot (SME19528's feed repeated one host time for four days), and a
+  // stale "running" must never stand in for a moment nobody measured.
+  // The first in-window reading is compared with the last stateful vendor
+  // reading BEFORE the window (boundary context), so a feed that froze
+  // before the period cannot pass its first repeat off as fresh.
+  const prior_stateful = vendor_is_edu
+    ? []
+    : ctx_series_before.filter((r) => r.compressor_on !== null && !(vendor_is_inference && outside(r.coldhead_k, CHANNEL_BOUNDS.coldhead_k)));
+  const prev_host = (i) =>
+    i > 0 ? vendor_stateful[i - 1].host_t : prior_stateful.length ? prior_stateful[prior_stateful.length - 1].host_t : undefined;
+  const fresh = vendor_stateful.filter((r, i) => !(r.host_t != null && r.host_t === prev_host(i)));
+  // EDU readings just outside the window count for proximity only: an EDU
+  // reading at 23:40 still speaks for a vendor reading at 00:10.
+  const edu_ts = [
+    ...edu_comp_rows.map((r) => r.t),
+    ...ctx_edu.filter((r) => r.comp_vib !== null && r.comp_vib !== undefined).map((r) => r.t)
+  ].sort((a, b) => a - b);
+  const edu_near = (t) => {
+    // edu_ts is sorted above (in-window and boundary readings together).
+    let lo = 0, hi = edu_ts.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (edu_ts[mid] < t) lo = mid + 1; else hi = mid; }
+    return (lo < edu_ts.length && edu_ts[lo] - t <= EDU_COVER_MS) || (lo > 0 && t - edu_ts[lo - 1] <= EDU_COVER_MS);
+  };
+  const backup_rows = use_edu && !vendor_is_edu ? fresh.filter((r) => !edu_near(r.t)) : [];
+  const stateful = use_edu
+    ? [...edu_comp_rows, ...backup_rows].sort((a, b) => a.t - b.t)
+    : vendor_stateful;
+  const compressor_rows = stateful;
+  // Names the PRIMARY source (EDU whenever it reported); the backup's share
+  // is stated separately so no page credits the EDU for a reading it did
+  // not take, or drops the ᶜ from a coldhead-inferred one.
+  const compressor_source = use_edu ? "edu_comp_vib" : vendor_src;
+  const compressor_backup = backup_rows.length
+    ? { source: vendor_src, readings: backup_rows.length, inferred: is_inferred(vendor_src) }
+    : null;
   // Split single-reading, thermally-uncorroborated dropouts (sensor
   // flickers) from real stops; only real runs form the event.
   const { real_runs, flicker_runs } = classify_compressor_runs(
@@ -251,6 +291,52 @@ const analyze_system = ({
         })
       ]
     : build_compressor_events(real_runs, { interval_ms });
+  // Every EDU-reported stop stays a stop; the other data types it
+  // (compute/corroborate.js). Only when the EDU is primary: the rule is
+  // about what the EDU says, and a vendor-only system is unchanged.
+  if (use_edu) {
+    // The last row before the window lets the first in-window row be judged
+    // stale too; it is never itself a reading here.
+    const before_last = ctx_series_before.length ? [ctx_series_before[ctx_series_before.length - 1]] : [];
+    const stale = stale_times([...before_last, ...rows]);
+    const fresh_pts = (pts) => pts.filter((p) => !stale.has(p.t));
+    const ctx = {
+      secondary: vendor_is_edu ? [] : fresh,
+      p_points: fresh_pts(p_points),
+      coldhead: fresh_pts(
+        rows
+          .filter((r) => r.coldhead_k != null && !Number.isNaN(r.coldhead_k) && !outside(r.coldhead_k, CHANNEL_BOUNDS.coldhead_k))
+          .map((r) => ({ t: r.t, v: r.coldhead_k }))
+      ),
+      warm_k: vendor.coldhead ? vendor.coldhead.warm_k : null,
+      epsilon: thr.high_gt !== null ? thr.high_gt * 0.02 : null,
+      window_end
+    };
+    // The frozen-feed readings set aside above, so the page can say a
+    // channel was frozen rather than silent.
+    const fresh_set = new Set(fresh);
+    ctx.secondary_stale = vendor_is_edu ? [] : vendor_stateful.filter((r) => !fresh_set.has(r));
+    ctx.p_stale = p_points.filter((p) => stale.has(p.t));
+    ctx.coldhead_stale = rows
+      .filter((r) => stale.has(r.t) && r.coldhead_k != null && !Number.isNaN(r.coldhead_k))
+      .map((r) => ({ t: r.t, v: r.coldhead_k }));
+    // Only the readings of the stop's REAL off-runs, the ones its off_count
+    // counts: single-reading flickers inside the span are not the stop.
+    const in_real_run = (t) => real_runs.some((run) => t >= run.start && t <= run.end);
+    for (const ev of compressor_events) {
+      const off_rows = stateful.filter(
+        (r) =>
+          r.src === "edu_comp_vib" &&
+          r.compressor_on === false &&
+          r.t >= ev.start &&
+          (ev.end == null || r.t <= ev.end) &&
+          in_real_run(r.t)
+      );
+      // A stop only the backup saw (the EDU was silent) is not an EDU-off
+      // issue: it carries no corroboration record and reads as any stop.
+      if (off_rows.length) ev.corroboration = corroborate_event(ev, off_rows, ctx);
+    }
+  }
   const compressor_event = select_primary_event(compressor_events);
   const compressor_flickers = flicker_runs.length
     ? { count: flicker_runs.length, times: flicker_runs.map((r) => r.start) }
@@ -259,6 +345,17 @@ const analyze_system = ({
   const quenched = detect_quench(rows);
   const other_events = compressor_events.filter((ev) => ev !== compressor_event);
   const pressure = metric_facts(p_points, compressor_event, { other_events });
+  // Judged once, here, where the alert line is known: the classifier, the
+  // tiles, the fleet arrows and the summary record all read this one answer.
+  // Only without an OBSERVED stop — the classifier's own predicate
+  // (archetype.js: a hand-supplied event_window holding no OFF readings is
+  // not a stop). With one, the event ramp is the story and a stop outranks
+  // a rise; without one, the steady rise alone decides, so the condition
+  // and the trend word cannot disagree (rising-trend review F1).
+  if (pressure) {
+    pressure.event_observed = !!(compressor_event && compressor_event.off_count !== 0);
+    pressure.steady_rise = pressure.event_observed ? null : steady_rise(pressure, thr);
+  }
   const helium = metric_facts(he_points, compressor_event, { other_events });
   const coldhead_points = screen(metric_points(rows, "coldhead_k"), "coldhead_k");
   const coldhead = stats_for(coldhead_points);
@@ -330,6 +427,19 @@ const analyze_system = ({
     // The source actually used for THIS system — drives the ᶜ provenance
     // mark and the "(per EDU vibration sensor)" narrative note.
     compressor_source,
+    compressor_backup,
+    // The period's EDU-off issue type (confirmed / doubtful / unconfirmed,
+    // compute/corroborate.js), null without EDU-reported stops; and what the
+    // secondary channel is called in the annotation.
+    compressor_corroboration: overall_type(
+      compressor_events.filter((ev) => ev.corroboration).map((ev) => ev.corroboration.type)
+    ),
+    compressor_secondary_label: vendor_is_edu ? null : is_inferred(vendor_src) ? "the coldhead" : "the magnet monitor",
+    // How the secondary channel says "running" in the annotation.
+    compressor_secondary_running: vendor_is_edu ? null : is_inferred(vendor_src) ? "the coldhead stayed cold" : "the magnet monitor read running",
+    // Where the CURRENT state came from: a backup reading at the end of the
+    // period carries the backup's provenance (a coldhead-inferred ONᶜ).
+    compressor_last_source: stateful.length ? stateful[stateful.length - 1].src : null,
     compressor_flickers,
     last_compressor_on: stateful.length
       ? stateful[stateful.length - 1].compressor_on
@@ -380,9 +490,15 @@ const analyze_system = ({
   // (EDU vs the vendor channel, implausible-coldhead inference blanked) —
   // exposed so the per-system activity page plots the same compressor
   // state this analysis judged, never a second derivation of it.
+  // secondary_compressor: the vendor channel as it reported, every reading,
+  // when the EDU is primary. The activity page draws it as a second strip:
+  // the two sensors can disagree, and the merged strip only shows the
+  // vendor where the EDU was silent.
+  const secondary_compressor =
+    use_edu && vendor_stateful.length ? { source: vendor_src, rows: vendor_stateful } : null;
   return {
     facts,
-    views: { mode, p_points, he_points, compressor_rows: stateful, compressor_source }
+    views: { mode, p_points, he_points, compressor_rows: stateful, compressor_source, secondary_compressor }
   };
 };
 
