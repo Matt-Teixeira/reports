@@ -25,6 +25,7 @@
       "description": "One customer's Magnet Health Summary, by customer id",
       "_scope": "give exactly one of customer_id, site_ids, system_ids",
       "customer_id": "C0137",
+      "recipients": ["matt.teixeira@avantehs.com", "jonathan.pope@avantehs.com", "joe.anello@avantehs.com"],
       "period": "6mo"
     },
 
@@ -32,6 +33,7 @@
       "kind": "sme_brief",
       "description": "Magnet Health Brief for one or more MRI systems",
       "system_ids": ["SME21824"],
+      "recipients": ["matt.teixeira@avantehs.com", "jonathan.pope@avantehs.com", "joe.anello@avantehs.com"],
       "period": "6mo"
     },
 
