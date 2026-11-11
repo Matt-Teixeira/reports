@@ -11,6 +11,7 @@ const {
   fleet_failure_note
 } = require("./email_theme");
 const { status_html } = require("./email_status");
+const { activity_attachment } = require("./activity_attachment");
 
 const {
   attention_sort,
@@ -89,6 +90,8 @@ const send_summary_email = async (
     status_html(results, { failures: failures || [], reason_of });
 
   const attachments = [logo_attachment()];
+  // What carried activity part 1, for the send log.
+  let activity_sent = null;
   if (fleet_pdf_path) {
     attachments.push({
       filename: path.basename(fleet_pdf_path),
@@ -115,16 +118,24 @@ const send_summary_email = async (
   // not be built is NAMED, never just absent from the zip.
   if (activity) {
     const first = activity.zips[0];
-    if (first) attachments.push({ filename: first.filename, path: first.path });
-    const n = activity.pages;
     const parts = activity.zips.length;
+    // Small, Avante-only: the HTML itself; otherwise the zip (activity_attachment.js).
+    activity_sent = first
+      ? activity_attachment(first, { parts, recipients: batch_email.recipients, cc_list: batch_email.cc_list })
+      : null;
+    if (activity_sent) attachments.push({ filename: activity_sent.filename, path: activity_sent.path });
+    const n = activity.pages;
     const internal = activity.audience === "internal";
+    const carrier =
+      activity_sent && !activity_sent.zipped
+        ? `The attached <b>System Activity</b> file, <b>${esc(activity_sent.filename)}</b>, is one interactive page`
+        : `The attached <b>System Activity</b> zip holds one interactive file${first && first.app ? `, <b>${esc(path.basename(first.app))}</b>` : ""}`;
     // The app: one file per zip part, opening on a list of every flagged
     // system. Pages: one file per system.
     let note = !n
       ? ""
       : activity.format === "app"
-        ? `The attached <b>System Activity</b> zip holds one interactive file${first && first.app ? `, <b>${esc(path.basename(first.app))}</b>` : ""}. Open it in a web browser: it lists the ${n} system${n === 1 ? "" : "s"} below that need${n === 1 ? "s" : ""} attention, ${n === 1 ? "has" : "have"} a data issue, or could not be analyzed, and selecting one shows its alert detections, notifications and readings over this period.` +
+        ? `${carrier}. Open it in a web browser: it lists the ${n} system${n === 1 ? "" : "s"} below that need${n === 1 ? "s" : ""} attention, ${n === 1 ? "has" : "have"} a data issue, or could not be analyzed, and selecting one shows its alert detections, notifications and readings over this period.` +
           (internal ? " This is the <b>internal</b> copy: Avante staff recipients are included." : "") +
           (parts > 1 ? ` It is split into ${parts} zips; this email carries part 1 and parts 2–${parts} follow in separate emails. Each part opens on the full list and holds its share of the systems.` : "")
         : `The attached <b>System Activity</b> zip holds ${n} interactive page${n === 1 ? "" : "s"}, one for each system below that needs attention, has a data issue, or could not be analyzed: its alert detections, notifications and readings over this period. Open them in a web browser.` +
@@ -165,7 +176,8 @@ const send_summary_email = async (
       urgent: urgent.map((r) => r.system_id),
       data_issues: data_issues.map((r) => r.system_id),
       fleet_pdf: fleet_pdf_path || null,
-      activity_zip: activity && activity.zips[0] ? activity.zips[0].filename : null,
+      activity_attachment: activity_sent ? activity_sent.filename : null,
+      activity_zipped: activity_sent ? activity_sent.zipped : null,
       failures: (failures || []).length,
       status,
       accepted,

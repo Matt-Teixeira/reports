@@ -100,6 +100,7 @@ const remove_activity_zips = (activity) => {
   for (const z of activity.zips) {
     try {
       fs.rmSync(z.path, { force: true });
+      if (z.snapshot) fs.rmSync(z.snapshot, { force: true });
     } catch (error) {
       console.error(`activity zip cleanup failed (send outcome unaffected): ${error.message}`);
     }

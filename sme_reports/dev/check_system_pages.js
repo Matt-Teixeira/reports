@@ -103,6 +103,51 @@ const H = 3600e3;
   assert.deepStrictEqual([...avante_keys(broad)], ["someone1116@gmail.com"]);
 }
 
+// --- zip or HTML for activity part 1 (output/activity_attachment.js) --------------
+{
+  const { activity_attachment, avante_only, UNZIPPED_MAX_BYTES } = require("../output/activity_attachment");
+  assert.strictEqual(UNZIPPED_MAX_BYTES, 5 * 1024 * 1024);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "activity-attach-"));
+  const small = path.join(dir, "Avante-X-System-Activity-Internal-2026-11-11.html");
+  const big = path.join(dir, "Avante-Y-System-Activity-Internal-2026-11-11.html");
+  fs.writeFileSync(small, "x".repeat(1000));
+  fs.writeFileSync(big, Buffer.alloc(UNZIPPED_MAX_BYTES + 1, 120));
+  // app: the out/ copy (names the attachment); snapshot: the run's own copy (is attached).
+  const zip = (snapshot) => ({
+    path: path.join(dir, "activity-1234-z.zip"),
+    filename: "z.zip",
+    app: snapshot && path.join(dir, "out", path.basename(snapshot)),
+    snapshot
+  });
+  const AV = ["matt.teixeira@avantehs.com"];
+
+  // Small app, Avante To only -> the HTML, by its own name.
+  let a = activity_attachment(zip(small), { parts: 1, recipients: AV, cc_list: [] });
+  assert.deepStrictEqual([a.zipped, a.path, a.filename], [false, small, path.basename(small)], "the snapshot, under the app's name");
+  // Exactly at the limit is still unzipped.
+  const edge = path.join(dir, "edge.html");
+  fs.writeFileSync(edge, Buffer.alloc(UNZIPPED_MAX_BYTES, 120));
+  assert.strictEqual(activity_attachment(zip(edge), { parts: 1, recipients: AV, cc_list: [] }).zipped, false, "at the limit");
+  // Each condition alone keeps the zip.
+  for (const [why, opts, z] of [
+    ["over the size limit", { parts: 1, recipients: AV, cc_list: [] }, zip(big)],
+    ["a customer in To", { parts: 1, recipients: [...AV, "pat@hospital.org"], cc_list: [] }, zip(small)],
+    ["a customer in CC", { parts: 1, recipients: AV, cc_list: ["pat@hospital.org"] }, zip(small)],
+    ["a look-alike domain", { parts: 1, recipients: ["x@avantehs.com.evil.io"], cc_list: [] }, zip(small)],
+    ["the broad /avante/i is not enough", { parts: 1, recipients: ["joe.avante@gmail.com"], cc_list: [] }, zip(small)],
+    ["several parts", { parts: 2, recipients: AV, cc_list: [] }, zip(small)],
+    ["pages format (no app file)", { parts: 1, recipients: AV, cc_list: [] }, zip(undefined)],
+    ["missing snapshot file", { parts: 1, recipients: AV, cc_list: [] }, zip(path.join(dir, "gone.html"))],
+    ["no snapshot (a multi-part build)", { parts: 1, recipients: AV, cc_list: [] }, { ...zip(small), snapshot: null }],
+    ["no recipients", { parts: 1, recipients: [], cc_list: [] }, zip(small)]
+  ]) {
+    a = activity_attachment(z, opts);
+    assert.deepStrictEqual([a.zipped, a.path, a.filename], [true, z.path, "z.zip"], `zip kept: ${why}`);
+  }
+  assert.ok(avante_only([" Matt.Teixeira@AvanteHS.com "], ["joe.anello@avantehs.com"]), "case and whitespace");
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 // --- audience and recipient rules ----------------------------------------------
 {
   const fail = (m) => {

@@ -84,6 +84,12 @@ external scrub, same internal marking, same selection rule
    back/forward and bookmarks work.
 4. **The zip stays.** A 26 MB HTML attachment is over O365's limit
    uncompressed. The zip now holds one file per part, not one per system.
+   *Amended 2026-11-11:* an Avante-only envelope (every To/CC
+   `@avantehs.com`) gets the HTML itself when it is ≤ 5 MB and one part
+   (`output/activity_attachment.js`); any customer address keeps the zip,
+   since some hospital gateways quarantine `.html` attachments. The HTML
+   sent is a per-run copy written at build time (like the zip, never the
+   shared out/ name) and removed with the zip after delivery.
 
 ## Size (measured, 6-month window, current logo)
 

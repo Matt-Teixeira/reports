@@ -602,6 +602,7 @@ const run_batch = async (run_log, job_id, loaded, scope_resolution, opts = {}) =
             for (const z of activity.zips) {
               try {
                 fs.rmSync(z.path, { force: true });
+                if (z.snapshot) fs.rmSync(z.snapshot, { force: true });
                 z.removed = true;
               } catch (cleanup_error) {
                 console.error(`activity zip cleanup failed (send outcome unaffected): ${cleanup_error.message}`);

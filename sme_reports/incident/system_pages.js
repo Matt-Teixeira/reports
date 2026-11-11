@@ -222,7 +222,17 @@ const build_system_pages = async (
       const file = path.join(out_dir, system_app_name({ scope_tag, period_tag, date: first.date, audience, part, parts: parts.length }));
       fs.writeFileSync(file, html);
       for (const p of parts[i]) p.path = file;
-      await zip_part(i, [file], path.basename(file).replace(/\.html$/, ".zip"), { app: file });
+      // A one-part app may be sent as the HTML itself (activity_attachment.js).
+      // Like the zip, that copy is this run's own: a per-run path written from
+      // this run's html, never the shared out/ name another same-day run of
+      // the same scope could rewrite before the send reads it. Removed with
+      // the zip after delivery.
+      let snapshot = null;
+      if (parts.length === 1) {
+        snapshot = path.join(out_dir, `activity-${uuidv4().slice(0, 8)}-${path.basename(file)}`);
+        fs.writeFileSync(snapshot, html);
+      }
+      await zip_part(i, [file], path.basename(file).replace(/\.html$/, ".zip"), { app: file, snapshot });
       await addLogEvent(I, run_log, "build_system_app", det, {
         job_id,
         audience,

@@ -210,7 +210,9 @@ with the timeline, filters and slot table of the Anomaly Report and none
 of its interpretation (`incident/system_pages.js`,
 `PLAN-FLEET-SYSTEM-PAGES.md`). They land in the out dir; with `--email`
 they are zipped and ride on the summary email, split into "part n/N"
-follow-up emails when one zip would exceed the message limit.
+follow-up emails when one zip would exceed the message limit. When every
+To/CC address is `@avantehs.com` and the app's HTML is 5 MB or less, the
+HTML itself is attached instead of the zip (`output/activity_attachment.js`).
 
 Two formats (`PLAN-SYSTEM-ACTIVITY-APP.md`):
 

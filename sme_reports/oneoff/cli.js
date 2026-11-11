@@ -120,6 +120,10 @@ const main = async () => {
   const run_log = await makeAppRunLog();
   try {
     const batch = await run_request_object(run_log, raw);
+    // The per-run HTML snapshot (system_pages.js) exists only to be
+    // attached; the send removes it. With nothing emailed it would sit in
+    // the out dir as an unlisted duplicate of the app, so it goes here.
+    if (batch.activity) for (const z of batch.activity.zips) if (z.snapshot) fs.rmSync(z.snapshot, { force: true });
     print_outcome(job, batch);
     // A per-system failure inside a batch is isolated by design, but a
     // hand-run job that produced nothing at all should not exit 0 — the
