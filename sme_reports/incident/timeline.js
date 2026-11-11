@@ -522,6 +522,18 @@ const CSS = `
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0; background:var(--bg); color:var(--ink); font-family:"Helvetica Neue",Helvetica,Arial,sans-serif; font-size:14.5px; line-height:1.5; font-variant-numeric:tabular-nums}
 .wrap{max-width:1360px; margin:0 auto; padding:0 24px}
+/* Footer pinned to the bottom of a tall window when the content is short:
+   the page is a column at least the window's height and the main block
+   (the body's own .wrap) takes the slack. width:100% keeps the centered,
+   max-width wrap exactly as wide as in block layout (auto margins would
+   otherwise shrink a flex item to its content). */
+body{min-height:100vh; display:flex; flex-direction:column}
+body>.wrap{flex:1 0 auto; width:100%}
+/* The activity app's #app wrap stays empty with JavaScript off; then its
+   <noscript> notice takes the slack instead, so the notice sits under the
+   header rather than at the bottom of a tall window. */
+body>.wrap:empty{flex:0 0 auto}
+body>noscript{flex:1 0 auto}
 code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:12.5px}
 
 /* Avante brand header: logo, document label, the tri-color band */
@@ -658,6 +670,9 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .legend{list-style:none;padding:0;margin:14px 0;display:grid;gap:8px;font-size:13.5px}
 .legend li{display:flex;align-items:center;gap:8px}
 .legend .mkr{cursor:default}
+.legend .mkr:empty{min-width:28px;padding:0}
+.legend .mkr.grey:empty{box-shadow:inset 0 0 0 1px var(--line)}
+.legend-note{font-size:12.5px;color:var(--muted);margin:-6px 0 14px;max-width:52ch}
 .jump{font-weight:700;padding:6px 12px}
 .kicker{margin:0 0 2px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--blue);font-weight:700}
 .dhead .sub{margin:2px 0 0;font-size:12.5px;color:var(--muted)}

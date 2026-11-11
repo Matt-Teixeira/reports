@@ -444,8 +444,9 @@ function renderDetail(){
   if(selected && selected.kind === 'g' && !groupById.has(selected.id)) selected = viewById.has(selected.id) ? {kind:'s', id:selected.id} : null;
   if(!selected){
     el.innerHTML = `<div class="empty"><h3>Slot details</h3><p>Select a row or one of its markers to see that capture slot's readings, detections, ${showMissed ? 'missed alerts ' : ''}and notifications here.</p>
-      <ul class="legend"><li><span class="mkr red">2</span> High-severity detections</li><li><span class="mkr yellow">1</span> Medium-severity detections</li>
-      ${showMissed ? '<li><span class="mkr miss">1</span> Expected but not detected</li>' : ''}<li><span class="mkr green">12</span> Notification, recipients reached</li><li><span class="mkr grey">0</span> Notification that reached no one</li></ul>
+      <ul class="legend"><li><span class="mkr red" aria-hidden="true"></span> High-severity detections</li><li><span class="mkr yellow" aria-hidden="true"></span> Medium-severity detections</li>
+      ${showMissed ? '<li><span class="mkr miss" aria-hidden="true"></span> Expected but not detected</li>' : ''}<li><span class="mkr green" aria-hidden="true"></span> Notification, recipients reached</li><li><span class="mkr grey" aria-hidden="true"></span> Notification that reached no one</li></ul>
+      <p class="legend-note">The number on a marker in the table is that slot's count: detections, ${showMissed ? 'missed alerts, ' : ''}or recipients reached.</p>
       ${DATA.jump ? `<button type="button" class="jump" data-jump="${DATA.jump}">Start where the compressor stopped</button>` : ''}</div>`;
     return;
   }
