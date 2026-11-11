@@ -226,7 +226,7 @@ Two audiences (`incident/page_policy.js`):
 
 | Audience | What it shows | Default for |
 |---|---|---|
-| `external` | the customer copy — every Avante user (address, name, or staff role) scrubbed before anything is counted | `customer_summary` |
+| `external` | the customer copy — every Avante user (address, name, staff role, or access to 5+ customers) scrubbed before anything is counted | `customer_summary` |
 | `internal` | every recipient, Avante staff grouped under "Avante"; marked Internal in the header, title and file name (`…-Activity-Internal-…`) | `fleet_summary` |
 
 `--system-pages` (job key `"system_pages": true`) takes the summary's

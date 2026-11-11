@@ -22,7 +22,7 @@ const path = require("path");
 // where the env comes from the container).
 require("dotenv").config({ path: path.join(__dirname, "..", "..", ".env") });
 
-const { scrub_avante, avante_keys, is_avante_user } = require("../incident/scrub");
+const { scrub_avante, avante_keys, is_avante_user, MULTI_CUSTOMER_MIN } = require("../incident/scrub");
 const { normalize_system_pages, pages_audience, page_envelope_error, PILOT_RECIPIENTS } = require("../incident/page_policy");
 const { analyze_activity, SLOT_MS } = require("../incident/activity");
 const { build_system_page, system_section, system_page_name } = require("../incident/system_page");
@@ -54,6 +54,20 @@ const H = 3600e3;
     assert.ok(is_avante_user("ops.tech@gmail.com", { first_name: "Sam", last_name: "Staff", roles: ["basic", role] }), `${role} role is staff`);
   for (const roles of [["admin"], ["site-admin"], ["basic", "admin"], [], undefined])
     assert.ok(!is_avante_user("pat@hospital.org", { first_name: "Pat", last_name: "Smith", roles }), `${JSON.stringify(roles)} is a customer`);
+  // Access breadth: a personal address with only a customer role but access
+  // to MULTI_CUSTOMER_MIN or more customers is Avante's; a contractor across
+  // a few customers is not. Null/blank ids and duplicates do not count.
+  const ids = (n) => Array.from({ length: n }, (_, i) => `C${1000 + i}`);
+  assert.strictEqual(MULTI_CUSTOMER_MIN, 5);
+  assert.ok(is_avante_user("someone1116@gmail.com", { first_name: "Sam", last_name: "Lee", roles: ["basic"], customer_ids: ids(24) }), "24 customers is Avante");
+  assert.ok(is_avante_user("x@gmail.com", { first_name: "Sam", last_name: "Lee", roles: ["basic"], customer_ids: ids(5) }), "5 customers is Avante");
+  assert.ok(!is_avante_user("tech@crothall.com", { first_name: "Rob", last_name: "Tech", roles: ["admin", "basic"], customer_ids: ids(2) }), "contractor on 2 customers kept");
+  assert.ok(!is_avante_user("tech@crothall.com", { first_name: "Rob", last_name: "Tech", roles: ["basic"], customer_ids: ids(4) }), "4 customers kept");
+  assert.ok(
+    !is_avante_user("pat@hospital.org", { first_name: "Pat", last_name: "Smith", roles: ["basic"], customer_ids: ["C1", "C1", "C1", null, "", " ", "C2"] }),
+    "duplicates and blanks do not count toward the threshold"
+  );
+  assert.ok(!is_avante_user("pat@hospital.org", { first_name: "Pat", last_name: "Smith", customer_ids: undefined }), "no access list is a customer");
 
   const r = scrub_avante({
     notifications: [{ user_id: "Jane@AvanteHS.com" }, { user_id: "pat@hospital.org" }, { user_id: "desk@hospital.org" }],
@@ -73,6 +87,20 @@ const H = 3600e3;
     ]
   });
   assert.deepStrictEqual([...staff], ["ops.tech@gmail.com"], "keys are lowercased; only the staff role matches");
+
+  // The broad-access account is dropped with its notifications, and labelled
+  // Avante on an internal page.
+  const broad = {
+    notifications: [{ user_id: "Someone1116@gmail.com" }, { user_id: "pat@hospital.org" }],
+    recipients: [
+      { email_address: "someone1116@gmail.com", first_name: "Sam", last_name: "Lee", roles: ["basic"], customer_ids: ids(24) },
+      { email_address: "pat@hospital.org", first_name: "Pat", last_name: "Smith", roles: ["basic"], customer_ids: ["C0151"] }
+    ]
+  };
+  const rb = scrub_avante(broad);
+  assert.deepStrictEqual(rb.notifications.map((n) => n.user_id), ["pat@hospital.org"]);
+  assert.deepStrictEqual(rb.recipients.map((u) => u.email_address), ["pat@hospital.org"]);
+  assert.deepStrictEqual([...avante_keys(broad)], ["someone1116@gmail.com"]);
 }
 
 // --- audience and recipient rules ----------------------------------------------

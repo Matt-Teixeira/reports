@@ -6,7 +6,13 @@
 // (avantehs.com, avante-hs.com, avantehealth..., a personal address with the
 // name in it) or in the user's first or last name, OR when their app roles
 // include a staff-only role (superuser, network, developer — no customer
-// account carries one; "admin" and "site-admin" are customer roles).
+// account carries one; "admin" and "site-admin" are customer roles), OR
+// when their access (users.system_list_config) names MULTI_CUSTOMER_MIN or
+// more customers. That last test catches an Avante person's personal
+// account that carries only a customer role (2026-11-11: a staff member's
+// gmail with "basic" and 24 customers reached customer pages). Customer and
+// contractor accounts name 1–2 customers (Crothall: 2); Avante's own name
+// 18–34 almost without exception, so 5 leaves margin on both sides.
 // Matching is case-insensitive and deliberately broad: a false positive
 // drops one recipient from a customer's page; a false negative shows a
 // customer an Avante staff address, which the page promises never to do.
@@ -18,13 +24,20 @@
 
 const AVANTE = /avante/i;
 const STAFF_ROLES = ["superuser", "network", "developer"];
+const MULTI_CUSTOMER_MIN = 5;
+
+// Distinct, non-empty customer ids (the SQL's DISTINCT keeps a null entry
+// for a config element without customers__id).
+const customer_count = (user) =>
+  new Set((user.customer_ids || []).filter((c) => c != null && String(c).trim() !== "")).size;
 
 const is_avante_user = (email, user) =>
   AVANTE.test(String(email || "")) ||
   (user
     ? AVANTE.test(String(user.first_name || "")) ||
       AVANTE.test(String(user.last_name || "")) ||
-      (user.roles || []).some((r) => STAFF_ROLES.includes(String(r).toLowerCase()))
+      (user.roles || []).some((r) => STAFF_ROLES.includes(String(r).toLowerCase())) ||
+      customer_count(user) >= MULTI_CUSTOMER_MIN
     : false);
 
 // rows: { notifications, recipients } as incident/sql returns them. The
@@ -51,4 +64,4 @@ const scrub_avante = (rows) => {
   };
 };
 
-module.exports = { scrub_avante, avante_keys, is_avante_user, AVANTE, STAFF_ROLES };
+module.exports = { scrub_avante, avante_keys, is_avante_user, AVANTE, STAFF_ROLES, MULTI_CUSTOMER_MIN };

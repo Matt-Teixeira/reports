@@ -119,7 +119,10 @@ Synthetic fixtures, matching the other `dev/check_*.js`:
    page is made to cope — not the window shortened.
 2. **Non-Avante recipients outside the customer are kept** (e.g.
    contractors whose access spans several customers). The only scrub
-   rule is the Avante one. No customer recipients are configured yet:
+   rule is the Avante one. *Amended 2026-11-11:* the Avante test also
+   counts access to 5 or more customers, after a staff member's personal
+   gmail (customer role only, 24 customers) reached customer pages.
+   Contractors seen so far span 2, so they are still kept. No customer recipients are configured yet:
    test sends go to the job's default address only.
 3. **Failed systems get a page.** A system that failed analysis (e.g. "no
    monitor data") has no facts or classification, so its page carries
