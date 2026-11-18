@@ -47,6 +47,7 @@
 const { open, close } = require("./db");
 const { read_ct, TX_MODE } = require("./data");
 const M = require("./model");
+const { checker, series, r3, num, msOf, PERIOD_SQL, SEV_RANK, report_lines } = require("../insights/verify_core");
 
 const VERIFY_SYSTEMS = ["SME21859", "SME18531", "SME21867"]; // plan §16.3 Q6 candidates; Q6 still open
 
@@ -65,30 +66,9 @@ function args(argv) {
 
 // ------------------------------------------------------------ comparison
 
-// JSON with sorted keys: key order never matters, a missing or extra key always does
-const canon = (x) => JSON.stringify(x === undefined ? null : x, (k, v) =>
-  (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((key) => [key, v[key] === undefined ? null : v[key]])) : v));
-const checks = [];
-function check(name) {
-  const c = { name, compared: 0, diffs: [] };
-  checks.push(c);
-  return (key, model, sql) => {
-    c.compared++;
-    const a = canon(model), b = canon(sql);
-    if (a !== b) c.diffs.push({ key, model: a, sql: b });
-  };
-}
-// element by element for a per-day series (one comparison per day)
-function series(eq, key, arr, want) {
-  const n = Math.max(arr ? arr.length : 0, want.length);
-  for (let i = 0; i < n; i++) eq(`${key}[${i}]`, arr ? arr[i] : null, want[i]);
-}
-
-const r3 = (x) => (x === null || x === undefined ? null : Math.round(1000 * x) / 1000);
-const num = (x) => (x === null || x === undefined ? null : Number(x));
-const msOf = (t) => (t === null || t === undefined ? null : new Date(t).getTime());
-const PERIOD_SQL = "(VALUES ('30d', 30), ('90d', 90), ('6mo', 183), ('all', NULL::int)) p(key, days)";
-const SEV_RANK = "CASE severity WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 WHEN 'info' THEN 0 END";
+// canon / check / series and the small converters live in the shared
+// insights/verify_core.js (PLAN-CV-INSIGHTS.md §13.3 Q1), unchanged.
+const { checks, check } = checker();
 
 // ------------------------------------------------------------------ fleet
 
@@ -537,17 +517,11 @@ async function main() {
     out.push(`fleet: ${model.reporting.length + model.not_reporting.length} systems (${model.reporting.length} reporting, ${model.not_reporting.length} not reporting), inventory ${model.inventory.length}`);
     out.push(`panel systems: ${o.systems.join(", ")}; findings shown: ${findings}; rule trip days checked: ${trips}`);
     out.push("");
-    const w = Math.max(...checks.map((c) => c.name.length));
-    for (const c of checks) out.push(`  ${c.name.padEnd(w)}  ${String(c.compared).padStart(7)} compared  ${String(c.diffs.length).padStart(4)} diffs`);
-    const diffs = checks.flatMap((c) => c.diffs.map((d) => ({ check: c.name, ...d })));
-    if (diffs.length) {
-      out.push("", `DIFFERENCES (${diffs.length}; first ${Math.min(diffs.length, o.max_diffs)}):`);
-      for (const d of diffs.slice(0, o.max_diffs)) out.push(`  [${d.check}] ${d.key}\n      model ${d.model}\n      sql   ${d.sql}`);
-    }
-    out.push("", diffs.length ? `FAIL: ${diffs.length} differences` : `ALL CHECKS PASS: 0 differences in ${checks.reduce((s, c) => s + c.compared, 0)} comparisons`);
+    const rep = report_lines(checks, o.max_diffs);
+    out.push(...rep.lines);
     out.push(`(${((Date.now() - t0) / 1000).toFixed(1)} s)`);
     console.log(out.join("\n"));
-    process.exitCode = diffs.length ? 1 : 0;
+    process.exitCode = rep.diffs ? 1 : 0;
   } finally {
     await close();
   }
